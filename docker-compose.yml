@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: camunda-postgres
+    environment:
+      POSTGRES_DB: camunda
+      POSTGRES_USER: camunda
+      POSTGRES_PASSWORD: camunda
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  camunda:
+    image: camunda/camunda-bpm-platform:latest
+    container_name: camunda
+    depends_on:
+      - postgres
+    environment:
+      DB_DRIVER: org.postgresql.Driver
+      DB_URL: jdbc:postgresql://postgres:5432/camunda
+      DB_USERNAME: camunda
+      DB_PASSWORD: camunda
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: sinac-backend
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sinac-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
