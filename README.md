@@ -1,4 +1,4 @@
-# SINAC NEXT
+# SINAC-NEXT
 
 ## Arquitectura propuesta
 
