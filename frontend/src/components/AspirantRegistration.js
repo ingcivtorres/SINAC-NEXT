@@ -3,39 +3,19 @@ import React, {useMemo, useState} from 'react';
 const DRAFT_KEY = 'sinac_preregistro_draft_v2';
 
 const initialForm = {
-  nombre: '',
-  usuario: '',
-  curp: '',
-  correo: '',
-  telefono: '',
-  nacimiento: '',
-  estadoActual: '',
-  municipioActual: '',
-  direccionActual: '',
-  estadoPermanente: '',
-  municipioPermanente: '',
-  direccionPermanente: '',
-  nombreFamiliar: '',
-  parentesco: '',
-  telefonoFamiliar: '',
-  ultimoGrado: '',
-  institucion: '',
-  promedio: '',
-  idiomas: '',
-  publicaciones: '',
-  apoyos: '',
-  experiencia: '',
-  unidad: '',
-  departamento: '',
-  seccion: '',
-  programa: '',
-  modalidad: 'Presencial',
-  tutorPropuesto: '',
-  comentarios: ''
+  nombre: '', usuario: '', curp: '', correo: '', telefono: '', nacimiento: '',
+  password: '', passwordConfirm: '',
+  estadoActual: '', municipioActual: '', direccionActual: '',
+  estadoPermanente: '', municipioPermanente: '', direccionPermanente: '',
+  nombreFamiliar: '', parentesco: '', telefonoFamiliar: '',
+  ultimoGrado: '', institucion: '', promedio: '',
+  idiomas: '', publicaciones: '', apoyos: '', experiencia: '',
+  unidad: '', departamento: '', seccion: '', programa: '', modalidad: 'Presencial',
+  tutorPropuesto: '', comentarios: ''
 };
 
 const requiredFields = [
-  'nombre', 'usuario', 'curp', 'correo', 'telefono', 'nacimiento',
+  'nombre', 'usuario', 'curp', 'correo', 'telefono', 'nacimiento', 'password', 'passwordConfirm',
   'estadoActual', 'municipioActual', 'direccionActual',
   'estadoPermanente', 'municipioPermanente', 'direccionPermanente',
   'nombreFamiliar', 'parentesco', 'telefonoFamiliar',
@@ -43,112 +23,251 @@ const requiredFields = [
   'unidad', 'departamento', 'seccion', 'programa', 'modalidad'
 ];
 
-const sections = [
-  {id: 'generales', title: '1. Datos Generales', fields: ['nombre', 'usuario', 'curp', 'correo', 'telefono', 'nacimiento']},
-  {id: 'domicilioActual', title: '2. Domicilio Actual', fields: ['estadoActual', 'municipioActual', 'direccionActual']},
-  {id: 'domicilioPermanente', title: '3. Domicilio Permanente', fields: ['estadoPermanente', 'municipioPermanente', 'direccionPermanente']},
-  {id: 'familiar', title: '4. Datos de un Familiar', fields: ['nombreFamiliar', 'parentesco', 'telefonoFamiliar']},
-  {id: 'escolaridad', title: '5. Escolaridad', fields: ['ultimoGrado', 'institucion', 'promedio']},
-  {id: 'idiomas', title: '6. Idiomas', fields: ['idiomas']},
-  {id: 'publicaciones', title: '7. Publicaciones', fields: ['publicaciones']},
-  {id: 'apoyos', title: '8. Apoyos', fields: ['apoyos']},
-  {id: 'experiencia', title: '9. Experiencia Profesional', fields: ['experiencia']},
-  {id: 'cinvestav', title: '10. Cinvestav', fields: ['unidad', 'departamento', 'seccion', 'programa', 'modalidad']},
-  {id: 'adscripcion', title: '11. Adscripción', fields: ['tutorPropuesto', 'comentarios']}
+const sectionDefs = [
+  {id: 'generales',          title: '1. Datos Generales',         required: ['nombre','usuario','curp','correo','telefono','nacimiento']},
+  {id: 'domicilioActual',    title: '2. Domicilio Actual',         required: ['estadoActual','municipioActual','direccionActual']},
+  {id: 'domicilioPermanente',title: '3. Domicilio Permanente',     required: ['estadoPermanente','municipioPermanente','direccionPermanente']},
+  {id: 'familiar',           title: '4. Datos de un Familiar',    required: ['nombreFamiliar','parentesco','telefonoFamiliar']},
+  {id: 'escolaridad',        title: '5. Escolaridad',              required: ['ultimoGrado','institucion','promedio']},
+  {id: 'idiomas',            title: '6. Idiomas',                  required: []},
+  {id: 'publicaciones',      title: '7. Publicaciones',            required: []},
+  {id: 'apoyos',             title: '8. Apoyos',                   required: []},
+  {id: 'experiencia',        title: '9. Experiencia Profesional',  required: []},
+  {id: 'cinvestav',          title: '10. Cinvestav',               required: ['unidad','departamento','seccion','programa','modalidad']},
+  {id: 'adscripcion',        title: '11. Adscripción',             required: []},
 ];
 
 function getDraft(){
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    return null;
-  }
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; }
+}
+function saveDraft(f){ try { localStorage.setItem(DRAFT_KEY, JSON.stringify(f)); } catch {} }
+function clearDraft(){ try { localStorage.removeItem(DRAFT_KEY); } catch {} }
+
+/* badge: checks / total required in this section */
+function SectionBadge({def, form, errors}){
+  const hasErr = def.required.some(f => errors[f]);
+  const done   = def.required.filter(f => `${form[f]||''}`.trim()).length;
+  const total  = def.required.length;
+  if (total === 0) return null;
+  if (hasErr) return <span className="sec-badge sec-badge--err">!</span>;
+  if (done === total) return <span className="sec-badge sec-badge--ok">✓</span>;
+  return <span className="sec-badge sec-badge--partial">{done}/{total}</span>;
 }
 
-function saveDraft(form){
-  try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
-  } catch (e) {}
-}
-
-function clearDraft(){
-  try {
-    localStorage.removeItem(DRAFT_KEY);
-  } catch (e) {}
-}
-
-function formatLabel(name){
-  return name
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, c => c.toUpperCase())
-    .trim();
+function Field({label, req, error, children}){
+  return (
+    <label className="af-label">
+      <span className="af-label-text">{label}{req && <em> *</em>}</span>
+      {children}
+      {error && <span className="field-error">{error}</span>}
+    </label>
+  );
 }
 
 export default function AspirantRegistration(){
-  const [form, setForm] = useState(() => ({...initialForm, ...(getDraft() || {})}));
-  const [submitted, setSubmitted] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [form, setForm]           = useState(() => ({...initialForm, ...(getDraft()||{})}));
+  const [submitted, setSubmitted]  = useState(false);
+  const [submitData, setSubmitData] = useState(null);
+  const [errors, setErrors]        = useState({});
+  const [apiError, setApiError]    = useState('');
+  const [sending, setSending]      = useState(false);
+  const [activeId, setActiveId]    = useState('generales');
 
   const completion = useMemo(() => {
-    const requiredDone = requiredFields.filter(field => `${form[field] || ''}`.trim() !== '').length;
-    return Math.round((requiredDone / requiredFields.length) * 100);
+    const done = requiredFields.filter(f => `${form[f]||''}`.trim()).length;
+    return Math.round((done / requiredFields.length) * 100);
   }, [form]);
 
-  const lidaPacket = useMemo(() => {
-    const businessKey = `PREREG-${(form.curp || 'SINCURP').toUpperCase()}-${(form.programa || 'BASE').replace(/\s+/g, '').toUpperCase()}`;
-    return {
-      processDefinitionKey: 'sinac_preregistro_v1',
-      processVersion: '1.0.0',
-      businessKey,
-      lidaStage: 'modelado-listo',
-      lidaSource: 'PortalAspirantes',
-      camundaStartEvent: 'StartPreregistro',
-      payload: form
-    };
-  }, [form]);
+  const lidaPacket = useMemo(() => ({
+    processDefinitionKey: 'sinac_preregistro_v1',
+    businessKey: `PREREG-${(form.curp||'SINCURP').toUpperCase()}-${(form.programa||'BASE').replace(/\s+/g,'').toUpperCase()}`,
+    camundaStartEvent: 'StartPreregistro',
+    payload: form,
+  }), [form]);
+
+  function selectSection(id){ setActiveId(id); }
 
   function handleChange(e){
     const {name, value} = e.target;
-    let next = value;
-
-    if (name === 'curp' || name === 'usuario') {
-      next = value.toUpperCase().replace(/\s+/g, '');
-    }
-
-    setForm(prev => {
-      const updated = {...prev, [name]: next};
-      saveDraft(updated);
-      return updated;
-    });
+    const next = (name==='curp'||name==='usuario') ? value.toUpperCase().replace(/\s+/g,'') : value;
+    setForm(prev => { const u={...prev,[name]:next}; saveDraft(u); return u; });
   }
 
   function validate(){
-    const nextErrors = {};
-
-    requiredFields.forEach(field => {
-      if (!`${form[field] || ''}`.trim()) {
-        nextErrors[field] = 'Este campo es obligatorio.';
-      }
-    });
-
-    if (form.curp && !/^[A-Z0-9]{18}$/.test(form.curp)) {
-      nextErrors.curp = 'La CURP debe tener 18 caracteres alfanuméricos.';
-    }
-
-    if (form.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.correo)) {
-      nextErrors.correo = 'Ingresa un correo válido.';
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    const errs = {};
+    requiredFields.forEach(f => { if(!`${form[f]||''}`.trim()) errs[f]='Obligatorio.'; });
+    if(form.curp && !/^[A-Z0-9]{18}$/.test(form.curp)) errs.curp='Debe tener 18 caracteres.';
+    if(form.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.correo)) errs.correo='Correo no válido.';
+    if(form.password && form.password.length < 8) errs.password='Mínimo 8 caracteres.';
+    if(form.password !== form.passwordConfirm) errs.passwordConfirm='Las contraseñas no coinciden.';
+    setErrors(errs);
+    const errSec = sectionDefs.find(s => s.required.some(f => errs[f]));
+    if(errSec) setActiveId(errSec.id);
+    return Object.keys(errs).length === 0;
   }
 
-  function handleSubmit(e){
+  async function handleSubmit(e){
     e.preventDefault();
-    if (!validate()) return;
-    setSubmitted(true);
-    clearDraft();
+    if(!validate()) return;
+    setSending(true);
+    setApiError('');
+    const payload = {
+      nombre: form.nombre, usuario: form.usuario, curp: form.curp,
+      correo: form.correo, telefono: form.telefono, nacimiento: form.nacimiento,
+      password: form.password,
+      estado_actual: form.estadoActual, municipio_actual: form.municipioActual,
+      direccion_actual: form.direccionActual,
+      estado_permanente: form.estadoPermanente, municipio_permanente: form.municipioPermanente,
+      direccion_permanente: form.direccionPermanente,
+      nombre_familiar: form.nombreFamiliar, parentesco: form.parentesco,
+      telefono_familiar: form.telefonoFamiliar,
+      ultimo_grado: form.ultimoGrado, institucion: form.institucion, promedio: form.promedio,
+      idiomas: form.idiomas, publicaciones: form.publicaciones,
+      apoyos: form.apoyos, experiencia: form.experiencia,
+      unidad: form.unidad, departamento: form.departamento, seccion: form.seccion,
+      programa: form.programa, modalidad: form.modalidad,
+      tutor_propuesto: form.tutorPropuesto, comentarios: form.comentarios,
+    };
+    try {
+      const res = await fetch('/api/preregistro/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const serverErrors = data && typeof data === 'object' ? data : {};
+        const fieldErrors = Object.entries(serverErrors).reduce((acc, [key, value]) => {
+          const messages = Array.isArray(value) ? value : [value];
+          acc[key] = messages.flatMap((item) => String(item).split('.').filter(Boolean)).join(' ');
+          return acc;
+        }, {});
+        setErrors(prev => ({...prev, ...fieldErrors}));
+        const msg = Object.values(fieldErrors).join(' ') || Object.values(serverErrors).flat().join(' ');
+        setApiError(msg || 'Error al enviar el pre-registro.');
+        setSending(false);
+        return;
+      }
+      setSubmitData(data);
+      setSubmitted(true);
+      clearDraft();
+    } catch {
+      setApiError('No se pudo conectar con el servidor. Verifica tu conexión.');
+    }
+    setSending(false);
+  }
+
+  if(submitted){
+    return (
+      <section id="portal-aspirantes" className="registration-section">
+        <div className="success-box" style={{maxWidth:760,margin:'40px auto'}}>
+          <h3>✅ Pre-registro enviado correctamente</h3>
+          <p>Tu solicitud fue recibida. Guarda estos datos para acceder al sistema.</p>
+          {submitData && (
+            <div className="success-detail">
+              <div><strong>Business Key:</strong> {submitData.business_key}</div>
+              <div><strong>Estado LIDA:</strong> {submitData.proceso_estado}</div>
+              {submitData.camunda_id && <div><strong>Instancia Camunda:</strong> {submitData.camunda_id}</div>}
+              <div style={{marginTop:10,fontSize:'.88rem',color:'var(--muted)'}}>Guarda tu usuario y contraseña para iniciar sesión como Aspirante.</div>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  const activeDef = sectionDefs.find(s => s.id === activeId);
+
+  function renderPanel(){
+    switch(activeId){
+      case 'generales': return (
+        <div className="cf-grid">
+          <Field label="Nombre completo" req error={errors.nombre}><input name="nombre" value={form.nombre} onChange={handleChange}/></Field>
+          <Field label="Usuario" req error={errors.usuario}><input name="usuario" value={form.usuario} onChange={handleChange} maxLength="20"/></Field>
+          <Field label="CURP" req error={errors.curp}><input name="curp" value={form.curp} onChange={handleChange} maxLength="18" placeholder="18 caracteres"/></Field>
+          <Field label="Correo electrónico" req error={errors.correo}><input name="correo" type="email" value={form.correo} onChange={handleChange}/></Field>
+          <Field label="Teléfono / celular" req error={errors.telefono}><input name="telefono" type="tel" value={form.telefono} onChange={handleChange}/></Field>
+          <Field label="Fecha de nacimiento" req error={errors.nacimiento}><input name="nacimiento" type="date" value={form.nacimiento} onChange={handleChange}/></Field>
+          <Field label="Contraseña" req error={errors.password}><input name="password" type="password" value={form.password} onChange={handleChange} placeholder="Mínimo 8 caracteres"/></Field>
+          <Field label="Confirmar contraseña" req error={errors.passwordConfirm}><input name="passwordConfirm" type="password" value={form.passwordConfirm} onChange={handleChange}/></Field>
+        </div>
+      );
+      case 'domicilioActual': return (
+        <div className="cf-grid">
+          <Field label="Estado" req error={errors.estadoActual}><input name="estadoActual" value={form.estadoActual} onChange={handleChange}/></Field>
+          <Field label="Municipio" req error={errors.municipioActual}><input name="municipioActual" value={form.municipioActual} onChange={handleChange}/></Field>
+          <Field label="Dirección" req error={errors.direccionActual}><input name="direccionActual" value={form.direccionActual} onChange={handleChange} className="cf-full"/></Field>
+        </div>
+      );
+      case 'domicilioPermanente': return (
+        <div className="cf-grid">
+          <Field label="Estado" req error={errors.estadoPermanente}><input name="estadoPermanente" value={form.estadoPermanente} onChange={handleChange}/></Field>
+          <Field label="Municipio" req error={errors.municipioPermanente}><input name="municipioPermanente" value={form.municipioPermanente} onChange={handleChange}/></Field>
+          <Field label="Dirección" req error={errors.direccionPermanente}><input name="direccionPermanente" value={form.direccionPermanente} onChange={handleChange} className="cf-full"/></Field>
+        </div>
+      );
+      case 'familiar': return (
+        <div className="cf-grid">
+          <Field label="Nombre" req error={errors.nombreFamiliar}><input name="nombreFamiliar" value={form.nombreFamiliar} onChange={handleChange}/></Field>
+          <Field label="Parentesco" req error={errors.parentesco}><input name="parentesco" value={form.parentesco} onChange={handleChange}/></Field>
+          <Field label="Teléfono" req error={errors.telefonoFamiliar}><input name="telefonoFamiliar" type="tel" value={form.telefonoFamiliar} onChange={handleChange}/></Field>
+        </div>
+      );
+      case 'escolaridad': return (
+        <div className="cf-grid">
+          <Field label="Último grado" req error={errors.ultimoGrado}><input name="ultimoGrado" value={form.ultimoGrado} onChange={handleChange}/></Field>
+          <Field label="Institución" req error={errors.institucion}><input name="institucion" value={form.institucion} onChange={handleChange}/></Field>
+          <Field label="Promedio" req error={errors.promedio}><input name="promedio" value={form.promedio} onChange={handleChange} placeholder="ej. 9.5"/></Field>
+        </div>
+      );
+      case 'idiomas': return (
+        <label className="af-label af-label--full">
+          <span className="af-label-text">Idiomas que dominas</span>
+          <textarea name="idiomas" rows="4" value={form.idiomas} onChange={handleChange} placeholder="Inglés – Avanzado, Francés – Intermedio…"/>
+        </label>
+      );
+      case 'publicaciones': return (
+        <label className="af-label af-label--full">
+          <span className="af-label-text">Publicaciones (artículos, libros, etc.)</span>
+          <textarea name="publicaciones" rows="4" value={form.publicaciones} onChange={handleChange}/>
+        </label>
+      );
+      case 'apoyos': return (
+        <label className="af-label af-label--full">
+          <span className="af-label-text">Becas o apoyos recibidos</span>
+          <textarea name="apoyos" rows="4" value={form.apoyos} onChange={handleChange}/>
+        </label>
+      );
+      case 'experiencia': return (
+        <label className="af-label af-label--full">
+          <span className="af-label-text">Experiencia laboral o de investigación</span>
+          <textarea name="experiencia" rows="5" value={form.experiencia} onChange={handleChange}/>
+        </label>
+      );
+      case 'cinvestav': return (
+        <div className="cf-grid">
+          <Field label="Unidad" req error={errors.unidad}><input name="unidad" value={form.unidad} onChange={handleChange}/></Field>
+          <Field label="Departamento" req error={errors.departamento}><input name="departamento" value={form.departamento} onChange={handleChange}/></Field>
+          <Field label="Sección" req error={errors.seccion}><input name="seccion" value={form.seccion} onChange={handleChange}/></Field>
+          <Field label="Programa de interés" req error={errors.programa}><input name="programa" value={form.programa} onChange={handleChange}/></Field>
+          <Field label="Modalidad" req error={errors.modalidad}>
+            <select name="modalidad" value={form.modalidad} onChange={handleChange}>
+              <option>Presencial</option><option>Híbrida</option><option>En línea</option>
+            </select>
+          </Field>
+        </div>
+      );
+      case 'adscripcion': return (
+        <div className="cf-grid">
+          <Field label="Tutor propuesto"><input name="tutorPropuesto" value={form.tutorPropuesto} onChange={handleChange}/></Field>
+          <label className="af-label af-label--full">
+            <span className="af-label-text">Comentarios</span>
+            <textarea name="comentarios" rows="4" value={form.comentarios} onChange={handleChange}/>
+          </label>
+        </div>
+      );
+      default: return null;
+    }
   }
 
   return (
@@ -156,232 +275,55 @@ export default function AspirantRegistration(){
       <div className="registration-hero">
         <div>
           <h1>Portal de Pre-registro SINAC</h1>
-          <p>Completa las 11 secciones oficiales del pre-registro. El sistema genera un paquete LIDA compatible con ejecución BPMN en Camunda.</p>
+          <p>Selecciona una sección del menú izquierdo para completarla.</p>
         </div>
-        <div className="progress-badge" aria-label="avance del registro">{completion}% completado</div>
+        <div className="progress-outer" title={`${completion}% completado`}>
+          <div className="progress-inner" style={{width:`${completion}%`}}/>
+          <span className="progress-label">{completion}%</span>
+        </div>
       </div>
 
-      <section className="registration-overview">
-        <div className="card">
-          <h2>Validaciones y flujo LIDA</h2>
-          <ul>
-            <li>Campos obligatorios como en el manual oficial de Pre-registro.</li>
-            <li>Validación de formato de CURP y correo institucional.</li>
-            <li>Selección explícita de Unidad, Departamento y Sección.</li>
-            <li>Generación de <strong>businessKey</strong> para instanciar workflow en Camunda.</li>
-          </ul>
-        </div>
-      </section>
+      <form className="sb-form" onSubmit={handleSubmit} noValidate>
+        {/* sidebar */}
+        <nav className="sb-nav" aria-label="Secciones del formulario">
+          {sectionDefs.map(def => (
+            <button
+              key={def.id}
+              type="button"
+              className={`sb-item${activeId===def.id?' sb-item--active':''}`}
+              onClick={()=>selectSection(def.id)}
+            >
+              <span className="sb-item-title">{def.title}</span>
+              <SectionBadge def={def} form={form} errors={errors}/>
+            </button>
+          ))}
+        </nav>
 
-      <section className="registration-form-section">
-        <div className="card form-card">
-          <h2>Formulario de pre-registro</h2>
-
-          <div className="section-grid" aria-label="secciones del formulario">
-            {sections.map(section => (
-              <div key={section.id} className="section-chip">
-                {section.title}
-              </div>
-            ))}
+        {/* panel */}
+        <div className="sb-panel">
+          <div className="sb-panel-header">
+            <h2>{activeDef?.title}</h2>
+            {activeDef?.required.length > 0 && (
+              <span className="sb-required-note">* campos obligatorios</span>
+            )}
           </div>
-
-          {submitted ? (
-            <div className="success-box">
-              <h3>Pre-registro enviado correctamente</h3>
-              <p>Tu solicitud quedó registrada y está lista para iniciar el proceso en Camunda con la metadata de LIDA.</p>
-              <pre className="lida-preview">{JSON.stringify(lidaPacket, null, 2)}</pre>
+          <div className="sb-panel-body">
+            {renderPanel()}
+          </div>
+          <div className="sb-panel-footer">
+            <div className="lida-panel">
+              <strong>LIDA</strong>
+              <span style={{marginLeft:10,fontSize:'.85rem',color:'var(--muted)'}}>{lidaPacket.businessKey}</span>
             </div>
-          ) : (
-            <form className="aspirant-form" onSubmit={handleSubmit} noValidate>
-              <label>
-                Nombre completo *
-                <input name="nombre" value={form.nombre} onChange={handleChange} />
-                {errors.nombre && <span className="field-error">{errors.nombre}</span>}
-              </label>
-
-              <label>
-                Usuario *
-                <input name="usuario" value={form.usuario} onChange={handleChange} maxLength="20" />
-                {errors.usuario && <span className="field-error">{errors.usuario}</span>}
-              </label>
-
-              <label>
-                CURP *
-                <input name="curp" value={form.curp} onChange={handleChange} maxLength="18" />
-                {errors.curp && <span className="field-error">{errors.curp}</span>}
-              </label>
-
-              <label>
-                Correo electrónico *
-                <input name="correo" type="email" value={form.correo} onChange={handleChange} />
-                {errors.correo && <span className="field-error">{errors.correo}</span>}
-              </label>
-
-              <label>
-                Teléfono / celular *
-                <input name="telefono" type="tel" value={form.telefono} onChange={handleChange} />
-                {errors.telefono && <span className="field-error">{errors.telefono}</span>}
-              </label>
-
-              <label>
-                Fecha de nacimiento *
-                <input name="nacimiento" type="date" value={form.nacimiento} onChange={handleChange} />
-                {errors.nacimiento && <span className="field-error">{errors.nacimiento}</span>}
-              </label>
-
-              <label>
-                Estado actual *
-                <input name="estadoActual" value={form.estadoActual} onChange={handleChange} />
-                {errors.estadoActual && <span className="field-error">{errors.estadoActual}</span>}
-              </label>
-
-              <label>
-                Municipio actual *
-                <input name="municipioActual" value={form.municipioActual} onChange={handleChange} />
-                {errors.municipioActual && <span className="field-error">{errors.municipioActual}</span>}
-              </label>
-
-              <label>
-                Dirección actual *
-                <input name="direccionActual" value={form.direccionActual} onChange={handleChange} />
-                {errors.direccionActual && <span className="field-error">{errors.direccionActual}</span>}
-              </label>
-
-              <label>
-                Estado permanente *
-                <input name="estadoPermanente" value={form.estadoPermanente} onChange={handleChange} />
-                {errors.estadoPermanente && <span className="field-error">{errors.estadoPermanente}</span>}
-              </label>
-
-              <label>
-                Municipio permanente *
-                <input name="municipioPermanente" value={form.municipioPermanente} onChange={handleChange} />
-                {errors.municipioPermanente && <span className="field-error">{errors.municipioPermanente}</span>}
-              </label>
-
-              <label>
-                Dirección permanente *
-                <input name="direccionPermanente" value={form.direccionPermanente} onChange={handleChange} />
-                {errors.direccionPermanente && <span className="field-error">{errors.direccionPermanente}</span>}
-              </label>
-
-              <label>
-                Nombre de familiar *
-                <input name="nombreFamiliar" value={form.nombreFamiliar} onChange={handleChange} />
-                {errors.nombreFamiliar && <span className="field-error">{errors.nombreFamiliar}</span>}
-              </label>
-
-              <label>
-                Parentesco *
-                <input name="parentesco" value={form.parentesco} onChange={handleChange} />
-                {errors.parentesco && <span className="field-error">{errors.parentesco}</span>}
-              </label>
-
-              <label>
-                Teléfono de familiar *
-                <input name="telefonoFamiliar" value={form.telefonoFamiliar} onChange={handleChange} />
-                {errors.telefonoFamiliar && <span className="field-error">{errors.telefonoFamiliar}</span>}
-              </label>
-
-              <label>
-                Último grado de estudios *
-                <input name="ultimoGrado" value={form.ultimoGrado} onChange={handleChange} />
-                {errors.ultimoGrado && <span className="field-error">{errors.ultimoGrado}</span>}
-              </label>
-
-              <label>
-                Institución *
-                <input name="institucion" value={form.institucion} onChange={handleChange} />
-                {errors.institucion && <span className="field-error">{errors.institucion}</span>}
-              </label>
-
-              <label>
-                Promedio *
-                <input name="promedio" value={form.promedio} onChange={handleChange} />
-                {errors.promedio && <span className="field-error">{errors.promedio}</span>}
-              </label>
-
-              <label className="full-width">
-                Idiomas
-                <textarea name="idiomas" rows="3" value={form.idiomas} onChange={handleChange} />
-              </label>
-
-              <label className="full-width">
-                Publicaciones
-                <textarea name="publicaciones" rows="3" value={form.publicaciones} onChange={handleChange} />
-              </label>
-
-              <label className="full-width">
-                Apoyos
-                <textarea name="apoyos" rows="3" value={form.apoyos} onChange={handleChange} />
-              </label>
-
-              <label className="full-width">
-                Experiencia profesional
-                <textarea name="experiencia" rows="3" value={form.experiencia} onChange={handleChange} />
-              </label>
-
-              <label>
-                Unidad Cinvestav *
-                <input name="unidad" value={form.unidad} onChange={handleChange} />
-                {errors.unidad && <span className="field-error">{errors.unidad}</span>}
-              </label>
-
-              <label>
-                Departamento *
-                <input name="departamento" value={form.departamento} onChange={handleChange} />
-                {errors.departamento && <span className="field-error">{errors.departamento}</span>}
-              </label>
-
-              <label>
-                Sección *
-                <input name="seccion" value={form.seccion} onChange={handleChange} />
-                {errors.seccion && <span className="field-error">{errors.seccion}</span>}
-              </label>
-
-              <label>
-                Programa de interés *
-                <input name="programa" value={form.programa} onChange={handleChange} />
-                {errors.programa && <span className="field-error">{errors.programa}</span>}
-              </label>
-
-              <label>
-                Modalidad *
-                <select name="modalidad" value={form.modalidad} onChange={handleChange}>
-                  <option>Presencial</option>
-                  <option>Híbrida</option>
-                  <option>En línea</option>
-                </select>
-                {errors.modalidad && <span className="field-error">{errors.modalidad}</span>}
-              </label>
-
-              <label>
-                Tutor propuesto
-                <input name="tutorPropuesto" value={form.tutorPropuesto} onChange={handleChange} />
-              </label>
-
-              <label className="full-width">
-                Comentarios de adscripción
-                <textarea name="comentarios" rows="4" value={form.comentarios} onChange={handleChange} />
-              </label>
-
-              <div className="lida-panel full-width">
-                <h3>Vista previa técnica LIDA / Camunda</h3>
-                <p>Este pre-registro ya está estructurado para iniciar una instancia BPMN usando una business key trazable.</p>
-                <ul>
-                  <li><strong>Process Key:</strong> {lidaPacket.processDefinitionKey}</li>
-                  <li><strong>Business Key:</strong> {lidaPacket.businessKey}</li>
-                  <li><strong>Evento de inicio:</strong> {lidaPacket.camundaStartEvent}</li>
-                </ul>
-              </div>
-
-              <div className="form-actions full-width">
-                <button type="submit" className="btn-primary">Enviar pre-registro</button>
-              </div>
-            </form>
-          )}
+            {apiError && <div className="api-error">{apiError}</div>}
+            <div className="form-actions">
+              <button type="submit" className="btn-primary" disabled={sending}>
+                {sending ? 'Enviando...' : 'Enviar pre-registro'}
+              </button>
+            </div>
+          </div>
         </div>
-      </section>
+      </form>
     </section>
-  )
+  );
 }

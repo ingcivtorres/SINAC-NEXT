@@ -1,6 +1,19 @@
 import React, {useState} from 'react';
+import civLogo from '../assets/logociv.png';
+import {useLanguage} from '../translations';
 
-export default function LoginView({onBackHome}){
+const ROLE_IDS = [
+  'aspirante',
+  'alumno',
+  'coordinacion',
+  'docente',
+  'director',
+  'admin',
+];
+
+export default function LoginView({onBackHome, onLoginSuccess}){
+  const {t} = useLanguage();
+  const [role, setRole] = useState('aspirante');
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
@@ -8,105 +21,138 @@ export default function LoginView({onBackHome}){
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const getRoleLabel = (roleId) => {
+    const key = `role.${roleId}`;
+    return t(key);
+  };
+  const detectedRoleLabel = getRoleLabel(role);
+
   function validate(){
     if (!usuario.trim() || !password.trim()) {
-      setError('Captura usuario/correo y contraseña.');
-      return false;
-    }
-    if (usuario.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(usuario)) {
-      setError('El correo no tiene un formato válido.');
+      setError(t('login.errorValidation'));
       return false;
     }
     setError('');
     return true;
   }
 
-  function handleSubmit(e){
+  async function handleSubmit(e){
     e.preventDefault();
     if (!validate()) return;
-
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setError('Demo activa: autenticación backend pendiente de implementación.');
-    }, 900);
+
+    const normalizedUsuario = usuario.trim();
+
+    try {
+      const res = await fetch('/api/auth/login/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({usuario: normalizedUsuario, password}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || t('login.errorCredentials'));
+        setLoading(false);
+        return;
+      }
+
+      const rawRole = data.role ?? data.rol ?? role ?? 'aspirante';
+      const authenticatedRole = String(rawRole).trim() || 'aspirante';
+      setRole(authenticatedRole);
+
+      const storage = remember ? localStorage : sessionStorage;
+      storage.setItem('sinac_access', data.access);
+      storage.setItem('sinac_refresh', data.refresh);
+      storage.setItem('sinac_role', authenticatedRole);
+
+      if (typeof onLoginSuccess === 'function') {
+        onLoginSuccess({role: authenticatedRole, access: data.access, refresh: data.refresh});
+      }
+    } catch {
+      setError(t('login.errorConnection'));
+    }
+    setLoading(false);
   }
 
   return (
-    <section id="login" className="login-section">
-      <div className="login-layout">
-        <aside className="login-side-card">
-          <p className="login-kicker">Acceso Institucional</p>
-          <h1>SINAC NEXT</h1>
-          <p>
-            Ingresa con tu cuenta de pre-registro para consultar el estado de tu solicitud,
-            continuar capturas pendientes y dar seguimiento al flujo académico.
-          </p>
-          <ul>
-            <li>Seguimiento del trámite por etapas.</li>
-            <li>Actualización de datos del expediente.</li>
-            <li>Trazabilidad de procesos LIDA/Camunda.</li>
-          </ul>
-          <button type="button" className="login-back" onClick={onBackHome}>Volver a Inicio</button>
-        </aside>
+    <section id="login" className="login-section single-panel-login">
+      <div className="login-card modern-login-card single-panel-card">
+        <div className="login-branding">
+          <div className="login-logo-wrap">
+            <img src={civLogo} alt="CINVESTAV" className="login-civ-logo" />
+          </div>
+          <div className="login-badge">{t('login.institutionalAccess')}</div>
+        </div>
 
-        <div className="login-card">
-          <div className="login-header">
-            <h2>Iniciar sesión</h2>
-            <p>Accede con tu usuario registrado en el pre-registro.</p>
+        <div className="login-brand-copy">
+          <h1>{t('login.systemName')}</h1>
+          <p>{t('login.description')}</p>
+        </div>
+
+        <div className="login-header">
+          <p className="login-kicker">{t('login.welcome')}</p>
+          <h2>{t('login.signIn')}</h2>
+        </div>
+
+        <form className="login-form" onSubmit={handleSubmit} noValidate>
+          <label>
+            {t('login.userOrEmail')}
+            <input
+              type="text"
+              placeholder={t('login.userPlaceholder')}
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+            />
+          </label>
+
+          <label>
+            {t('login.password')}
+            <div className="password-row">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder={t('login.passwordPlaceholder')}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="toggle-password"
+                onClick={() => setShowPassword(v => !v)}
+                aria-label={showPassword ? t('login.password') : t('login.password')}
+              >
+                {showPassword ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
+          </label>
+
+          <div className="login-role-readonly">
+            <span>Perfil detectado</span>
+            <strong>{detectedRoleLabel}</strong>
           </div>
 
-          <form className="login-form" onSubmit={handleSubmit} noValidate>
-            <label>
-              Usuario o correo
+          <div className="login-row">
+            <label className="remember-check">
               <input
-                type="text"
-                placeholder="usuario@correo.com"
-                value={usuario}
-                onChange={(e)=>setUsuario(e.target.value)}
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
               />
+              {t('login.rememberMe')}
             </label>
+            <button type="button" className="link-btn">{t('login.forgotPassword')}</button>
+          </div>
 
-            <label>
-              Contraseña
-              <div className="password-row">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e)=>setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="toggle-password"
-                  onClick={() => setShowPassword(v => !v)}
-                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                >
-                  {showPassword ? 'Ocultar' : 'Mostrar'}
-                </button>
-              </div>
-            </label>
+          {error ? <div className="login-error">{error}</div> : null}
 
-            <div className="login-row">
-              <label className="remember-check">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(e)=>setRemember(e.target.checked)}
-                />
-                Recordarme
-              </label>
-              <button type="button" className="link-btn">Olvidé mi contraseña</button>
-            </div>
+          <button type="submit" className="login-submit" disabled={loading}>
+            {loading ? t('login.signIn') + '...' : t('login.signInButton')}
+          </button>
 
-            {error ? <div className="login-error">{error}</div> : null}
-
-            <button type="submit" className="login-submit" disabled={loading}>
-              {loading ? 'Validando...' : 'Iniciar sesión'}
-            </button>
-          </form>
-        </div>
+          <button type="button" className="login-back login-back-inline" onClick={onBackHome}>
+            {t('navbar.home')}
+          </button>
+        </form>
       </div>
     </section>
-  )
+  );
 }
