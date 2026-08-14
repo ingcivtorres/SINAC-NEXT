@@ -434,6 +434,119 @@ class PanelAdministradorView(APIView):
             'aspirantes': AspiranteAdminSerializer(aspirantes, many=True).data,
         })
 
+    def post(self, request):
+        """Create a new aspirante (admin only)"""
+        nombre = (request.data.get('name') or '').strip()
+        correo = (request.data.get('email') or '').strip().lower()
+        usuario = (request.data.get('usuario') or nombre.replace(' ', '').lower()[:20]).strip()
+        rol = request.data.get('role', 'aspirante').lower()
+        programa = request.data.get('area', 'General').strip()
+
+        if not nombre or not correo:
+            return Response(
+                {'error': 'Nombre y correo son obligatorios.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if Aspirante.objects.filter(correo__iexact=correo).exists():
+            return Response(
+                {'error': 'Ya existe un aspirante con este correo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if Aspirante.objects.filter(usuario__iexact=usuario).exists():
+            return Response(
+                {'error': 'Ya existe un aspirante con este usuario.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            aspirante = Aspirante.objects.create_user(
+                usuario=usuario,
+                correo=correo,
+                nombre=nombre,
+                password='TempPass123!',
+                curp='TEMP000000HDF00001',
+                rol=rol if rol in ['aspirante', 'alumno', 'docente'] else 'aspirante',
+                programa=programa,
+                unidad='Administración',
+                departamento='SINAC',
+                seccion='General',
+                estado_actual='Ciudad de México',
+                municipio_actual='Gustavo A. Madero',
+                direccion_actual='Cinvestav',
+                estado_permanente='Ciudad de México',
+                municipio_permanente='Gustavo A. Madero',
+                direccion_permanente='Cinvestav',
+                nombre_familiar='No aplica',
+                parentesco='No aplica',
+                telefono='0000000000',
+                telefono_familiar='0000000000',
+                ultimo_grado='No aplica',
+                institucion='Cinvestav',
+            )
+            return Response(AspiranteAdminSerializer(aspirante).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response(
+                {'error': f'Error al crear aspirante: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def put(self, request, pk=None):
+        """Update an aspirante (admin only)"""
+        if not pk and request.data.get('id'):
+            pk = request.data['id']
+
+        if not pk:
+            return Response(
+                {'error': 'Se requiere un ID de usuario.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            aspirante = Aspirante.objects.get(pk=pk, is_staff=False)
+        except Aspirante.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if 'name' in request.data:
+            aspirante.nombre = request.data['name'].strip()
+        if 'email' in request.data:
+            email = request.data['email'].strip().lower()
+            if Aspirante.objects.exclude(pk=pk).filter(correo__iexact=email).exists():
+                return Response(
+                    {'error': 'Ya existe un aspirante con este correo.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            aspirante.correo = email
+        if 'role' in request.data:
+            role = request.data['role'].lower()
+            if role in ['aspirante', 'alumno', 'docente']:
+                aspirante.rol = role
+        if 'area' in request.data:
+            aspirante.programa = request.data['area'].strip()
+
+        aspirante.save()
+        return Response(AspiranteAdminSerializer(aspirante).data)
+
+    def delete(self, request, pk=None):
+        """Delete an aspirante (admin only)"""
+        if not pk and request.data.get('id'):
+            pk = request.data['id']
+
+        if not pk:
+            return Response(
+                {'error': 'Se requiere un ID de usuario.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            aspirante = Aspirante.objects.get(pk=pk, is_staff=False)
+        except Aspirante.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        aspirante.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class PanelCoordinacionView(APIView):
     permission_classes = [permissions.IsAdminUser]

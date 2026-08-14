@@ -10,6 +10,7 @@ urlpatterns = [
     path('preregistro/documentos/<int:pk>/', DocumentoAspiranteView.as_view(), name='documento-aspirante'),
     path('preregistro/documentos/<int:pk>/descarga/', DocumentoDescargaView.as_view(), name='documento-descarga'),
     path('administracion/panel/', PanelAdministradorView.as_view(), name='admin-panel'),
+    path('administracion/aspirantes/<int:pk>/', PanelAdministradorView.as_view(), name='admin-aspirante-detail'),
     path('coordinacion/panel/', PanelCoordinacionView.as_view(), name='coordinacion-panel'),
     path('coordinacion/aspirantes/<int:pk>/estado/', EstadoAspiranteCoordinacionView.as_view(), name='coordinacion-estado-aspirante'),
     path('coordinacion/aspirantes/<int:pk>/', AspiranteCoordinacionDetailView.as_view(), name='coordinacion-aspirante-detail'),
