@@ -1,6 +1,6 @@
 import React, {useState, useEffect} from 'react';
 import cinvestavLogo from '../assets/logo2civ-removebg-preview.png';
-import sinacLogo from '../assets/6-removebg-preview.png';
+import sinacLogo from '../assets/SINAC5-removebg-preview.png';
 import {useLanguage} from '../translations';
 
 export default function Navbar({onNavigate, activeView, session, onLogout}){

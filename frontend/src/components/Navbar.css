@@ -1,0 +1,211 @@
+/* Barra institucional: sobria, compacta y consistente con ambos temas. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  isolation: isolate;
+  min-height: 86px;
+  padding: 10px clamp(18px, 3vw, 44px);
+  background: linear-gradient(115deg, var(--header-bg) 0%, #08786d 58%, #075b61 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, .18);
+  box-shadow: 0 12px 30px rgba(7, 52, 58, .18);
+}
+
+.site-header::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
+              linear-gradient(90deg, transparent 0 68%, rgba(255, 255, 255, .04));
+}
+
+.site-header .left {
+  min-height: 66px;
+  gap: 0;
+}
+
+.site-header .logo.small {
+  height: 66px;
+  max-width: 120px;
+  margin: 0;
+  object-fit: contain;
+  transition: transform .2s ease, opacity .2s ease;
+}
+
+.site-header .logo.small:hover {
+  opacity: .9;
+  transform: translateY(-1px);
+}
+
+.site-header .logo.small.sinac {
+  height: 48px;
+  max-width: 220px;
+  margin-left: 22px;
+  padding-left: 22px;
+  border-left: 1px solid rgba(255, 255, 255, .34);
+}
+
+.site-header .right {
+  gap: 9px;
+}
+
+.theme-toggle,
+.language-selector,
+.menu-dropdown .menu {
+  border-color: rgba(255, 255, 255, .34);
+  background: rgba(255, 255, 255, .10);
+  box-shadow: 0 7px 18px rgba(0, 35, 40, .16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.theme-toggle {
+  width: 58px;
+  height: 36px;
+}
+
+.theme-toggle::before {
+  width: 23px;
+  height: 23px;
+  top: 5px;
+  background: #f7fffd;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
+}
+
+.theme-toggle:hover,
+.menu-dropdown .menu:hover {
+  background: rgba(255, 255, 255, .20);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(0, 35, 40, .22);
+}
+
+.language-selector {
+  height: 36px;
+  padding: 3px;
+}
+
+.language-selector .lang-btn {
+  min-width: 36px;
+  padding: 7px 10px;
+}
+
+.menu-dropdown .menu {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  font-size: 0;
+}
+
+.menu-dropdown .menu::before,
+.menu-dropdown .menu::after {
+  content: "";
+  width: 18px;
+  height: 2px;
+  position: absolute;
+  border-radius: 3px;
+  background: currentColor;
+  box-shadow: 0 6px 0 currentColor;
+}
+
+.menu-dropdown .menu::after {
+  transform: translateY(-6px);
+  box-shadow: none;
+}
+
+.dropdown-menu {
+  top: 56px;
+  width: 238px;
+  padding: 10px;
+  gap: 4px;
+  border: 1px solid rgba(0, 105, 92, .16);
+  box-shadow: 0 22px 46px rgba(8, 50, 57, .20);
+}
+
+.dropdown-menu .dropdown-item {
+  justify-content: flex-start;
+  padding: 11px 13px;
+  font-size: .87rem;
+}
+
+.dropdown-menu .dropdown-item.active {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.theme-toggle:focus-visible,
+.language-selector .lang-btn:focus-visible,
+.menu-dropdown .menu:focus-visible,
+.dropdown-menu .dropdown-item:focus-visible {
+  outline: 3px solid rgba(144, 235, 219, .65);
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .site-header {
+  background: linear-gradient(115deg, #102f2d 0%, #0d4b48 60%, #102c39 100%);
+  border-bottom-color: rgba(148, 239, 224, .18);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
+}
+
+[data-theme="dark"] .dropdown-menu {
+  background: #152732;
+  border-color: rgba(148, 239, 224, .16);
+  box-shadow: 0 22px 46px rgba(0, 0, 0, .38);
+}
+
+[data-theme="dark"] .dropdown-menu .dropdown-item {
+  color: #e8fffa;
+}
+
+[data-theme="dark"] .dropdown-menu .dropdown-item:hover,
+[data-theme="dark"] .dropdown-menu .dropdown-item.active {
+  background: rgba(122, 221, 207, .12);
+  color: #91e8da;
+}
+
+@media (max-width: 700px) {
+  .site-header {
+    min-height: 68px;
+    padding: 8px 14px;
+  }
+
+  .site-header .left {
+    min-height: 52px;
+  }
+
+  .site-header .logo.small {
+    height: 50px;
+    max-width: 88px;
+  }
+
+  .site-header .logo.small.sinac {
+    height: 36px;
+    max-width: 145px;
+    margin-left: 11px;
+    padding-left: 11px;
+  }
+
+  .site-header .right {
+    gap: 6px;
+  }
+
+  .theme-toggle {
+    width: 48px;
+    height: 32px;
+  }
+
+  .language-selector {
+    height: 32px;
+  }
+
+  .language-selector .lang-btn {
+    min-width: 29px;
+    padding: 6px 7px;
+    font-size: .68rem;
+  }
+
+  .menu-dropdown .menu {
+    width: 40px;
+    height: 40px;
+  }
+}

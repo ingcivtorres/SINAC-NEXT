@@ -1,5 +1,6 @@
 import React, {useState} from 'react';
 import civLogo from '../assets/logociv.png';
+import campusImage from '../assets/54088665669_251d9c0f8a_z.jpg';
 import {useLanguage} from '../translations';
 
 const ROLE_IDS = [
@@ -76,6 +77,11 @@ export default function LoginView({onBackHome, onLoginSuccess}){
 
   return (
     <section id="login" className="login-section single-panel-login">
+      <div className="login-layout-modern">
+        <div className="login-visual" aria-label="Campus Cinvestav Zacatenco">
+          <img src={campusImage} alt="Campus Cinvestav Zacatenco" />
+          <div className="login-visual-caption"><span>CINVESTAV</span><strong>Unidad Zacatenco</strong><small>Investigación · Ciencia · Tecnología</small></div>
+        </div>
       <div className="login-card modern-login-card single-panel-card">
         <div className="login-branding">
           <div className="login-logo-wrap">
@@ -152,6 +158,7 @@ export default function LoginView({onBackHome, onLoginSuccess}){
             {t('navbar.home')}
           </button>
         </form>
+      </div>
       </div>
     </section>
   );

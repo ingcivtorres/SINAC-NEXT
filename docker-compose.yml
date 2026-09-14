@@ -23,19 +23,25 @@ services:
       DB_PASSWORD: camunda
     ports:
       - "8081:8080"
+    volumes:
+      - ./camunda:/camunda/configuration/resources
     restart: unless-stopped
 
   backend:
     build:
       context: ./backend
     container_name: sinac-backend
-    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      CAMUNDA_URL: http://camunda:8080
+      CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
     ports:
       - "8000:8000"
     depends_on:
       - postgres
     volumes:
       - documentos_media:/app/media
+      - ./frontend/src/assets:/app/frontend_assets:ro
 
   frontend:
     build:

@@ -10,8 +10,16 @@ import PanelAdministrador from './components/PanelAdministrador';
 import PanelAlumno from './components/PanelAlumno';
 import PanelCoordinacion from './components/PanelCoordinacion';
 import PanelDocente from './components/PanelDocente';
+import PanelDirector from './components/PanelDirector';
+import PanelServiciosEscolares from './components/PanelServiciosEscolares';
+import AvisoPrivacidad from './components/AvisoPrivacidad';
 import Footer from './components/Footer';
+import NotificationBell from './components/NotificationBell';
 import './styles.css';
+import './components/Navbar.css';
+import './components/Footer.css';
+import './components/RegistrationPrivacyGate.css';
+import './components/Login.css';
 
 function clearAuthStorage(){
   localStorage.removeItem('sinac_access');
@@ -52,24 +60,12 @@ export default function App(){
   const switchTimerRef = useRef(null);
 
   useEffect(()=>{
-    const t = setTimeout(()=> setLoading(false), 1400);
+    const t = setTimeout(()=> setLoading(false), 2200);
     return ()=> clearTimeout(t);
   },[]);
 
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      clearAuthStorage();
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        clearAuthStorage();
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
     };
   }, []);
@@ -87,15 +83,20 @@ export default function App(){
 
   function handleLoginSuccess(sess){
     setSession(sess);
-    const target = sess.role === 'admin'
+    const authenticatedRole = String(sess.role || 'aspirante').trim().toLowerCase();
+    const target = authenticatedRole === 'admin'
       ? 'admin-panel'
-      : sess.role === 'coordinacion'
+      : authenticatedRole === 'coordinacion'
         ? 'coordinacion-panel'
-        : sess.role === 'docente'
+        : authenticatedRole === 'docente'
           ? 'docente-panel'
-          : sess.role === 'alumno'
-            ? 'alumno-panel'
-            : 'panel';
+          : authenticatedRole === 'alumno'
+          ? 'alumno-panel'
+            : authenticatedRole === 'director'
+              ? 'director-panel'
+              : authenticatedRole === 'servicios' || authenticatedRole === 'servicios_escolares'
+                ? 'servicios-panel'
+              : 'panel';
     handleNavigate(target);
   }
 
@@ -124,6 +125,7 @@ export default function App(){
           document.body
         )}
         {displayView === 'home'   && <HomePage />}
+        {displayView === 'privacy' && <AvisoPrivacidad onNavigate={handleNavigate} />}
         {displayView === 'portal' && <AspirantRegistration />}
         {displayView === 'login'  && (
           <LoginView
@@ -153,11 +155,20 @@ export default function App(){
         )}
         {displayView === 'docente-panel' && (
           session
-            ? <PanelDocente onLogout={handleLogout} />
+            ? <PanelDocente session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
+        {displayView === 'director-panel' && (
+          session
+            ? <PanelDirector session={session} onLogout={handleLogout} />
+            : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
+        )}
+        {displayView === 'servicios-panel' && (
+          session ? <PanelServiciosEscolares session={session} onLogout={handleLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
+        )}
       </main>
-      {!loading && <Footer />}
+      {session && <NotificationBell session={session} />}
+      {!loading && <Footer onNavigate={handleNavigate} />}
     </div>
   )
 }

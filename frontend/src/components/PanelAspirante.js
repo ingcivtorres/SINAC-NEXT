@@ -2,6 +2,10 @@ import React, {useCallback, useEffect, useState} from 'react';
 import DocumentosAspirante from './DocumentosAspirante';
 import SeguimientoSolicitud from './SeguimientoSolicitud';
 import SolicitudApoyo from './SolicitudApoyo';
+import PerfilAspirante from './PerfilAspirante';
+import './PanelAspirante.css';
+import './PanelAspiranteSingle.css';
+import {useLanguage} from '../translations';
 
 const ETAPAS = [
   {id: 'pendiente', label: 'Pre-registro recibido', icon: '1'},
@@ -11,10 +15,12 @@ const ETAPAS = [
 ];
 
 const MENU_ITEMS = [
+  {id: 'perfil', label: 'Mi perfil'},
   {id: 'inicio', label: 'Inicio'},
   {id: 'expediente', label: 'Expediente'},
   {id: 'proceso', label: 'Seguimiento LIDA'},
   {id: 'documentos', label: 'Documentos'},
+  {id: 'examenes', label: 'Exámenes en línea'},
 ];
 
 function etapaIndex(estado) {
@@ -68,19 +74,22 @@ function mensajeEtapa(estado) {
 }
 
 export default function PanelAspirante({session, onLogout}) {
+  const {language} = useLanguage();
   const [perfil, setPerfil] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
-  const [openSections, setOpenSections] = useState({inicio: true, expediente: false, proceso: false, documentos: false, notificaciones: false});
+  const [openSections, setOpenSections] = useState({inicio: true, perfil: false, expediente: false, proceso: false, documentos: false, notificaciones: false});
   const [seguimiento, setSeguimiento] = useState(null);
   const [seguimientoCargando, setSeguimientoCargando] = useState(true);
   const [confirmarConversion, setConfirmarConversion] = useState(false);
   const [convirtiendo, setConvirtiendo] = useState(false);
   const [mensajeConversion, setMensajeConversion] = useState('');
+  const [examenes, setExamenes] = useState([]);
+  const menuLabels = language === 'en' ? {perfil:'My profile', inicio:'Home', expediente:'Academic record', proceso:'LIDA tracking', documentos:'Documents', examenes:'Online exams'} : {};
 
   const toggleSection = (id) => {
     setOpenSections((prev) => {
-      const next = {...prev, [id]: !prev[id]};
+      const next = Object.keys(prev).reduce((sections, key) => ({...sections, [key]: key === id}), {});
       // if opening notifications, mark them as read
       if (id === 'notificaciones' && !prev.notificaciones) {
         marcarNotificacionesLeidas();
@@ -156,6 +165,10 @@ export default function PanelAspirante({session, onLogout}) {
       sctrl.abort();
     };
   }, [cargarPerfil, cargarSeguimiento]);
+
+  useEffect(() => {
+    fetch('/api/preregistro/examenes/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : {examenes: []}).then(data => setExamenes(data.examenes || []));
+  }, [session.access]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -257,7 +270,7 @@ export default function PanelAspirante({session, onLogout}) {
                 onClick={() => toggleSection(item.id)}
                 aria-expanded={openSections[item.id]}
               >
-                <span>{item.label}</span>
+                <span>{menuLabels[item.id] || item.label}</span>
                 <span>{openSections[item.id] ? '−' : '+'}</span>
               </button>
             ))}
@@ -312,6 +325,10 @@ export default function PanelAspirante({session, onLogout}) {
             </div>
           </SectionPanel>
 
+          <SectionPanel id="perfil" label="Mi perfil" open={openSections.perfil} onToggle={() => toggleSection('perfil')}>
+            <PerfilAspirante perfil={perfil} session={session} onActualizado={(actualizado) => setPerfil((actual) => ({...actual, ...actualizado}))}/>
+          </SectionPanel>
+
           <SectionPanel id="notificaciones" label="Notificaciones" open={openSections.notificaciones} onToggle={() => toggleSection('notificaciones')}>
             <div className="panel-card">
               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -349,6 +366,10 @@ export default function PanelAspirante({session, onLogout}) {
 
           <SectionPanel id="documentos" label="Documentos" open={openSections.documentos} onToggle={() => toggleSection('documentos')}>
             <DocumentosAspirante session={session} />
+          </SectionPanel>
+
+          <SectionPanel id="examenes" label="Exámenes en línea" open={openSections.examenes} onToggle={() => toggleSection('examenes')}>
+            <div className="panel-card"><h3>Exámenes de admisión y selección</h3>{examenes.length ? <div className="request-list">{examenes.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.tipo_label} · {examen.duracion_minutos} minutos</p><span>{examen.estado_label}</span></article>)}</div> : <p className="empty-state">Aún no tienes exámenes asignados.</p>}</div>
           </SectionPanel>
         </div>
       </div>}

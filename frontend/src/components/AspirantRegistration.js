@@ -1,6 +1,9 @@
 import React, {useMemo, useState} from 'react';
 
 const DRAFT_KEY = 'sinac_preregistro_draft_v2';
+const DEPARTAMENTOS = ['Biología Celular','Biomedicina Molecular','Bioquímica','Biotecnología y Bioingeniería','Computación','Control Automático','Farmacología','Física','Fisiología, Biofísica y Neurociencias','Genética y Biología Molecular','Infectómica y Patogénesis Molecular','Ingeniería Eléctrica','Investigación y Estudios Multidisciplinarios','Matemática Educativa','Matemáticas','Química','Toxicología'];
+const PROGRAMAS = ['Maestría — Teoría de la Computación (2 años)','Maestría — Inteligencia Artificial (2 años)','Maestría — Sistemas de Cómputo (2 años)','Maestría — Sistemas de Información (2 años)','Maestría — Ciencias de la Computación (2 años)','Doctorado — Teoría de la Computación (4 años)','Doctorado — Inteligencia Artificial (4 años)','Doctorado — Sistemas de Cómputo (4 años)','Doctorado — Sistemas de Información (4 años)','Doctorado — Ciencias de la Computación (4 años)'];
+const SECCIONES = Array.from({length:65},(_,i)=>String(i+1));
 
 const initialForm = {
   nombre: '', usuario: '', curp: '', correo: '', telefono: '', nacimiento: '',
@@ -65,6 +68,7 @@ function Field({label, req, error, children}){
 }
 
 export default function AspirantRegistration(){
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [form, setForm]           = useState(() => ({...initialForm, ...(getDraft()||{})}));
   const [submitted, setSubmitted]  = useState(false);
   const [submitData, setSubmitData] = useState(null);
@@ -96,7 +100,7 @@ export default function AspirantRegistration(){
   function validate(){
     const errs = {};
     requiredFields.forEach(f => { if(!`${form[f]||''}`.trim()) errs[f]='Obligatorio.'; });
-    if(form.curp && !/^[A-Z0-9]{18}$/.test(form.curp)) errs.curp='Debe tener 18 caracteres.';
+    if(form.curp && !/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9]$/.test(form.curp)) errs.curp='CURP no válida (18 caracteres, formato oficial).';
     if(form.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.correo)) errs.correo='Correo no válido.';
     if(form.password && form.password.length < 8) errs.password='Mínimo 8 caracteres.';
     if(form.password !== form.passwordConfirm) errs.passwordConfirm='Las contraseñas no coinciden.';
@@ -176,6 +180,21 @@ export default function AspirantRegistration(){
     );
   }
 
+  if(!privacyAccepted){
+    return (
+      <section className="registration-privacy-gate" aria-labelledby="privacy-gate-title">
+        <div className="registration-privacy-card">
+          <div className="privacy-gate-icon" aria-hidden="true">✓</div>
+          <span className="privacy-gate-kicker">PORTAL DE ASPIRANTES · SINAC NEXT</span>
+          <h1 id="privacy-gate-title">Antes de comenzar</h1>
+          <p>Si tienes dudas sobre la información que vas a capturar a continuación, te invitamos a consultar nuestro <strong>Aviso de Privacidad</strong>, disponible en el pie de página.</p>
+          <div className="privacy-gate-note"><span aria-hidden="true">i</span><span>La información proporcionada será utilizada para gestionar tu proceso de registro y admisión.</span></div>
+          <button type="button" className="privacy-gate-accept" onClick={() => setPrivacyAccepted(true)}>Aceptar y continuar</button>
+        </div>
+      </section>
+    );
+  }
+
   const activeDef = sectionDefs.find(s => s.id === activeId);
 
   function renderPanel(){
@@ -246,10 +265,10 @@ export default function AspirantRegistration(){
       );
       case 'cinvestav': return (
         <div className="cf-grid">
-          <Field label="Unidad" req error={errors.unidad}><input name="unidad" value={form.unidad} onChange={handleChange}/></Field>
-          <Field label="Departamento" req error={errors.departamento}><input name="departamento" value={form.departamento} onChange={handleChange}/></Field>
-          <Field label="Sección" req error={errors.seccion}><input name="seccion" value={form.seccion} onChange={handleChange}/></Field>
-          <Field label="Programa de interés" req error={errors.programa}><input name="programa" value={form.programa} onChange={handleChange}/></Field>
+          <Field label="Unidad" req error={errors.unidad}><select name="unidad" value={form.unidad} onChange={handleChange}><option value="">Selecciona unidad</option><option value="Zacatenco">Zacatenco</option></select></Field>
+          <Field label="Departamento" req error={errors.departamento}><select name="departamento" value={form.departamento} onChange={handleChange}><option value="">Selecciona departamento</option>{DEPARTAMENTOS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Sección" req error={errors.seccion}><select name="seccion" value={form.seccion} onChange={handleChange}><option value="">Selecciona sección</option>{SECCIONES.map(x=><option key={x}>{x}</option>)}</select><small>Para conocer la sección consulta el croquis de Cinvestav Zacatenco.</small></Field>
+          <Field label="Programa de interés" req error={errors.programa}><select name="programa" value={form.programa} onChange={handleChange}><option value="">Selecciona programa</option>{PROGRAMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
           <Field label="Modalidad" req error={errors.modalidad}>
             <select name="modalidad" value={form.modalidad} onChange={handleChange}>
               <option>Presencial</option><option>Híbrida</option><option>En línea</option>

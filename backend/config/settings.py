@@ -1,7 +1,8 @@
-import os
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+CAMUNDA_URL = os.getenv('CAMUNDA_URL', '')
 
 SECRET_KEY = 'dev-secret-key'
 DEBUG = True

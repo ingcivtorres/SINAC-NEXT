@@ -1,193 +1,68 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import PerfilAspirante from './PerfilAspirante';
+import './PanelAlumno.css';
+import {useLanguage} from '../translations';
 
-function InfoRow({label, value}) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value || '—'}</strong>
-    </div>
-  );
-}
+const MENU = [
+  ['resumen', 'Resumen', '⌂'], ['materias', 'Materias e inscripciones', '▦'], ['calificaciones', 'Calificaciones y avance', '✓'],
+  ['horario', 'Horario', '◷'], ['solicitudes', 'Solicitudes académicas', '▤'],
+  ['entrevistas', 'Entrevistas virtuales', '◉'], ['tramites', 'Documentos y trámites', '⇩'], ['perfil', 'Mi perfil', '◌'],
+];
 
-function Badge({children, tone = 'neutral'}) {
-  return <span className={`badge badge--${tone}`}>{children}</span>;
-}
-
-function MateriaRow({materia}) {
-  return (
-    <article className="subject-row">
-      <div>
-        <strong>{materia.materia_clave}</strong> {materia.materia_nombre}
-        <p>{materia.materia_profesor || 'Profesor no asignado'}</p>
-      </div>
-      <div className="subject-meta">
-        <Badge tone={materia.color}>{materia.estado_label}</Badge>
-        <span>{materia.calificacion ?? 'Sin calif.'}</span>
-      </div>
-    </article>
-  );
-}
+function InfoRow({label, value}) { return <div className="info-row"><span>{label}</span><strong>{value || '—'}</strong></div>; }
+function Badge({children, tone = 'neutral'}) { return <span className={`badge badge--${tone}`}>{children}</span>; }
+function MateriaRow({materia}) { return <article className="subject-row"><div><strong>{materia.materia_clave}</strong> {materia.materia_nombre}<p>{materia.materia_profesor || 'Profesor no asignado'} · Créditos: {materia.materia_creditos ?? '—'} · Periodo: {materia.periodo_nombre || 'Histórico'}</p></div><div className="subject-meta"><Badge tone={materia.color}>{materia.estado_label}</Badge><div className="subject-grades"><span>Parciales: {[materia.parcial_1, materia.parcial_2, materia.parcial_3].map(n => n ?? '—').join(' · ')}</span><strong>Final: {materia.calificacion ?? 'Pendiente'}</strong></div></div></article>; }
 
 export default function PanelAlumno({session, onLogout}) {
-  const [perfil, setPerfil] = useState(null);
-  const [inscripciones, setInscripciones] = useState([]);
-  const [solicitudes, setSolicitudes] = useState([]);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
-
+  const {language} = useLanguage();
+  const [perfil, setPerfil] = useState(null), [inscripciones, setInscripciones] = useState([]), [materias, setMaterias] = useState([]), [solicitudes, setSolicitudes] = useState([]), [entrevistas, setEntrevistas] = useState([]), [examenes, setExamenes] = useState([]), [inscribiendo, setInscribiendo] = useState(null);
+  const [seccion, setSeccion] = useState('resumen'), [error, setError] = useState(''), [loading, setLoading] = useState(true), [message, setMessage] = useState('');
+  const [periodoInscripcion, setPeriodoInscripcion] = useState(null);
+  const [respuestasExamen, setRespuestasExamen] = useState({});
   const apiHeaders = useMemo(() => ({Authorization: `Bearer ${session.access}`}), [session.access]);
-
-  const cargarDatos = useCallback(async (signal) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
+  const cargarDatos = useCallback(async signal => {
+    setLoading(true); setError('');
     try {
-      const [perfilResp, inscripcionesResp, solicitudesResp] = await Promise.all([
-        fetch('/api/preregistro/me/', {headers: apiHeaders, signal}),
-        fetch('/api/preregistro/inscripciones/', {headers: apiHeaders, signal}),
-        fetch('/api/preregistro/solicitudes-academicas/', {headers: apiHeaders, signal}),
-      ]);
-
-      if (perfilResp.status === 401 || inscripcionesResp.status === 401 || solicitudesResp.status === 401) {
-        onLogout('Tu sesión ha caducado. Inicia sesión de nuevo.');
-        return;
-      }
-
-      if (!perfilResp.ok || !inscripcionesResp.ok || !solicitudesResp.ok) {
-        throw new Error('No se pudo cargar los datos del alumno.');
-      }
-
-      setPerfil(await perfilResp.json());
-      setInscripciones(await inscripcionesResp.json());
-      setSolicitudes(await solicitudesResp.json());
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setError(err.message || 'No se pudo cargar el panel del alumno.');
-      }
-    } finally {
-      if (!signal.aborted) setLoading(false);
-    }
+      const rs = await Promise.all(['me/', 'inscripciones/', 'materias/', 'solicitudes-academicas/', 'entrevistas/', 'examenes/'].map(path => fetch(`/api/preregistro/${path}`, {headers: apiHeaders, signal})));
+      if (rs.some(r => r.status === 401)) { onLogout('Tu sesión ha caducado. Inicia sesión de nuevo.'); return; }
+      if (rs.some(r => !r.ok)) throw new Error('No se pudo cargar los datos del alumno.');
+      setPerfil(await rs[0].json()); setInscripciones(await rs[1].json()); setMaterias(await rs[2].json()); setSolicitudes(await rs[3].json());
+      const data = await rs[4].json(); setEntrevistas(data.entrevistas || []); const examenesData = await rs[5].json(); setExamenes(examenesData.examenes || []);
+    } catch (err) { if (err.name !== 'AbortError') setError(err.message || 'No se pudo cargar el panel del alumno.'); }
+    finally { if (!signal.aborted) setLoading(false); }
   }, [apiHeaders, onLogout]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    cargarDatos(controller.signal);
-    return () => controller.abort();
-  }, [cargarDatos]);
-
-  const promedioGeneral = useMemo(() => {
-    if (!inscripciones.length) return null;
-    const calificaciones = inscripciones
-      .map(item => Number(item.calificacion))
-      .filter(value => !Number.isNaN(value));
-    if (!calificaciones.length) return null;
-    const sum = calificaciones.reduce((total, val) => total + val, 0);
-    return (sum / calificaciones.length).toFixed(2);
-  }, [inscripciones]);
-
-  const descargarArchivo = useCallback(async (ruta, nombre) => {
-    try {
-      const response = await fetch(ruta, {headers: apiHeaders});
-      if (!response.ok) throw new Error('No se pudo generar el archivo.');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = nombre;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      setMessage(`${nombre} descargado con éxito.`);
-    } catch (err) {
-      setError(err.message || 'Error descargando el archivo.');
+  useEffect(() => { const c = new AbortController(); cargarDatos(c.signal); return () => c.abort(); }, [cargarDatos]);
+  useEffect(() => { fetch('/api/periodos-inscripcion/', {headers: apiHeaders}).then(r=>r.ok?r.json():null).then(setPeriodoInscripcion).catch(()=>{}); }, [apiHeaders]);
+  const promedio = useMemo(() => { const a = inscripciones.map(i => Number(i.calificacion)).filter(n => !Number.isNaN(n)); return a.length ? (a.reduce((x, n) => x + n, 0) / a.length).toFixed(2) : null; }, [inscripciones]);
+  const descargar = useCallback(async (ruta, nombre) => { try { const r = await fetch(ruta, {headers: apiHeaders}); if (!r.ok) throw new Error('No se pudo generar el archivo.'); const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = nombre; a.click(); URL.revokeObjectURL(url); setMessage(`${nombre} descargado con éxito.`); } catch (e) { setError(e.message); } }, [apiHeaders]);
+  async function elegirMateria(materia) {
+    if (!periodoInscripcion?.activo) {
+      setError('El periodo de inscripción está cerrado o aún no ha sido habilitado por Coordinación Académica.');
+      return;
     }
-  }, [apiHeaders]);
-
-  return (
-    <section className="panel-section" aria-label="Panel del alumno">
-      <div className="panel-hero">
-        <div>
-          <p className="panel-kicker">Alumno</p>
-          <h1>Panel del alumno</h1>
-          <p className="panel-sub">Consulta tu información académica, solicitudes y horario.</p>
-        </div>
-        <button type="button" className="btn-outline-danger" onClick={() => onLogout('Se cerró la sesión correctamente.')}>Cerrar sesión</button>
-      </div>
-
-      {message && (
-        <div className="api-success" role="status">
-          {message}
-          <button type="button" className="link-btn" onClick={() => setMessage('')}>Cerrar</button>
-        </div>
-      )}
-
-      {error && (
-        <div className="api-error" role="alert">
-          {error}
-          <button type="button" className="link-btn" onClick={() => cargarDatos(new AbortController().signal)}>
-            Reintentar
-          </button>
-        </div>
-      )}
-
-      {loading && !perfil && <div className="panel-card">Cargando tu información de alumno...</div>}
-
-      {perfil && (
-        <div className="panel-grid">
-          <div className="panel-card panel-card--wide">
-            <h3>Bienvenido, {perfil.nombre || 'Alumno'}</h3>
-            <p>Usuario: <strong>{perfil.usuario || perfil.correo || '—'}</strong></p>
-            <div className="info-grid">
-              <InfoRow label="Programa" value={perfil.programa} />
-              <InfoRow label="Unidad" value={perfil.unidad} />
-              <InfoRow label="Modalidad" value={perfil.modalidad} />
-              <InfoRow label="Estado actual" value={perfil.proceso_estado || 'Pendiente'} />
-              <InfoRow label="Promedio" value={perfil.promedio ? Number(perfil.promedio).toFixed(2) : '—'} />
-              <InfoRow label="Promedio académico" value={promedioGeneral || 'Sin calificaciones'} />
-            </div>
-          </div>
-
-          <div className="panel-card">
-            <h3>Materias inscritas</h3>
-            {inscripciones.length ? (
-              <div className="subject-list">
-                {inscripciones.map(materia => <MateriaRow key={materia.id} materia={materia} />)}
-              </div>
-            ) : (
-              <p>No tienes materias inscritas aún.</p>
-            )}
-          </div>
-
-          <div className="panel-card">
-            <h3>Acciones académicas</h3>
-            <div className="action-grid">
-              <button type="button" className="btn-secondary" onClick={() => descargarArchivo('/api/preregistro/horario/download/', 'horario.txt')}>Descargar horario</button>
-              <button type="button" className="btn-secondary" onClick={() => descargarArchivo('/api/preregistro/reinscripcion/download/', 'reinscripcion.txt')}>Descargar reinscripción</button>
-              <button type="button" className="btn-secondary" onClick={() => setError('Funcionalidad de solicitud de ajuste de materias disponible pronto.')}>Solicitar ajuste de materias</button>
-            </div>
-          </div>
-
-          <div className="panel-card">
-            <h3>Solicitudes académicas</h3>
-            {solicitudes.length ? (
-              <ul className="request-list">
-                {solicitudes.map(item => (
-                  <li key={item.id}>
-                    <strong>{item.tipo_label}</strong>
-                    <p>{item.comentario || 'Sin comentario.'}</p>
-                    <span>{item.estado_label}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>No hay solicitudes académicas registradas.</p>
-            )}
-          </div>
-        </div>
-      )}
-    </section>
-  );
+    if (!window.confirm(`¿Deseas enviar tu solicitud de inscripción a ${materia.nombre}?`)) return;
+    setInscribiendo(materia.id); setError('');
+    try {
+      const r = await fetch('/api/preregistro/inscripciones/', {method: 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({materia: materia.id})});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || data.materia || 'No se pudo enviar la solicitud de inscripción.');
+      setInscripciones(items => [...items, data]);
+      setMessage(`Solicitud de inscripción enviada para ${materia.nombre}.`);
+    } catch (e) { setError(e.message); } finally { setInscribiendo(null); }
+  }
+  async function iniciarExamen(examen) { const r = await fetch('/api/preregistro/examenes/', {method: 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({id: examen.id})}); const data = await r.json(); if (!r.ok) return setError(data.detail || 'No se pudo iniciar el examen.'); setExamenes(items => items.map(item => item.id === data.id ? data : item)); setMessage('Examen iniciado.'); }
+  async function enviarExamen(examen) { const r = await fetch('/api/preregistro/examenes/', {method: 'PUT', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({id: examen.id, respuestas: respuestasExamen})}); const data = await r.json(); if (!r.ok) return setError(data.detail || 'No se pudo enviar el examen.'); setExamenes(items => items.map(item => item.id === data.id ? data : item)); setMessage(`Examen enviado. Calificación: ${data.calificacion}`); }
+  const contenido = () => {
+    if (seccion === 'examenes') return <div className="panel-card"><h3>Exámenes en línea</h3><p>Consulta tus evaluaciones de admisión y selección.</p>{examenes.length ? <div className="request-list">{examenes.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.tipo_label} · {examen.duracion_minutos} minutos</p><span>{examen.estado_label}</span>{examen.estado === 'programado' && <button type="button" className="btn-primary" onClick={() => iniciarExamen(examen)}>Iniciar examen</button>}{examen.estado === 'iniciado' && <p>Examen iniciado. El módulo de respuestas estará disponible en la siguiente etapa.</p>}{examen.calificacion !== null && <p>Calificación: <strong>{examen.calificacion}</strong></p>}</article>)}</div> : <p>No tienes exámenes asignados.</p>}</div>;
+    if (seccion === 'resumen') return <div className="alumno-dashboard-grid"><div className="panel-card alumno-welcome-card"><h3>Bienvenido, {perfil.nombre || 'Alumno'}</h3><p>Usuario: <strong>{perfil.usuario || perfil.correo || '—'}</strong></p><div className="info-grid"><InfoRow label="Programa" value={perfil.programa}/><InfoRow label="Unidad" value={perfil.unidad}/><InfoRow label="Modalidad" value={perfil.modalidad}/><InfoRow label="Estado actual" value={perfil.proceso_estado || 'Pendiente'}/></div></div><div className="alumno-stats"><div><strong>{inscripciones.length}</strong><span>Materias inscritas</span></div><div><strong>{promedio || '—'}</strong><span>Promedio académico</span></div><div><strong>{solicitudes.length}</strong><span>Solicitudes</span></div><div><strong>{entrevistas.length}</strong><span>Entrevistas</span></div></div><div className="panel-card"><h3>Acceso rápido</h3><div className="action-grid"><button className="btn-secondary" onClick={() => setSeccion('horario')}>Consultar horario</button><button className="btn-secondary" onClick={() => setSeccion('solicitudes')}>Ver solicitudes</button><button className="btn-secondary" onClick={() => setSeccion('tramites')}>Descargar documentos</button></div></div></div>;
+    if (seccion === 'materias') { const inscritas = new Set(inscripciones.map(i => i.materia)); const periodoActivo = Boolean(periodoInscripcion?.activo); const fecha = valor => valor ? new Date(valor).toLocaleDateString('es-MX') : '—'; return <div className="alumno-materias-view"><div className="panel-card"><h3>Materias disponibles</h3><p>Elige las materias que cursarás este periodo.</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `Inscripciones abiertas: ${periodoInscripcion.nombre}` : 'Inscripciones cerradas'}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} — ${fecha(periodoInscripcion.cierre)}` : 'Coordinación Académica aún no ha habilitado un periodo.'}</span></div>{materias.length && periodoActivo ? <div className="materias-grid">{materias.map(m => <article className={`materia-card ${inscritas.has(m.id) ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong><small>Docente: {m.profesor || 'Por asignar'}<br/>Horario: {m.horario || 'Por definir'}</small>{inscritas.has(m.id) ? <Badge tone="success">Ya inscrita</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo === m.id} onClick={() => elegirMateria(m)}>{inscribiendo === m.id ? 'Inscribiendo...' : 'Elegir materia'}</button>}</article>)}</div> : <p>{periodoActivo ? 'No hay materias cargadas por Coordinación Académica.' : 'La selección estará disponible cuando Coordinación Académica abra el periodo de inscripción.'}</p>}</div><div className="panel-card"><h3>Mis materias inscritas</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>Aún no tienes materias inscritas.</p>}</div></div>; }
+    if (seccion === 'calificaciones') { const aprobadas = inscripciones.filter(i => i.calificacion !== null && Number(i.calificacion) >= 7).length; const reprobadas = inscripciones.filter(i => i.calificacion !== null && Number(i.calificacion) < 7).length; return <div className="panel-card"><h3>Calificaciones y avance curricular</h3><p>Las materias permanecen en <strong>Cursando</strong> hasta que el docente capture la calificación final.</p><div className="alumno-progress-stats"><div><strong>{aprobadas}</strong><span>Aprobadas</span></div><div><strong>{reprobadas}</strong><span>Reprobadas</span></div><div><strong>{inscripciones.length - aprobadas - reprobadas}</strong><span>En curso</span></div></div><div className="subject-list">{inscripciones.length ? inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>Aún no hay materias inscritas.</p>}</div></div>; }
+    if (seccion === 'horario' || seccion === 'tramites') return <div className="panel-card"><h3>{seccion === 'horario' ? 'Horario y reinscripción' : 'Documentos y trámites'}</h3><p>Descarga tus documentos académicos en PDF.</p><div className="action-grid"><button className="btn-secondary" onClick={() => descargar('/api/preregistro/horario/download/', 'horario.pdf')}>Descargar horario PDF</button><button className="btn-secondary" onClick={() => descargar('/api/preregistro/reinscripcion/download/', 'reinscripcion.pdf')}>Descargar reinscripción PDF</button></div>{seccion === 'horario' && <div className="subject-list">{inscripciones.map(m => <div className="subject-row" key={m.id}><strong>{m.materia_clave}</strong> {m.materia_nombre}<span>{m.materia_horario || m.horario || 'Horario por asignar'}</span></div>)}</div>}</div>;
+    if (seccion === 'solicitudes') return <div className="panel-card"><h3>Solicitudes académicas</h3>{solicitudes.length ? <ul className="request-list">{solicitudes.map(i => <li key={i.id}><strong>{i.tipo_label}</strong><p>{i.comentario || 'Sin comentario.'}</p><span>{i.estado_label}</span></li>)}</ul> : <p>No hay solicitudes académicas registradas.</p>}</div>;
+    if (seccion === 'entrevistas') return <div className="panel-card"><h3>Entrevistas virtuales</h3>{entrevistas.length ? <ul className="request-list">{entrevistas.map(i => <li key={i.id}><strong>{i.proposito_label || i.proposito}</strong><p>{i.titulo || 'Sin título'}</p><div className="interview-meta"><span>{i.estado_label}</span>{i.jitsi_room_link && i.estado === 'iniciada' && <a href={i.jitsi_room_link} target="_blank" rel="noopener noreferrer">Unirse a entrevista</a>}</div></li>)}</ul> : <p>No hay entrevistas virtuales programadas.</p>}</div>;
+    return <div><PerfilAspirante perfil={perfil} session={session} onActualizado={data => { setPerfil(actual => ({...actual, ...data})); setMessage('Perfil actualizado correctamente.'); }}/><div className="panel-card alumno-profile-summary"><h3>Información académica</h3><div className="info-grid"><InfoRow label="Programa" value={perfil.programa}/><InfoRow label="Unidad" value={perfil.unidad}/><InfoRow label="Promedio" value={perfil.promedio ? Number(perfil.promedio).toFixed(2) : '—'}/><InfoRow label="Promedio académico" value={promedio || 'Sin calificaciones'}/></div></div></div>;
+  };
+  const labels = language === 'en' ? {resumen:'Overview', materias:'Courses and enrollment', horario:'Schedule', solicitudes:'Academic requests', entrevistas:'Virtual interviews', tramites:'Documents and procedures', perfil:'My profile'} : Object.fromEntries(MENU.map(i => [i[0], i[1]]));
+  const titulo = labels[seccion];
+  return <section className="panel-section" aria-label="Panel del alumno"><div className="panel-hero"><div><p className="panel-kicker">Alumno</p><h1>Panel del alumno</h1><p className="panel-sub">Consulta tu información académica, solicitudes y horario.</p></div><button className="btn-secondary" onClick={() => cargarDatos(new AbortController().signal)}>Actualizar información</button></div>{message && <div className="api-success">{message}</div>}{error && <div className="api-error">{error}<button className="link-btn" onClick={() => cargarDatos(new AbortController().signal)}>Reintentar</button></div>}{loading && !perfil && <div className="panel-card">Cargando tu información de alumno...</div>}{perfil && <div className="alumno-layout"><aside className="alumno-sidebar"><div className="alumno-sidebar-user"><span className="alumno-avatar">{(perfil.nombre || 'A').charAt(0).toUpperCase()}</span><div><strong>{perfil.nombre || 'Alumno'}</strong><small>{perfil.programa || 'Programa académico'}</small></div></div><nav className="alumno-nav" aria-label="Secciones del alumno">{MENU.map(i => <button type="button" key={i[0]} className={`alumno-nav-item ${seccion === i[0] ? 'is-active' : ''}`} onClick={() => setSeccion(i[0])}><span className="alumno-nav-icon">{i[2]}</span>{i[1]}</button>)}</nav><button className="sidebar-logout" onClick={() => onLogout('Se cerró la sesión correctamente.')}>Cerrar sesión</button></aside><div className="alumno-content"><div className="alumno-section-header"><div><p className="panel-kicker">Área del alumno</p><h2>{titulo}</h2></div>{loading && <span className="panel-sub">Actualizando…</span>}</div>{contenido()}</div></div>}</section>;
 }

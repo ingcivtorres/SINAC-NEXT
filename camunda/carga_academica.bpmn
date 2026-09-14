@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" targetNamespace="http://sinac.cinvestav.mx">
+  <process id="carga_academica" name="Aprobación de carga académica" isExecutable="true" camunda:historyTimeToLive="365">
+    <startEvent id="inicio" name="Carga enviada a revisión"/>
+    <sequenceFlow id="f1" sourceRef="inicio" targetRef="revision"/>
+    <userTask id="revision" name="Revisar carga académica" camunda:candidateGroups="coordinacion"/>
+    <sequenceFlow id="f2" sourceRef="revision" targetRef="decision"/>
+    <exclusiveGateway id="decision" name="¿Aprobada?"/>
+    <sequenceFlow id="rechazo" sourceRef="decision" targetRef="finRechazada"><conditionExpression xsi:type="tFormalExpression">${aprobada == false}</conditionExpression></sequenceFlow>
+    <sequenceFlow id="aprobacion" sourceRef="decision" targetRef="publicacion"><conditionExpression xsi:type="tFormalExpression">${aprobada == true}</conditionExpression></sequenceFlow>
+    <endEvent id="finRechazada" name="Carga rechazada"/>
+    <userTask id="publicacion" name="Publicar carga académica" camunda:candidateGroups="coordinacion"/>
+    <sequenceFlow id="f3" sourceRef="publicacion" targetRef="finPublicada"/>
+    <endEvent id="finPublicada" name="Carga publicada"/>
+  </process>
+</definitions>

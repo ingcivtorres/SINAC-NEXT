@@ -45,6 +45,7 @@ export const translations = {
     'role.docente': 'Docente',
     'role.director': 'Director de Tesis',
     'role.admin': 'Administrador',
+    'role.servicios': 'Servicios Escolares',
 
     // Home
     'home.title': 'Bienvenido a SINAC NEXT',
@@ -101,6 +102,7 @@ export const translations = {
     'role.docente': 'Teacher',
     'role.director': 'Thesis Director',
     'role.admin': 'Administrator',
+    'role.servicios': 'School Services',
 
     // Home
     'home.title': 'Welcome to SINAC NEXT',
