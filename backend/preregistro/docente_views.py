@@ -1,4 +1,6 @@
 """Panel de docentes y endpoints para gestión de calificaciones y cursos."""
+import logging
+
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,6 +8,20 @@ import requests
 from django.conf import settings
 from .models import Aspirante, Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual
 from .serializers import MateriaSerializer, InscripcionSerializer, SolicitudAcademicaSerializer, ExamenEnLineaSerializer, EntrevistaVirtualSerializer
+from .views import _registrar_seguimiento
+
+logger = logging.getLogger(__name__)
+
+
+def _es_docente(user):
+    return bool(user and str(getattr(user, 'rol', '')).strip().lower() in ('docente', 'teacher'))
+
+
+def _entrevista_permitida(docente, entrevista):
+    return Inscripcion.objects.filter(
+        materia__profesor__iexact=(docente.nombre or '').strip(),
+        aspirante=entrevista.aspirante,
+    ).exists()
 
 
 class PanelDocenteView(APIView):
@@ -62,6 +78,7 @@ class PanelDocenteView(APIView):
                 'usuario': docente.usuario,
                 'programa': docente.programa,
                 'unidad': docente.unidad,
+                'profile_photo': docente.profile_photo.url if docente.profile_photo else None,
             },
             'materias': MateriaSerializer(materias, many=True).data,
             'inscripciones': InscripcionSerializer(inscripciones, many=True).data,
@@ -90,12 +107,12 @@ class DocenteCatalogoMateriasView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.rol != 'docente':
+        if not _es_docente(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         return Response(MateriaSerializer(Materia.objects.all().order_by('clave'), many=True).data)
 
     def patch(self, request, pk):
-        if request.user.rol != 'docente':
+        if not _es_docente(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         try:
             materia = Materia.objects.get(pk=pk)
@@ -103,9 +120,14 @@ class DocenteCatalogoMateriasView(APIView):
             return Response({'detail': 'Materia no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
         if materia.profesor and materia.profesor.lower() != request.user.nombre.lower():
             return Response({'detail': 'Esta materia ya fue asignada a otro docente.'}, status=status.HTTP_409_CONFLICT)
+        salon = (request.data.get('salon') or '').strip()
+        if salon not in dict(Materia.SALONES):
+            return Response({'salon': 'Selecciona un salón válido.'}, status=status.HTTP_400_BAD_REQUEST)
         materia.profesor = request.user.nombre
         materia.horario = (request.data.get('horario') or '').strip()
-        materia.save(update_fields=['profesor', 'horario'])
+        materia.salon = salon
+        materia.capacidad = 42
+        materia.save(update_fields=['profesor', 'horario', 'salon', 'capacidad'])
         return Response(MateriaSerializer(materia).data)
 
 
@@ -116,7 +138,7 @@ class DocenteMateriaView(APIView):
     def get(self, request, pk):
         """Obtiene estudiantes inscritos en una materia."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -145,7 +167,7 @@ class CalificacionesView(APIView):
     def post(self, request):
         """Registra o actualiza calificaciones de estudiantes."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         inscripcion_id = request.data.get('inscripcion_id')
@@ -197,7 +219,7 @@ class CalificacionesView(APIView):
     def put(self, request, pk):
         """Actualiza calificación de una inscripción específica."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -239,7 +261,7 @@ class ActasCalificacionesView(APIView):
     def get(self, request, materia_id):
         """Genera un acta de calificaciones de una materia."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -279,7 +301,7 @@ class DocenteExamenView(APIView):
     def get(self, request):
         """Lista todos los exámenes en línea asociados al docente."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(
                 {'error': 'No tienes permisos de docente.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -310,7 +332,7 @@ class DocenteExamenView(APIView):
     def put(self, request, pk):
         """Actualiza el estado de un examen."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(
                 {'error': 'No tienes permisos de docente.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -353,6 +375,7 @@ class DocenteExamenView(APIView):
                 if not (0 <= calificacion <= 10):
                     raise ValueError('La calificación debe estar entre 0 y 10.')
                 examen.calificacion = calificacion
+                examen.estado = 'aprobado' if calificacion >= 8 else 'reprobado'
             except (ValueError, TypeError) as e:
                 return Response(
                     {'error': f'Calificación inválida: {str(e)}'},
@@ -379,7 +402,7 @@ class DocenteExamenDetailView(APIView):
     def get(self, request, pk):
         """Obtiene detalle de un examen."""
         docente = request.user
-        if docente.rol != 'docente':
+        if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -408,14 +431,14 @@ class DocenteEntrevistaView(APIView):
         """Obtener lista de entrevistas de los estudiantes del docente."""
         try:
             docente = request.user
-            if not isinstance(docente, Aspirante):
+            if not isinstance(docente, Aspirante) or not _es_docente(docente):
                 return Response(
                     {'error': 'Usuario no válido'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
             
             # Obtener materias donde es profesor
-            materias = Materia.objects.filter(profesor__icontains=docente.nombre)
+            materias = Materia.objects.filter(profesor__iexact=docente.nombre)
             
             # Obtener todas las inscripciones (estudiantes) en esas materias
             inscripciones = Inscripcion.objects.filter(materia__in=materias)
@@ -444,9 +467,10 @@ class DocenteEntrevistaView(APIView):
                     'entrevistas_completadas': entrevistas_completadas,
                 }
             })
-        except Exception as e:
+        except Exception:
+            logger.exception('Error al consultar entrevistas del docente %s', request.user.pk)
             return Response(
-                {'error': str(e)},
+                {'error': 'No se pudieron cargar las entrevistas del docente.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -454,7 +478,7 @@ class DocenteEntrevistaView(APIView):
         """Crear nueva entrevista virtual."""
         try:
             docente = request.user
-            if not isinstance(docente, Aspirante):
+            if not isinstance(docente, Aspirante) or not _es_docente(docente):
                 return Response(
                     {'error': 'Usuario no válido'},
                     status=status.HTTP_403_FORBIDDEN,
@@ -476,7 +500,7 @@ class DocenteEntrevistaView(APIView):
                 )
             
             # Verificar que el docente tenga relación con el estudiante
-            materias = Materia.objects.filter(profesor__icontains=docente.nombre)
+            materias = Materia.objects.filter(profesor__iexact=docente.nombre)
             inscripciones = Inscripcion.objects.filter(
                 materia__in=materias,
                 aspirante=aspirante
@@ -501,7 +525,14 @@ class DocenteEntrevistaView(APIView):
             
             serializer = EntrevistaVirtualSerializer(data=entrevista_data)
             if serializer.is_valid():
-                entrevista = serializer.save(aspirante=aspirante)
+                # Los datos de la videoconferencia son generados por el servidor;
+                # al ser campos de solo lectura del serializer deben pasarse
+                # explícitamente al guardar la entrevista.
+                entrevista = serializer.save(
+                    aspirante=aspirante,
+                    jitsi_room_id=jitsi_room_id,
+                    jitsi_room_link=jitsi_room_link,
+                )
                 base = getattr(settings, 'CAMUNDA_REST_URL', '')
                 if base:
                     try:
@@ -510,12 +541,14 @@ class DocenteEntrevistaView(APIView):
                             entrevista.camunda_instance_id = r.json().get('id', ''); entrevista.save(update_fields=['camunda_instance_id','updated_at'])
                     except requests.RequestException:
                         pass
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+                _registrar_seguimiento(aspirante, 'entrevista_programada', f'Entrevista virtual programada para {entrevista.fecha_programada or "fecha pendiente"}.', 'Docencia', notificar=False)
+                return Response(EntrevistaVirtualSerializer(entrevista).data, status=status.HTTP_201_CREATED)
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
+        except Exception:
+            logger.exception('Error al crear entrevista para el docente %s', request.user.pk)
             return Response(
-                {'error': str(e)},
+                {'error': 'No se pudo crear la entrevista virtual.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -531,12 +564,9 @@ class DocenteEntrevistaView(APIView):
         
         # Verificar permisos
         docente = request.user
-        materias = Materia.objects.filter(profesor__icontains=docente.nombre)
-        inscripciones = Inscripcion.objects.filter(
-            materia__in=materias,
-            aspirante=entrevista.aspirante
-        )
-        if not inscripciones.exists():
+        if not isinstance(docente, Aspirante) or not _es_docente(docente):
+            return Response({'error': 'Solo un docente puede actualizar entrevistas.'}, status=status.HTTP_403_FORBIDDEN)
+        if not _entrevista_permitida(docente, entrevista):
             return Response(
                 {'error': 'No tienes permiso para actualizar esta entrevista'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -551,7 +581,21 @@ class DocenteEntrevistaView(APIView):
                     {'error': f'Estado inválido. Debe ser uno de: {", ".join(valid_estados)}'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            transiciones = {
+                'programada': {'programada', 'iniciada', 'cancelada'},
+                'iniciada': {'iniciada', 'completada', 'cancelada'},
+                'completada': {'completada'},
+                'cancelada': {'cancelada'},
+            }
+            if estado not in transiciones.get(entrevista.estado, set()):
+                return Response({'error': f'No se puede pasar de {entrevista.get_estado_display()} a {dict(EntrevistaVirtual.ESTADOS_ENTREVISTA).get(estado, estado)}.'}, status=status.HTTP_400_BAD_REQUEST)
             entrevista.estado = estado
+            if estado == 'iniciada' and not entrevista.fecha_inicio:
+                from django.utils import timezone
+                entrevista.fecha_inicio = timezone.now()
+            if estado in ('completada', 'cancelada') and not entrevista.fecha_fin:
+                from django.utils import timezone
+                entrevista.fecha_fin = timezone.now()
         
         if 'notas_docente' in request.data:
             entrevista.notas_docente = request.data.get('notas_docente')
@@ -576,6 +620,7 @@ class DocenteEntrevistaView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
+        _registrar_seguimiento(entrevista.aspirante, f'entrevista_{entrevista.estado}', f'La entrevista “{entrevista.titulo}” ahora está {entrevista.get_estado_display().lower()}.', 'Docencia', notificar=False)
         return Response(EntrevistaVirtualSerializer(entrevista).data)
 
 
@@ -596,12 +641,9 @@ class DocenteEntrevistaDetailView(APIView):
         
         # Verificar permisos
         docente = request.user
-        materias = Materia.objects.filter(profesor__icontains=docente.nombre)
-        inscripciones = Inscripcion.objects.filter(
-            materia__in=materias,
-            aspirante=entrevista.aspirante
-        )
-        if not inscripciones.exists():
+        if not isinstance(docente, Aspirante) or not _es_docente(docente):
+            return Response({'error': 'Solo un docente puede consultar entrevistas.'}, status=status.HTTP_403_FORBIDDEN)
+        if not _entrevista_permitida(docente, entrevista):
             return Response(status=status.HTTP_403_FORBIDDEN)
         
         return Response(EntrevistaVirtualSerializer(entrevista).data)

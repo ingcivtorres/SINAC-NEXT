@@ -34,6 +34,11 @@ services:
     environment:
       CAMUNDA_URL: http://camunda:8080
       CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: camunda
+      DB_USER: camunda
+      DB_PASSWORD: camunda
     command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
     ports:
       - "8000:8000"
@@ -42,6 +47,31 @@ services:
     volumes:
       - documentos_media:/app/media
       - ./frontend/src/assets:/app/frontend_assets:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  alertas:
+    build:
+      context: ./backend
+    container_name: sinac-alertas
+    environment:
+      CAMUNDA_URL: http://camunda:8080
+      CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: camunda
+      DB_USER: camunda
+      DB_PASSWORD: camunda
+      TZ: America/Mexico_City
+    command: sh -c "while true; do if python manage.py generar_alertas_automatizadas; then sleep 86400; else sleep 60; fi; done"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     build:

@@ -8,16 +8,16 @@ import civSur from '../assets/civsur.jpg';
 import civZaca from '../assets/civzaca.jpg';
 
 const centers = [
-  {name: 'Cinvestav Unidad Mérida', desc: 'Centro especializado en biotecnología.', image: civMerida},
-  {name: 'Cinvestav Unidad Guadalajara', desc: 'Investigación en electrónica y robótica.', image: civGuadalajara},
-  {name: 'Cinvestav Unidad Monterrey', desc: 'Innovación en tecnología industrial.', image: civMont},
-  {name: 'Cinvestav Unidad Querétaro', desc: 'Desarrollo de soluciones de ingeniería avanzada.', image: civQuere},
-  {name: 'Cinvestav Unidad Saltillo', desc: 'Investigación aplicada a procesos productivos.', image: civSaltillo},
-  {name: 'Cinvestav Unidad CDMX Sur', desc: 'Educación e investigación en ciencias sociales.', image: civSur},
-  {name: 'Cinvestav Unidad CDMX Zacatenco', desc: 'Centro de desarrollo tecnológico e ingeniería.', image: civZaca}
+  {name: 'Cinvestav Unidad Mérida', descriptionKey: 'home.center.merida', image: civMerida},
+  {name: 'Cinvestav Unidad Guadalajara', descriptionKey: 'home.center.guadalajara', image: civGuadalajara},
+  {name: 'Cinvestav Unidad Monterrey', descriptionKey: 'home.center.monterrey', image: civMont},
+  {name: 'Cinvestav Unidad Querétaro', descriptionKey: 'home.center.queretaro', image: civQuere},
+  {name: 'Cinvestav Unidad Saltillo', descriptionKey: 'home.center.saltillo', image: civSaltillo},
+  {name: 'Cinvestav Unidad CDMX Sur', descriptionKey: 'home.center.sur', image: civSur},
+  {name: 'Cinvestav Unidad CDMX Zacatenco', descriptionKey: 'home.center.zacatenco', image: civZaca}
 ];
 
-export default function Carousel(){
+export default function Carousel({t}){
   const [idx, setIdx] = useState(0);
   useEffect(()=>{
     const t = setInterval(()=> setIdx(i => (i+1)%centers.length), 3500);
@@ -31,7 +31,7 @@ export default function Carousel(){
       </div>
       <div className="carousel-item">
         <h2>{centers[idx].name}</h2>
-        <p>{centers[idx].desc}</p>
+        <p>{t(centers[idx].descriptionKey)}</p>
       </div>
       <div className="carousel-dots">
         {centers.map((c,i)=>(

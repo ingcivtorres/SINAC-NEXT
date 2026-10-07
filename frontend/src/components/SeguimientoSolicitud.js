@@ -1,52 +1,24 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React from 'react';
+import {useApplicantCopy} from './aspirantPanelTranslations';
 
-const ETIQUETAS = {
-  pendiente: 'Pre-registro recibido',
-  iniciado: 'Proceso iniciado',
-  revision: 'En revisión',
-  aceptado: 'Aceptado',
-};
-
-function fecha(valor) {
-  return new Intl.DateTimeFormat('es-MX', {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(valor));
+function fecha(valor, locale) {
+  return new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(valor));
 }
 
-export default function SeguimientoSolicitud({session}) {
-  const [seguimiento, setSeguimiento] = useState(null);
-  const [error, setError] = useState('');
-  const [cargando, setCargando] = useState(true);
-
-  const cargar = useCallback(async (signal) => {
-    setError('');
-    try {
-      const response = await fetch('/api/preregistro/seguimiento/', {headers: {Authorization: `Bearer ${session.access}`}, signal});
-      if (!response.ok) throw new Error('No se pudo consultar el seguimiento de tu solicitud.');
-      setSeguimiento(await response.json());
-    } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message || 'No se pudo consultar el seguimiento.');
-    } finally {
-      if (!signal.aborted) setCargando(false);
-    }
-  }, [session.access]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    cargar(controller.signal);
-    return () => controller.abort();
-  }, [cargar]);
-
+export default function SeguimientoSolicitud({seguimiento, cargando = false, onActualizar}) {
+  const copy = useApplicantCopy();
+  const labelEstado = (estado) => copy.stages[estado] || estado;
   return <div id="panel-proceso" role="tabpanel" className="panel-grid">
     <div className="panel-card panel-card--wide">
       <div className="seguimiento-head">
         <div>
-          <h3>Seguimiento de tu solicitud</h3>
-          <p>Consulta los cambios registrados en tu proceso de admisión.</p>
+          <h3>{copy.followup.title}</h3>
+          <p>{copy.followup.intro}</p>
         </div>
-        <button type="button" className="qa-btn" onClick={() => cargar(new AbortController().signal)}>Actualizar</button>
+        <button type="button" className="qa-btn" onClick={onActualizar}>{copy.followup.update}</button>
       </div>
-      {error && <div className="api-error" role="alert">{error}</div>}
       {cargando && !seguimiento ? (
-        <p>Cargando seguimiento...</p>
+        <p>{copy.followup.loading}</p>
       ) : (
         <div className="seguimiento-timeline">
           {(seguimiento?.eventos || []).length ? (
@@ -54,25 +26,25 @@ export default function SeguimientoSolicitud({session}) {
               <article className="seguimiento-evento" key={evento.id}>
                 <span className={`seguimiento-dot estado-${evento.estado}`}/>
                 <div>
-                  <div className="seguimiento-evento-head"><strong>{ETIQUETAS[evento.estado] || evento.estado}</strong><time>{fecha(evento.created_at)}</time></div>
+                  <div className="seguimiento-evento-head"><strong>{labelEstado(evento.estado)}</strong><time>{fecha(evento.created_at, copy.locale)}</time></div>
                   <p>{evento.detalle}</p>
                   <small>{evento.origen}</small>
                 </div>
               </article>
             ))
           ) : (
-            <p className="empty-state">Aún no hay movimientos registrados.</p>
+            <p className="empty-state">{copy.followup.empty}</p>
           )}
         </div>
       )}
     </div>
     {seguimiento && (
       <div className="panel-card">
-        <h3>Enlace LIDA</h3>
+        <h3>{copy.followup.lida}</h3>
         <div className="lida-trace">
-          <div className="trace-row"><span className="trace-key">Estado actual</span><span className={`estado-badge estado-${seguimiento.estado_actual}`}>{ETIQUETAS[seguimiento.estado_actual] || seguimiento.estado_actual}</span></div>
-          <div className="trace-row"><span className="trace-key">Business Key</span><code className="trace-val">{seguimiento.business_key || '—'}</code></div>
-          <div className="trace-row"><span className="trace-key">Instancia Camunda</span><code className="trace-val">{seguimiento.camunda_instance_id || 'Pendiente de asignación'}</code></div>
+          <div className="trace-row"><span className="trace-key">{copy.followup.currentState}</span><span className={`estado-badge estado-${seguimiento.estado_actual}`}>{labelEstado(seguimiento.estado_actual)}</span></div>
+          <div className="trace-row"><span className="trace-key">{copy.followup.businessKey}</span><code className="trace-val">{seguimiento.business_key || '—'}</code></div>
+          <div className="trace-row"><span className="trace-key">{copy.followup.instance}</span><code className="trace-val">{seguimiento.camunda_instance_id || copy.followup.pendingAssignment}</code></div>
         </div>
       </div>
     )}

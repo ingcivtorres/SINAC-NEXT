@@ -1,10 +1,12 @@
 import csv
+import re
 import uuid
 import unicodedata
 from datetime import timedelta
 from django.db.models import Count, Avg, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.http import HttpResponse
 from django.http import FileResponse
 from io import BytesIO
@@ -54,6 +56,11 @@ def normalizar_rol(value):
     raw = str(value or '').strip().lower()
     normalized = ''.join(ch for ch in unicodedata.normalize('NFKD', raw) if not unicodedata.combining(ch))
     return ROLE_ALIASES.get(raw, ROLE_ALIASES.get(normalized, 'aspirante'))
+
+
+def validar_password(password):
+    value = str(password or '')
+    return len(value) >= 8 and bool(re.search(r'[A-Z]', value)) and bool(re.search(r'[a-z]', value)) and bool(re.search(r'[0-9]', value))
 
 
 def ip_cliente(request):
@@ -170,8 +177,8 @@ class AdminUsuariosView(APIView):
         rol = normalizar_rol(data.get('rol') or data.get('role'))
         if not nombre or not usuario or not correo or not password:
             return Response({'error': 'Nombre, usuario, correo y contraseña son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
-        if len(password) < 8:
-            return Response({'error': 'La contraseña debe tener al menos 8 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not validar_password(password):
+            return Response({'error': 'La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.'}, status=status.HTTP_400_BAD_REQUEST)
         if Aspirante.objects.filter(usuario__iexact=usuario).exists():
             return Response({'error': 'El nombre de usuario ya está registrado.'}, status=status.HTTP_400_BAD_REQUEST)
         if Aspirante.objects.filter(correo__iexact=correo).exists():
@@ -233,8 +240,8 @@ class AdminUsuarioDetailView(APIView):
             user.is_active = value if isinstance(value, bool) else str(value).lower() not in ('false', 'inactivo', 'inactive', '0')
         if data.get('password'):
             password = str(data['password'])
-            if len(password) < 8:
-                return Response({'error': 'La contraseña debe tener al menos 8 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not validar_password(password):
+                return Response({'error': 'La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.'}, status=status.HTTP_400_BAD_REQUEST)
             user.set_password(password)
         user.save()
         despues = serializar_usuario(user)
@@ -261,7 +268,7 @@ class AdminCatalogosView(APIView):
         return Response({
             'departamentos': departamentos, 'programas': programas,
             'roles': sorted(set(ROLE_ALIASES.values())),
-            'materias': list(Materia.objects.order_by('clave').values('id', 'clave', 'nombre', 'creditos', 'profesor', 'horario')),
+            'materias': list(Materia.objects.order_by('clave').values('id', 'clave', 'nombre', 'creditos', 'profesor', 'horario', 'salon', 'capacidad')),
             'periodos': list(PeriodoInscripcion.objects.order_by('-apertura').values('id', 'nombre', 'apertura', 'cierre', 'activo')),
         })
 
@@ -272,19 +279,39 @@ class AdminCatalogosView(APIView):
             nombre = str(request.data.get('nombre') or '').strip()
             if not clave or not nombre:
                 return Response({'error': 'Clave y nombre son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                creditos = int(request.data.get('creditos') or 4)
+                capacidad = int(request.data.get('capacidad') or 42)
+            except (TypeError, ValueError):
+                return Response({'error': 'Créditos y capacidad deben ser números válidos.'}, status=status.HTTP_400_BAD_REQUEST)
+            salon = str(request.data.get('salon') or 'salon_1').strip()
+            if creditos not in (4, 5, 7):
+                return Response({'error': 'Los créditos deben ser 4, 5 o 7.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not 1 <= capacidad <= 32767:
+                return Response({'error': 'La capacidad debe estar entre 1 y 32767.'}, status=status.HTTP_400_BAD_REQUEST)
+            if salon not in dict(Materia.SALONES):
+                return Response({'error': 'Selecciona un salón válido.'}, status=status.HTTP_400_BAD_REQUEST)
             materia, _ = Materia.objects.update_or_create(clave=clave, defaults={
-                'nombre': nombre, 'creditos': int(request.data.get('creditos') or 4),
+                'nombre': nombre, 'creditos': creditos, 'salon': salon, 'capacidad': capacidad,
                 'profesor': str(request.data.get('profesor') or ''), 'horario': str(request.data.get('horario') or ''),
             })
             registrar_auditoria(request, 'actualizacion_catalogo', 'Materia', materia.id, nuevos={'clave': materia.clave, 'nombre': materia.nombre})
-            return Response({'id': materia.id, 'clave': materia.clave, 'nombre': materia.nombre})
+            return Response({'id': materia.id, 'clave': materia.clave, 'nombre': materia.nombre, 'creditos': materia.creditos, 'salon': materia.salon, 'capacidad': materia.capacidad})
         if tipo == 'periodo':
             nombre = str(request.data.get('nombre') or '').strip()
-            apertura = request.data.get('apertura')
-            cierre = request.data.get('cierre')
+            apertura = parse_datetime(str(request.data.get('apertura') or ''))
+            cierre = parse_datetime(str(request.data.get('cierre') or ''))
             if not nombre or not apertura or not cierre:
-                return Response({'error': 'Nombre, apertura y cierre son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
-            periodo, _ = PeriodoInscripcion.objects.update_or_create(nombre=nombre, defaults={'apertura': apertura, 'cierre': cierre, 'activo': bool(request.data.get('activo', True))})
+                return Response({'error': 'Nombre, apertura y cierre son obligatorios y deben ser fechas válidas.'}, status=status.HTTP_400_BAD_REQUEST)
+            if timezone.is_naive(apertura): apertura = timezone.make_aware(apertura)
+            if timezone.is_naive(cierre): cierre = timezone.make_aware(cierre)
+            if apertura >= cierre:
+                return Response({'error': 'La apertura debe ser anterior al cierre.'}, status=status.HTTP_400_BAD_REQUEST)
+            activo = request.data.get('activo', True) in (True, 'true', '1', 1, 'si', 'sí')
+            traslape = PeriodoInscripcion.objects.filter(activo=True, apertura__lt=cierre, cierre__gt=apertura).exclude(nombre=nombre).exists()
+            if activo and traslape:
+                return Response({'error': 'El periodo se traslapa con otro periodo activo.'}, status=status.HTTP_409_CONFLICT)
+            periodo, _ = PeriodoInscripcion.objects.update_or_create(nombre=nombre, defaults={'apertura': apertura, 'cierre': cierre, 'activo': activo})
             registrar_auditoria(request, 'actualizacion_periodo', 'PeriodoInscripcion', periodo.id, nuevos={'nombre': periodo.nombre, 'activo': periodo.activo})
             return Response({'id': periodo.id, 'nombre': periodo.nombre, 'apertura': periodo.apertura, 'cierre': periodo.cierre, 'activo': periodo.activo})
         return Response({'error': 'Tipo de catálogo no soportado.'}, status=status.HTTP_400_BAD_REQUEST)

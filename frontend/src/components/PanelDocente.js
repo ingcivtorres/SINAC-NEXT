@@ -1,40 +1,44 @@
 import React, {useCallback, useEffect, useState} from 'react';
+import DashboardAnalitico from './DashboardAnalitico';
+import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
+import {useTeacherCopy} from './teacherPanelTranslations';
 
 const MENU_ITEMS = [
-  {id: 'overview', label: 'Resumen'},
-  {id: 'cursos', label: 'Mis Cursos'},
-  {id: 'carga', label: 'Mi carga académica'},
-  {id: 'catalogo', label: 'Elegir materia'},
-  {id: 'estudiantes', label: 'Estudiantes'},
-  {id: 'calificaciones', label: 'Calificaciones'},
-  {id: 'examenes', label: 'Exámenes'},
-  {id: 'entrevistas', label: 'Entrevistas'},
-  {id: 'solicitudes', label: 'Solicitudes'},
-  {id: 'reportes', label: 'Reportes'},
+  {label: 'overview', items: [['overview', 'Resumen', '▦']]},
+  {label: 'teaching', items: [['cursos', 'Mis cursos', '▤'], ['carga', 'Mi carga académica', '↗'], ['catalogo', 'Elegir materia', '◫'], ['estudiantes', 'Estudiantes', '♙']]},
+  {label: 'evaluation', items: [['calificaciones', 'Calificaciones', '✓'], ['examenes', 'Exámenes', '✦'], ['entrevistas', 'Entrevistas', '◷']]},
+  {label: 'followup', items: [['solicitudes', 'Solicitudes', '◈'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
 
-function etiquetaEstado(estado) {
-  const mapa = {
-    'cursando': 'Cursando',
-    'aprobada': 'Aprobada',
-    'reprobada': 'Reprobada',
-    'pendiente': 'Pendiente',
-    'aceptado': 'Aceptado',
-    'rechazado': 'Rechazado',
-    'programado': 'Programado',
-    'iniciado': 'Iniciado',
-    'completado': 'Completado',
-    'aprobado': 'Aprobado',
-    'cancelado': 'Cancelado',
-    'programada': 'Programada',
-    'iniciada': 'Iniciada',
-    'completada': 'Completada',
-    'cancelada': 'Cancelada',
-  };
-  return mapa[estado] || estado;
+function etiquetaEstado(estado, copy) {
+  return copy.status[estado] || estado || copy.common.pending;
+}
+
+function TablaAlumnosMateria({materia, inscripciones, copy, soloCalificaciones = false}) {
+  const alumnos = inscripciones.filter(inscripcion => inscripcion.materia === materia.id);
+  return <section className="docente-materia-section">
+    <div className="docente-materia-section-head">
+      <div><span className="materia-card-clave">{materia.clave}</span><h4>{materia.nombre}</h4><small>{copy.common.schedule}: {materia.horario || copy.common.notAssigned} · {alumnos.length} {copy.common.student}{alumnos.length === 1 ? '' : 's'}</small></div>
+    </div>
+    <div className="admin-table-wrap">
+      <table className="admin-table">
+        <thead><tr><th>{copy.common.student}</th><th>{copy.common.user}</th><th>{copy.common.program}</th>{!soloCalificaciones && <th>{copy.common.status}</th>}<th>{copy.common.partials} 1</th><th>{copy.common.partials} 2</th><th>{copy.common.partials} 3</th><th>{copy.common.final}</th><th>{copy.common.academicStatus}</th>{soloCalificaciones && <th>{copy.grading.lastUpdate}</th>}</tr></thead>
+        <tbody>{alumnos.length ? alumnos.map(inscripcion => <tr key={inscripcion.id}>
+          <td><strong>{inscripcion.aspirante?.nombre || 'N/A'}</strong></td>
+          <td>{inscripcion.aspirante?.usuario || 'N/A'}</td>
+          <td>{inscripcion.aspirante?.programa || 'N/A'}</td>
+          {!soloCalificaciones && <td><span className={`estado-badge estado-${inscripcion.estado}`}>{etiquetaEstado(inscripcion.estado, copy)}</span></td>}
+          <td>{inscripcion.parcial_1 ?? '-'}</td><td>{inscripcion.parcial_2 ?? '-'}</td><td>{inscripcion.parcial_3 ?? '-'}</td><td><strong>{inscripcion.calificacion ?? '-'}</strong></td>
+          <td><span className={`estado-badge estado-${inscripcion.calificacion == null ? 'cursando' : Number(inscripcion.calificacion) < 7 ? 'reprobada' : 'aprobada'}`}>{inscripcion.calificacion == null ? copy.status.cursando : Number(inscripcion.calificacion) < 7 ? copy.status.reprobada : copy.status.aprobada}</span></td>
+          {soloCalificaciones && <td>{inscripcion.updated_at ? new Intl.DateTimeFormat(copy.locale, {dateStyle: 'medium'}).format(new Date(inscripcion.updated_at)) : '-'}</td>}
+        </tr>) : <tr><td colSpan="9" className="docente-empty-cell">{copy.common.noStudents}</td></tr>}</tbody>
+      </table>
+    </div>
+  </section>;
 }
 
 export default function PanelDocente({session, onLogout}) {
+  const copy = useTeacherCopy();
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -44,21 +48,38 @@ export default function PanelDocente({session, onLogout}) {
   const [calificacionForm, setCalificacionForm] = useState({inscripcion_id: '', calificacion: '', parcial: '', numero_parcial: '1'});
   const [catalogo, setCatalogo] = useState([]);
   const [horarios, setHorarios] = useState({});
+  const [salones, setSalones] = useState({});
   const [periodo, setPeriodo] = useState(null);
+  const [mostrarEntrevistaForm, setMostrarEntrevistaForm] = useState(false);
+  const [entrevistaGuardando, setEntrevistaGuardando] = useState(false);
+  const [entrevistaForm, setEntrevistaForm] = useState({
+    aspirante_id: '',
+    proposito: 'seguimiento',
+    titulo: 'Entrevista virtual',
+    descripcion: '',
+    fecha_programada: '',
+    duracion_minutos: 30,
+  });
   async function leerJson(response, mensaje) { const tipo=response.headers.get('content-type')||''; if (!response.ok || !tipo.includes('application/json')) throw new Error(mensaje); return response.json(); }
   const [cargas, setCargas] = useState([]);
   const [periodoCarga, setPeriodoCarga] = useState('');
 
   async function cargarCargas() {
-    const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`} });
-    if (r.ok) setCargas(await r.json());
+    try {
+      const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`} });
+      const body = await r.json().catch(() => []);
+      if (!r.ok) throw new Error(body.detail || copy.load.loadError);
+      setCargas(body);
+    } catch (e) { setError(e.message || copy.load.loadError); }
   }
   useEffect(() => { if (activeSection === 'carga') cargarCargas(); }, [activeSection]);
   async function enviarCarga() {
-    const r = await fetch('/api/cargas-academicas/', {method:'POST', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({periodo: periodoCarga})});
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) return setError(body.detail || 'No se pudo enviar la carga.');
-    setPeriodoCarga(''); setError(''); cargarCargas();
+    try {
+      const r = await fetch('/api/cargas-academicas/', {method:'POST', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({periodo: periodoCarga})});
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
+      setPeriodoCarga(''); setError(''); cargarCargas();
+    } catch (e) { setError(e.message || copy.load.sendError); }
   }
 
   const cargarPanel = useCallback(async (signal) => {
@@ -70,24 +91,24 @@ export default function PanelDocente({session, onLogout}) {
         signal,
       });
       if (response.status === 401) {
-        onLogout('Tu sesión ha caducado. Vuelve a iniciar sesión.');
+        onLogout(copy.messages.expired);
         return;
       }
       if (response.status === 403) {
-        throw new Error('No tienes permisos de docente para acceder a este panel.');
+        throw new Error(copy.messages.permission);
       }
       if (!response.ok) {
         let detail = '';
         try { const body = await response.json(); detail = body.error || body.detail || ''; } catch (ignore) { /* respuesta no JSON */ }
-        throw new Error(detail || `No se pudo cargar el panel del docente (HTTP ${response.status}).`);
+        throw new Error(detail || `${copy.messages.loadError} (HTTP ${response.status}).`);
       }
-      setDatos(await leerJson(response, 'No se pudo cargar el panel del docente.'));
+      setDatos(await leerJson(response, copy.messages.loadError));
     } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message || 'No se pudo cargar el panel.');
+      if (err.name !== 'AbortError') setError(err.message || copy.messages.loadError);
     } finally {
       if (!signal.aborted) setCargando(false);
     }
-  }, [onLogout, session.access]);
+  }, [copy, onLogout, session.access]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -98,20 +119,22 @@ export default function PanelDocente({session, onLogout}) {
   useEffect(() => {
     if (activeSection !== 'catalogo') return;
     fetch('/api/docente/catalogo-materias/', {headers: {Authorization: `Bearer ${session.access}`}})
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('No se pudo cargar el catálogo.')))
+        .then(response => response.ok ? response.json() : Promise.reject(new Error(copy.messages.noCatalog)))
       .then(setCatalogo).catch(err => setError(err.message));
-  }, [activeSection, session.access]);
+      }, [activeSection, copy, session.access]);
   useEffect(() => { fetch('/api/periodos-inscripcion/', {headers:{Authorization:`Bearer ${session.access}`}}).then(r=>r.ok && (r.headers.get('content-type')||'').includes('application/json') ? r.json() : null).then(setPeriodo).catch(()=>setPeriodo(null)); }, [session.access]);
 
   async function seleccionarMateria(materia) {
     const horario = (horarios[materia.id] || '').trim();
-    if (!horario) { setError('Escribe el horario antes de seleccionar la materia.'); return; }
+    const salon = salones[materia.id] || materia.salon || '';
+    if (!horario) { setError(copy.courses.scheduleMissing); return; }
+    if (!salon) { setError(copy.courses.roomMissing); return; }
     try {
-      const response = await fetch(`/api/docente/catalogo-materias/${materia.id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({horario})});
-      if (response.status === 401) { onLogout('Tu sesión ha caducado.'); return; }
-      if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.detail || 'No se pudo asignar la materia.'); return; }
-      setError(''); setCatalogo(items => items.map(item => item.id === materia.id ? {...item, profesor: datos?.docente?.nombre || 'Docente', horario} : item));
-    } catch { setError('No se pudo conectar con el servidor.'); return; }
+      const response = await fetch(`/api/docente/catalogo-materias/${materia.id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({horario, salon})});
+      if (response.status === 401) { onLogout(copy.messages.expired); return; }
+      if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.detail || copy.courses.assignError); return; }
+      setError(''); setCatalogo(items => items.map(item => item.id === materia.id ? {...item, profesor: datos?.docente?.nombre || copy.brand, horario, salon} : item));
+    } catch { setError(copy.courses.connectionError); return; }
     cargarPanel(new AbortController().signal);
   }
 
@@ -123,7 +146,7 @@ export default function PanelDocente({session, onLogout}) {
   const handleCalificacionSubmit = async (event) => {
     event.preventDefault();
     if (!calificacionForm.inscripcion_id || !calificacionForm.calificacion) {
-      setError('Completa todos los campos.');
+      setError(copy.grading.studentRequired);
       return;
     }
 
@@ -139,7 +162,7 @@ export default function PanelDocente({session, onLogout}) {
 
       if (!response.ok) {
         const errData = (response.headers.get('content-type') || '').includes('application/json') ? await response.json().catch(() => ({})) : {};
-        setError(errData.error || 'No se pudo registrar la calificación.');
+        setError(errData.error || copy.grading.saveError);
         return;
       }
 
@@ -148,16 +171,100 @@ export default function PanelDocente({session, onLogout}) {
       setError('');
       cargarPanel(new AbortController().signal);
     } catch (err) {
-      setError(err.message || 'Error al registrar calificación.');
+      setError(err.message || copy.grading.saveError);
     }
   };
 
-  function exportarCalificaciones() {
-    if (!datos?.inscripciones?.length) {
-      setError('No hay estudiantes o calificaciones para exportar.');
+  async function programarEntrevista(event) {
+    event.preventDefault();
+    if (!entrevistaForm.aspirante_id || !entrevistaForm.fecha_programada) {
+      setError(copy.interviews.studentDateRequired);
       return;
     }
-    const encabezados = ['Estudiante', 'Usuario', 'Curso', 'Programa', 'Parcial 1', 'Parcial 2', 'Parcial 3', 'Final', 'Estado'];
+    setEntrevistaGuardando(true);
+    setError('');
+    try {
+      const response = await fetch('/api/docente/entrevistas/', {
+        method: 'POST',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ...entrevistaForm,
+          aspirante_id: Number(entrevistaForm.aspirante_id),
+          duracion_minutos: Number(entrevistaForm.duracion_minutos) || 30,
+          fecha_programada: new Date(entrevistaForm.fecha_programada).toISOString(),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || body.detail || copy.interviews.scheduleError);
+      }
+      setMostrarEntrevistaForm(false);
+      setEntrevistaForm({aspirante_id: '', proposito: 'seguimiento', titulo: 'Entrevista virtual', descripcion: '', fecha_programada: '', duracion_minutos: 30});
+      await cargarPanel(new AbortController().signal);
+    } catch (err) {
+      setError(err.message || copy.interviews.scheduleError);
+    } finally {
+      setEntrevistaGuardando(false);
+    }
+  }
+
+  async function actualizarEntrevista(id, cambios) {
+    setError('');
+    try {
+      const response = await fetch(`/api/docente/entrevistas/${id}/`, {
+        method: 'PUT',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify(cambios),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || body.detail || copy.interviews.updateError);
+      await cargarPanel(new AbortController().signal);
+    } catch (err) {
+      setError(err.message || copy.interviews.updateError);
+    }
+  }
+
+  async function actualizarExamen(id, cambios) {
+    setError('');
+    try {
+      const response = await fetch(`/api/docente/examenes/${id}/`, {
+        method: 'PUT',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify(cambios),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || body.detail || copy.exams.updateError);
+      await cargarPanel(new AbortController().signal);
+    } catch (err) { setError(err.message || copy.exams.updateError); }
+  }
+
+  function calificarExamen(examen) {
+    const valor = window.prompt(copy.exams.gradePrompt, examen.calificacion ?? '');
+    if (valor === null) return;
+    const calificacion = Number(valor);
+    if (!Number.isFinite(calificacion) || calificacion < 0 || calificacion > 10) {
+      setError(copy.exams.gradeRange);
+      return;
+    }
+    actualizarExamen(examen.id, {calificacion});
+  }
+
+  function cambiarEstadoEntrevista(entrevista, estado) {
+    let notas = entrevista.notas_docente || '';
+    if (estado === 'completada') {
+      const captura = window.prompt(copy.interviews.notesPrompt, notas);
+      if (captura === null) return;
+      notas = captura;
+    }
+    actualizarEntrevista(entrevista.id, {estado, notas_docente: notas});
+  }
+
+  function exportarCalificaciones() {
+    if (!datos?.inscripciones?.length) {
+      setError(copy.grading.courseLoad);
+      return;
+    }
+    const encabezados = copy.grading.exportHeaders;
     const escapar = valor => `"${String(valor ?? '').replace(/"/g, '""')}"`;
     const filas = datos.inscripciones.map(item => [
       item.aspirante?.nombre,
@@ -168,7 +275,7 @@ export default function PanelDocente({session, onLogout}) {
       item.parcial_2,
       item.parcial_3,
       item.calificacion,
-      etiquetaEstado(item.estado),
+      etiquetaEstado(item.estado, copy),
     ]);
     const contenido = [encabezados, ...filas].map(fila => fila.map(escapar).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([`\ufeff${contenido}`], {type: 'text/csv;charset=utf-8'}));
@@ -181,99 +288,83 @@ export default function PanelDocente({session, onLogout}) {
   }
 
   return (
-    <section className="admin-dashboard docente-dashboard" aria-label="Panel del docente">
+    <section className="admin-dashboard docente-dashboard" aria-label={copy.panel}>
       <aside className="admin-sidebar">
         <div className="admin-sidebar-header">
-          <div className="admin-brand-mark">D</div>
+            <div className="admin-brand-mark docente-brand-mark">{datos?.docente?.profile_photo ? <img style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit'}} src={fotoUrl(datos.docente.profile_photo)} alt={copy.brand} /> : 'D'}</div>
           <div>
-            <p className="panel-kicker">Sistema</p>
-            <h2>Docente</h2>
+            <p className="panel-kicker">{copy.operations}</p>
+            <h2>{copy.brand}</h2>
+            <small>{copy.brandSubtitle}</small>
           </div>
         </div>
 
-        <nav className="admin-menu" aria-label="Menú docente">
-          {MENU_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`admin-menu-item ${activeSection === item.id ? 'is-active' : ''}`}
-              onClick={() => setActiveSection(item.id)}
-            >
-              <span>{item.label}</span>
-              <small>
-                {item.id === 'cursos' && (datos?.resumen?.total_materias || 0)}
-                {item.id === 'estudiantes' && (datos?.resumen?.total_inscripciones || 0)}
-                {item.id === 'calificaciones' && (datos?.resumen?.total_inscripciones || 0)}
-                {item.id === 'examenes' && (datos?.resumen?.examenes_total || 0)}
-                {item.id === 'solicitudes' && (datos?.resumen?.solicitudes_pendientes || 0)}
-                {item.id === 'reportes' && '3'}
-              </small>
-            </button>
-          ))}
+        <nav className="admin-menu" aria-label={copy.panel}>
+          {MENU_ITEMS.map(group => <div className="docente-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button key={id} type="button" className={`admin-menu-item ${activeSection === id ? 'is-active' : ''}`} onClick={() => setActiveSection(id)}><i aria-hidden="true">{icon}</i><span>{copy.menu[id]}</span><small>{id === 'cursos' && (datos?.resumen?.total_materias || 0)}{id === 'estudiantes' && (datos?.resumen?.total_inscripciones || 0)}{id === 'calificaciones' && (datos?.resumen?.total_inscripciones || 0)}{id === 'examenes' && (datos?.resumen?.examenes_total || 0)}{id === 'solicitudes' && (datos?.resumen?.solicitudes_pendientes || 0)}{id === 'reportes' && '3'}</small></button>)}</div>)}
         </nav>
 
         <div className="admin-side-card">
-          <p>Desempeño</p>
+          <p>{copy.reports.kicker}</p>
           <strong>92.5%</strong>
-          <span>Calificaciones registradas</span>
+          <span>{copy.grading.lastUpdate}</span>
         </div>
 
-        <button type="button" className="admin-logout" onClick={() => onLogout('Se cerró la sesión correctamente.')}>Cerrar sesión</button>
+        <button type="button" className="admin-logout" onClick={() => onLogout(copy.logout)}>{copy.logout}</button>
       </aside>
 
       <main className="admin-main-panel">
         <header className="admin-topbar">
           <div>
-            <p className="panel-kicker">Docencia</p>
-            <h1>Panel de docente</h1>
+            <p className="panel-kicker">{copy.kicker}</p>
+            <h1>{copy.panel}</h1>
           </div>
           <div className="admin-top-actions">
-            <button type="button" className="btn-secondary" onClick={exportarCalificaciones}>Exportar</button>
-            <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ Registrar calificación</button>
+            <button type="button" className="btn-secondary" onClick={exportarCalificaciones}>{copy.common.export}</button>
+            <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ {copy.common.registerGrade}</button>
           </div>
         </header>
 
-        {periodo && <div className={`periodo-banner ${periodo.activo ? 'is-open' : ''}`}><strong>Inscripciones {periodo.activo ? 'abiertas' : 'cerradas'}: {periodo.nombre}</strong><span>{periodo.apertura ? new Date(periodo.apertura).toLocaleString('es-MX') : 'Fecha pendiente'} — {periodo.cierre ? new Date(periodo.cierre).toLocaleString('es-MX') : 'Fecha pendiente'}</span></div>}
+        {periodo && <div className={`periodo-banner ${periodo.activo ? 'is-open' : ''}`}><strong>{periodo.activo ? copy.load.open : copy.load.closed}: {periodo.nombre}</strong><span>{periodo.apertura ? new Date(periodo.apertura).toLocaleString(copy.locale) : copy.common.pending} — {periodo.cierre ? new Date(periodo.cierre).toLocaleString(copy.locale) : copy.common.pending}</span></div>}
 
         {error && <div className="api-error" role="alert">{error}</div>}
-        {cargando && !datos && <div className="panel-card">Cargando panel del docente...</div>}
+        {cargando && !datos && <div className="panel-card">{copy.loading}</div>}
 
         {activeSection !== 'overview' && (!datos || cargando) && (
-          <div className="panel-card">Cargando datos...</div>
+          <div className="panel-card">{copy.loadingData}</div>
         )}
 
         {activeSection === 'overview' && datos && (
           <>
             <div className="admin-stat-grid">
               <div className="admin-stat-card accent">
-                <span>Mis cursos</span>
+                <span>{copy.overview.courses}</span>
                 <strong>{datos.resumen.total_materias}</strong>
-                <small>Materias asignadas</small>
+                <small>{copy.overview.assigned}</small>
               </div>
               <div className="admin-stat-card">
-                <span>Estudiantes</span>
+                <span>{copy.overview.students}</span>
                 <strong>{datos.resumen.total_inscripciones}</strong>
-                <small>Total inscrito</small>
+                <small>{copy.overview.enrolled}</small>
               </div>
               <div className="admin-stat-card">
-                <span>Aprobados</span>
+                <span>{copy.overview.passed}</span>
                 <strong>{datos.resumen.inscripciones_aprobadas}</strong>
-                <small>Últimas sesiones</small>
+                <small>{copy.overview.recent}</small>
               </div>
               <div className="admin-stat-card">
-                <span>Exámenes</span>
+                <span>{copy.overview.exams}</span>
                 <strong>{datos.resumen.examenes_total}</strong>
-                <small>Total en línea</small>
+                <small>{copy.overview.online}</small>
               </div>
               <div className="admin-stat-card">
-                <span>Entrevistas</span>
+                <span>{copy.overview.interviews}</span>
                 <strong>{datos.resumen.entrevistas_total || 0}</strong>
-                <small>Total programadas</small>
+                <small>{copy.overview.scheduled}</small>
               </div>
               <div className="admin-stat-card">
-                <span>Solicitudes</span>
+                <span>{copy.overview.requests}</span>
                 <strong>{datos.resumen.solicitudes_pendientes}</strong>
-                <small>Pendientes de revisar</small>
+                <small>{copy.overview.toReview}</small>
               </div>
             </div>
 
@@ -281,8 +372,8 @@ export default function PanelDocente({session, onLogout}) {
               <div className="admin-card admin-card-wide">
                 <div className="admin-card-head">
                   <div>
-                    <p className="panel-kicker">Cursos</p>
-                    <h3>Mis materias este semestre</h3>
+                    <p className="panel-kicker">{copy.overview.courseKicker}</p>
+                    <h3>{copy.overview.mySubjects}</h3>
                   </div>
                 </div>
                 {datos.materias.length ? (
@@ -291,31 +382,31 @@ export default function PanelDocente({session, onLogout}) {
                       <div key={materia.id} className="materia-card" onClick={() => {setCursoSeleccionado(materia); setActiveSection('cursos');}}>
                         <h4>{materia.clave}</h4>
                         <p>{materia.nombre}</p>
-                        <small>Horario: {materia.horario || 'N/A'}</small>
+                        <small>{copy.common.schedule}: {materia.horario || '—'}</small>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="empty-state">No hay materias asignadas actualmente.</p>
+                  <p className="empty-state">{copy.common.noSubjects}</p>
                 )}
               </div>
 
               <div className="admin-card">
                 <div className="admin-card-head">
                   <div>
-                    <p className="panel-kicker">Actividad</p>
-                    <h3>Últimas solicitudes</h3>
+                    <p className="panel-kicker">{copy.overview.activity}</p>
+                    <h3>{copy.overview.recent}</h3>
                   </div>
                 </div>
                 <ul className="activity-list">
                   {datos.solicitudes.slice(0, 3).map((solicitud) => (
                     <li key={solicitud.id}>
                       <strong>{solicitud.get_tipo_display || solicitud.tipo}</strong>
-                      <span>{etiquetaEstado(solicitud.estado)}</span>
-                      <button type="button" className="icon-btn">Ver</button>
+                      <span>{etiquetaEstado(solicitud.estado, copy)}</span>
+                      <button type="button" className="icon-btn">{copy.common.view}</button>
                     </li>
                   ))}
-                  {datos.solicitudes.length === 0 && <li><strong>Sin solicitudes</strong><span>Todas resueltas</span><button type="button" className="icon-btn">OK</button></li>}
+                  {datos.solicitudes.length === 0 && <li><strong>{copy.common.noRequests}</strong><span>{copy.common.allResolved}</span><button type="button" className="icon-btn">OK</button></li>}
                 </ul>
               </div>
             </div>
@@ -323,35 +414,35 @@ export default function PanelDocente({session, onLogout}) {
         )}
 
         {activeSection === 'carga' && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">Flujo de aprobación</p><h3>Mi carga académica</h3></div><button type="button" className="btn-secondary" onClick={cargarCargas}>Actualizar</button></div><p>Envía tu propuesta de carga a Coordinación Académica para revisión.</p><div className="coord-action-row"><input className="coord-search" placeholder="Periodo escolar (ej. 2026-1)" value={periodoCarga} onChange={e=>setPeriodoCarga(e.target.value)} /><button type="button" className="btn-primary" disabled={!periodoCarga.trim()} onClick={enviarCarga}>Enviar a revisión</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Periodo</th><th>Estado</th></tr></thead><tbody>{cargas.length ? cargas.map(c=><tr key={c.id}><td>{c.periodo || 'Sin periodo'}</td><td><span className="estado-badge">{c.estado.replace('_',' ')}</span></td></tr>) : <tr><td colSpan="2">Aún no has enviado cargas académicas.</td></tr>}</tbody></table></div></div>
+          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.load.kicker}</p><h3>{copy.load.title}</h3></div><button type="button" className="btn-secondary" onClick={cargarCargas}>{copy.load.refresh}</button></div><p>{copy.load.intro}</p><div className="coord-action-row"><input className="coord-search" placeholder={copy.load.periodPlaceholder} value={periodoCarga} onChange={e=>setPeriodoCarga(e.target.value)} /><button type="button" className="btn-primary" disabled={!periodoCarga.trim()} onClick={enviarCarga}>{copy.load.send}</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.load.period}</th><th>{copy.common.status}</th></tr></thead><tbody>{cargas.length ? cargas.map(c=><tr key={c.id}><td>{c.periodo || copy.load.noPeriod}</td><td><span className="estado-badge">{etiquetaEstado(c.estado, copy)}</span></td></tr>) : <tr><td colSpan="2">{copy.load.noLoads}</td></tr>}</tbody></table></div></div>
         )}
 
         {activeSection === 'cursos' && datos && (
           <div className="admin-card">
             <div className="admin-card-head">
               <div>
-                <p className="panel-kicker">Cursos</p>
-                <h3>{cursoSeleccionado ? cursoSeleccionado.nombre : 'Mis materias'}</h3>
+                <p className="panel-kicker">{copy.courses.kicker}</p>
+                <h3>{cursoSeleccionado ? cursoSeleccionado.nombre : copy.courses.mySubjects}</h3>
               </div>
             </div>
 
             {cursoSeleccionado ? (
               <>
                 <div className="curso-detalles">
-                  <div><strong>Clave:</strong> {cursoSeleccionado.clave}</div>
-                  <div><strong>Horario:</strong> {cursoSeleccionado.horario || 'N/A'}</div>
-                  <button type="button" className="btn-secondary" onClick={() => setCursoSeleccionado(null)}>← Volver</button>
+                  <div><strong>{copy.courses.key}:</strong> {cursoSeleccionado.clave}</div>
+                  <div><strong>{copy.courses.schedule}:</strong> {cursoSeleccionado.horario || '—'}</div>
+                  <button type="button" className="btn-secondary" onClick={() => setCursoSeleccionado(null)}>← {copy.courses.back}</button>
                 </div>
-                <h4 style={{marginTop: '20px'}}>Estudiantes inscritos</h4>
+                <h4 style={{marginTop: '20px'}}>{copy.courses.enrolled}</h4>
                 <div className="admin-table-wrap">
                   <table className="admin-table">
                     <thead>
                       <tr>
-                        <th>Nombre</th>
-                        <th>Usuario</th>
-                        <th>Programa</th>
-                        <th>Estado</th>
-                          <th>Parcial 1</th><th>Parcial 2</th><th>Parcial 3</th><th>Final</th>
+                        <th>{copy.common.student}</th>
+                        <th>{copy.common.user}</th>
+                        <th>{copy.common.program}</th>
+                        <th>{copy.common.status}</th>
+                          <th>{copy.common.partials} 1</th><th>{copy.common.partials} 2</th><th>{copy.common.partials} 3</th><th>{copy.common.final}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -360,12 +451,12 @@ export default function PanelDocente({session, onLogout}) {
                           <td><strong>{inscripcion.aspirante.nombre || 'N/A'}</strong></td>
                           <td>{inscripcion.aspirante.usuario || 'N/A'}</td>
                           <td>{inscripcion.aspirante.programa || 'N/A'}</td>
-                          <td><span className={`estado-badge estado-${inscripcion.estado}`}>{etiquetaEstado(inscripcion.estado)}</span></td>
+                          <td><span className={`estado-badge estado-${inscripcion.estado}`}>{etiquetaEstado(inscripcion.estado, copy)}</span></td>
                           <td>{inscripcion.parcial_1 ?? '-'}</td><td>{inscripcion.parcial_2 ?? '-'}</td><td>{inscripcion.parcial_3 ?? '-'}</td><td><strong>{inscripcion.calificacion ?? '-'}</strong></td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
+        </tbody>
+      </table>
                 </div>
               </>
             ) : (
@@ -374,7 +465,7 @@ export default function PanelDocente({session, onLogout}) {
                   <div key={materia.id} className="materia-card" onClick={() => setCursoSeleccionado(materia)}>
                     <h4>{materia.clave}</h4>
                     <p>{materia.nombre}</p>
-                    <small>Horario: {materia.horario || 'N/A'}</small>
+                    <small>{copy.common.schedule}: {materia.horario || '—'}</small>
                   </div>
                 ))}
               </div>
@@ -383,87 +474,25 @@ export default function PanelDocente({session, onLogout}) {
         )}
 
         {activeSection === 'catalogo' && datos && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">Oferta académica</p><h3>Elige la materia que impartirás</h3></div></div><p className="panel-sub">Coordinación Académica carga el catálogo. Selecciona una materia disponible y registra el horario propuesto.</p><div className="materias-grid">{catalogo.map(materia => { const propia = materia.profesor && materia.profesor.toLowerCase() === datos.docente.nombre.toLowerCase(); const ocupada = Boolean(materia.profesor) && !propia; return <div key={materia.id} className={`materia-card ${propia ? 'is-selected' : ''}`}><span className="materia-card-clave">{materia.clave}</span><strong className="materia-card-nombre">{materia.nombre}</strong><small>Profesor: {materia.profesor || 'Disponible'}</small><input className="calificacion-form-input" disabled={ocupada} placeholder="Ej. lunes y miércoles 08:00-10:00" value={horarios[materia.id] ?? materia.horario ?? ''} onChange={event => setHorarios(previous => ({...previous, [materia.id]: event.target.value}))}/><button type="button" className="btn-primary" disabled={ocupada} onClick={() => seleccionarMateria(materia)}>{ocupada ? 'Asignada a otro docente' : propia ? 'Actualizar horario' : 'Seleccionar materia'}</button></div>; })}</div>{!catalogo.length && <p className="empty-state">Coordinación aún no ha cargado materias.</p>}</div>
+          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.courses.selectTitle}</p><h3>{copy.courses.choose}</h3></div></div><p className="panel-sub">{copy.courses.intro}</p><div className="materias-grid">{catalogo.map(materia => { const propia = materia.profesor && materia.profesor.toLowerCase() === datos.docente.nombre.toLowerCase(); const ocupada = Boolean(materia.profesor) && !propia; return <div key={materia.id} className={`materia-card ${propia ? 'is-selected' : ''}`}><span className="materia-card-clave">{materia.clave}</span><strong className="materia-card-nombre">{materia.nombre}</strong><small>{copy.courses.professor}: {materia.profesor || copy.courses.available} · {materia.inscritos || 0} {copy.courses.of} {materia.capacidad || 42} {copy.courses.students}</small><input className="calificacion-form-input" disabled={ocupada} placeholder={copy.courses.schedulePlaceholder} value={horarios[materia.id] ?? materia.horario ?? ''} onChange={event => setHorarios(previous => ({...previous, [materia.id]: event.target.value}))}/><select className="calificacion-form-input" disabled={ocupada} value={salones[materia.id] ?? materia.salon ?? ''} onChange={event => setSalones(previous => ({...previous, [materia.id]: event.target.value}))}><option value="">{copy.courses.selectRoom}</option><option value="salon_1">{copy.courses.roomOne}</option><option value="laboratorio_harold">{copy.courses.roomLab}</option><option value="sala_juntas">{copy.courses.meetingRoom}</option></select><button type="button" className="btn-primary" disabled={ocupada} onClick={() => seleccionarMateria(materia)}>{ocupada ? copy.courses.assignedElsewhere : propia ? copy.courses.updateSchedule : copy.courses.selectSubject}</button></div>; })}</div>{!catalogo.length && <p className="empty-state">{copy.courses.catalogEmpty}</p>}</div>
         )}
 
         {activeSection === 'estudiantes' && datos && (
           <div className="admin-card">
             <div className="admin-card-head">
-              <div>
-                <p className="panel-kicker">Gestión</p>
-                <h3>Mis estudiantes</h3>
-              </div>
+              <div><p className="panel-kicker">{copy.courses.kicker}</p><h3>{copy.menu.estudiantes}</h3><p className="panel-sub">{copy.courses.intro}</p></div>
             </div>
-
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Nombre</th>
-                    <th>Usuario</th>
-                    <th>Curso</th>
-                    <th>Programa</th>
-                    <th>Estado</th>
-                    <th>Parcial 1</th><th>Parcial 2</th><th>Parcial 3</th><th>Final</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {datos.inscripciones.map((inscripcion) => (
-                    <tr key={inscripcion.id}>
-                      <td><strong>{inscripcion.aspirante.nombre}</strong></td>
-                      <td>{inscripcion.aspirante.usuario}</td>
-                        <td>{inscripcion.materia_clave}</td>
-                      <td>{inscripcion.aspirante.programa}</td>
-                      <td><span className={`estado-badge estado-${inscripcion.estado}`}>{etiquetaEstado(inscripcion.estado)}</span></td>
-                      <td>{inscripcion.parcial_1 ?? '-'}</td>
-                      <td>{inscripcion.parcial_2 ?? '-'}</td>
-                      <td>{inscripcion.parcial_3 ?? '-'}</td>
-                      <td><strong>{inscripcion.calificacion ?? '-'}</strong></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <div className="docente-materias-sections">{datos.materias.length ? datos.materias.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
           </div>
         )}
 
         {activeSection === 'calificaciones' && datos && (
           <div className="admin-card">
             <div className="admin-card-head">
-              <div>
-                <p className="panel-kicker">Actas</p>
-                <h3>Registro de calificaciones</h3>
-              </div>
-              <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ Nueva calificación</button>
+              <div><p className="panel-kicker">{copy.grading.kicker}</p><h3>{copy.grading.title}</h3><p className="panel-sub">{copy.grading.intro}</p></div>
+              <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ {copy.common.newGrade}</button>
             </div>
-
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Estudiante</th>
-                    <th>Curso</th>
-                    <th>Parcial 1</th>
-                    <th>Parcial 2</th>
-                    <th>Parcial 3</th>
-                    <th>Final</th>
-                    <th>Estado</th>
-                    <th>Fecha de registro</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {datos.inscripciones.filter((i) => i.calificacion !== null || i.parcial_1 !== null || i.parcial_2 !== null || i.parcial_3 !== null).map((inscripcion) => (
-                    <tr key={inscripcion.id}>
-                      <td><strong>{inscripcion.aspirante.nombre}</strong></td>
-                      <td>{inscripcion.materia_clave}</td>
-                      <td>{inscripcion.parcial_1 ?? '-'}</td><td>{inscripcion.parcial_2 ?? '-'}</td><td>{inscripcion.parcial_3 ?? '-'}</td><td><strong>{inscripcion.calificacion ?? '-'}</strong></td>
-                      <td><span className={`estado-badge estado-${inscripcion.estado}`}>{etiquetaEstado(inscripcion.estado)}</span></td>
-                      <td>{new Intl.DateTimeFormat('es-MX', {dateStyle: 'medium'}).format(new Date(inscripcion.updated_at))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <div className="docente-materias-sections">{datos.materias.length ? datos.materias.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} soloCalificaciones />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
           </div>
         )}
 
@@ -471,8 +500,8 @@ export default function PanelDocente({session, onLogout}) {
           <div className="admin-card">
             <div className="admin-card-head">
               <div>
-                <p className="panel-kicker">Evaluación</p>
-                <h3>Exámenes en línea</h3>
+                <p className="panel-kicker">{copy.exams.kicker}</p>
+                <h3>{copy.exams.title}</h3>
               </div>
             </div>
 
@@ -480,12 +509,13 @@ export default function PanelDocente({session, onLogout}) {
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Estudiante</th>
-                    <th>Tipo de examen</th>
-                    <th>Fecha programada</th>
-                    <th>Estado</th>
-                    <th>Calificación</th>
-                    <th>Intentos</th>
+                    <th>{copy.exams.student}</th>
+                    <th>{copy.exams.type}</th>
+                    <th>{copy.exams.scheduled}</th>
+                    <th>{copy.exams.status}</th>
+                    <th>{copy.exams.grade}</th>
+                    <th>{copy.exams.attempts}</th>
+                    <th>{copy.exams.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -494,14 +524,15 @@ export default function PanelDocente({session, onLogout}) {
                       <tr key={examen.id}>
                         <td><strong>{examen.aspirante?.nombre || 'N/A'}</strong></td>
                         <td>{examen.tipo_label || examen.tipo}</td>
-                        <td>{examen.fecha_programada ? new Intl.DateTimeFormat('es-MX', {dateStyle: 'short', timeStyle: 'short'}).format(new Date(examen.fecha_programada)) : '-'}</td>
-                        <td><span className={`estado-badge estado-${examen.estado}`}>{etiquetaEstado(examen.estado)}</span></td>
+                        <td>{examen.fecha_programada ? new Intl.DateTimeFormat(copy.locale, {dateStyle: 'short', timeStyle: 'short'}).format(new Date(examen.fecha_programada)) : '-'}</td>
+                        <td><span className={`estado-badge estado-${examen.estado}`}>{etiquetaEstado(examen.estado, copy)}</span></td>
                         <td><strong>{examen.calificacion !== null ? examen.calificacion : '-'}</strong></td>
                         <td>{examen.intentos}/{examen.max_intentos}</td>
+                        <td><div className="table-action-group">{examen.estado === 'programado' && <button type="button" className="link-btn" onClick={() => actualizarExamen(examen.id, {estado: 'iniciado'})}>{copy.exams.start}</button>}{examen.estado === 'iniciado' && <button type="button" className="link-btn" onClick={() => actualizarExamen(examen.id, {estado: 'completado'})}>{copy.exams.finish}</button>}{!['cancelado', 'aprobado', 'reprobado'].includes(examen.estado) && <button type="button" className="link-btn" onClick={() => calificarExamen(examen)}>{copy.exams.gradeAction}</button>}</div></td>
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan="6" style={{textAlign: 'center', padding: '20px'}}>No hay exámenes en línea</td></tr>
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{copy.exams.none}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -513,21 +544,65 @@ export default function PanelDocente({session, onLogout}) {
           <div className="admin-card">
             <div className="admin-card-head">
               <div>
-                <p className="panel-kicker">Comunicación</p>
-                <h3>Entrevistas virtuales</h3>
+                <p className="panel-kicker">{copy.interviews.kicker}</p>
+                <h3>{copy.interviews.title}</h3>
               </div>
+              <button type="button" className="btn-primary" onClick={() => setMostrarEntrevistaForm(value => !value)}>
+                {mostrarEntrevistaForm ? copy.interviews.closeForm : `+ ${copy.interviews.schedule}`}
+              </button>
             </div>
+
+            {mostrarEntrevistaForm && (
+              <form className="entrevista-form" onSubmit={programarEntrevista}>
+                <div className="entrevista-form-grid">
+                  <label>{copy.interviews.student}
+                    <select value={entrevistaForm.aspirante_id} onChange={event => setEntrevistaForm({...entrevistaForm, aspirante_id: event.target.value})} required>
+                      <option value="">{copy.interviews.selectStudent}</option>
+                      {Array.from(new Map((datos.inscripciones || []).filter(item => item.aspirante?.id).map(item => [item.aspirante.id, item.aspirante])).values()).map(estudiante => (
+                        <option key={estudiante.id} value={estudiante.id}>{estudiante.nombre} ({estudiante.usuario})</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>{copy.interviews.purpose}
+                    <select value={entrevistaForm.proposito} onChange={event => setEntrevistaForm({...entrevistaForm, proposito: event.target.value})}>
+                      <option value="admision">{copy.interviews.purposeOptions.admision}</option>
+                      <option value="seguimiento">{copy.interviews.purposeOptions.seguimiento}</option>
+                      <option value="tutoria">{copy.interviews.purposeOptions.tutoria}</option>
+                      <option value="orientacion">{copy.interviews.purposeOptions.orientacion}</option>
+                      <option value="otro">{copy.interviews.purposeOptions.otro}</option>
+                    </select>
+                  </label>
+                  <label>{copy.interviews.titleField}
+                    <input value={entrevistaForm.titulo} onChange={event => setEntrevistaForm({...entrevistaForm, titulo: event.target.value})} maxLength="255" required />
+                  </label>
+                  <label>{copy.interviews.date}
+                    <input type="datetime-local" value={entrevistaForm.fecha_programada} onChange={event => setEntrevistaForm({...entrevistaForm, fecha_programada: event.target.value})} required />
+                  </label>
+                  <label>{copy.interviews.duration}
+                    <input type="number" min="15" max="240" step="15" value={entrevistaForm.duracion_minutos} onChange={event => setEntrevistaForm({...entrevistaForm, duracion_minutos: event.target.value})} />
+                  </label>
+                  <label className="entrevista-form-wide">{copy.interviews.description}
+                    <textarea rows="2" value={entrevistaForm.descripcion} onChange={event => setEntrevistaForm({...entrevistaForm, descripcion: event.target.value})} placeholder={copy.interviews.descriptionPlaceholder}/>
+                  </label>
+                </div>
+                <div className="entrevista-form-actions">
+                  <button type="submit" className="btn-primary" disabled={entrevistaGuardando}>{entrevistaGuardando ? copy.interviews.saving : copy.interviews.save}</button>
+                  <span className="form-hint">{copy.interviews.jitsi}</span>
+                </div>
+              </form>
+            )}
 
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Estudiante</th>
-                    <th>Propósito</th>
-                    <th>Fecha programada</th>
-                    <th>Estado</th>
-                    <th>Jitsi</th>
-                    <th>Notas</th>
+                    <th>{copy.interviews.student}</th>
+                    <th>{copy.interviews.purpose}</th>
+                    <th>{copy.interviews.scheduled}</th>
+                    <th>{copy.common.status}</th>
+                    <th>{copy.interviews.jitsiCol}</th>
+                    <th>{copy.interviews.notes}</th>
+                    <th>{copy.common.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -536,14 +611,22 @@ export default function PanelDocente({session, onLogout}) {
                       <tr key={entrevista.id}>
                         <td><strong>{entrevista.aspirante?.nombre || 'N/A'}</strong></td>
                         <td>{entrevista.proposito_label || entrevista.proposito}</td>
-                        <td>{entrevista.fecha_programada ? new Intl.DateTimeFormat('es-MX', {dateStyle: 'short', timeStyle: 'short'}).format(new Date(entrevista.fecha_programada)) : '-'}</td>
-                        <td><span className={`estado-badge estado-${entrevista.estado}`}>{etiquetaEstado(entrevista.estado)}</span></td>
-                        <td>{entrevista.jitsi_room_link ? <a href={entrevista.jitsi_room_link} target="_blank" rel="noopener noreferrer" style={{color: '#0066cc'}}>Abrir sala</a> : '-'}</td>
-                        <td><small>{entrevista.notas_docente ? entrevista.notas_docente.substring(0, 50) + '...' : '-'}</small></td>
+                        <td>{entrevista.fecha_programada ? new Intl.DateTimeFormat(copy.locale, {dateStyle: 'short', timeStyle: 'short'}).format(new Date(entrevista.fecha_programada)) : '-'}</td>
+                        <td><span className={`estado-badge estado-${entrevista.estado}`}>{etiquetaEstado(entrevista.estado, copy)}</span></td>
+                        <td>{entrevista.jitsi_room_link && ['iniciada', 'completada'].includes(entrevista.estado) ? <a href={entrevista.jitsi_room_link} target="_blank" rel="noopener noreferrer" style={{color: '#0066cc'}}>{copy.interviews.join}</a> : (entrevista.estado === 'programada' ? copy.interviews.available : '-')}</td>
+                        <td><small>{entrevista.notas_docente ? entrevista.notas_docente.substring(0, 50) + (entrevista.notas_docente.length > 50 ? '…' : '') : '-'}</small></td>
+                        <td>
+                          <div className="table-action-group">
+                            {entrevista.estado === 'programada' && <button type="button" className="link-btn" onClick={() => cambiarEstadoEntrevista(entrevista, 'iniciada')}>{copy.interviews.start}</button>}
+                            {entrevista.estado === 'iniciada' && <button type="button" className="link-btn" onClick={() => cambiarEstadoEntrevista(entrevista, 'completada')}>{copy.interviews.finish}</button>}
+                            {['programada', 'iniciada'].includes(entrevista.estado) && <button type="button" className="link-btn danger" onClick={() => cambiarEstadoEntrevista(entrevista, 'cancelada')}>{copy.interviews.cancel}</button>}
+                            {['completada', 'cancelada'].includes(entrevista.estado) && <span className="form-hint">{copy.interviews.noActions}</span>}
+                          </div>
+                        </td>
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan="6" style={{textAlign: 'center', padding: '20px'}}>No hay entrevistas virtuales</td></tr>
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{copy.interviews.none}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -555,8 +638,8 @@ export default function PanelDocente({session, onLogout}) {
           <div className="admin-card">
             <div className="admin-card-head">
               <div>
-                <p className="panel-kicker">Gestión</p>
-                <h3>Solicitudes académicas</h3>
+                <p className="panel-kicker">{copy.requests.kicker}</p>
+                <h3>{copy.requests.title}</h3>
               </div>
             </div>
 
@@ -564,11 +647,11 @@ export default function PanelDocente({session, onLogout}) {
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Estudiante</th>
-                    <th>Tipo de solicitud</th>
-                    <th>Comentario</th>
-                    <th>Estado</th>
-                    <th>Fecha</th>
+                    <th>{copy.requests.student}</th>
+                    <th>{copy.requests.type}</th>
+                    <th>{copy.requests.comment}</th>
+                    <th>{copy.requests.status}</th>
+                    <th>{copy.requests.date}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -577,8 +660,8 @@ export default function PanelDocente({session, onLogout}) {
                       <td><strong>{solicitud.aspirante?.nombre || 'N/A'}</strong></td>
                       <td>{solicitud.tipo_label || solicitud.tipo}</td>
                       <td>{solicitud.comentario || '-'}</td>
-                      <td><span className={`estado-badge estado-${solicitud.estado}`}>{etiquetaEstado(solicitud.estado)}</span></td>
-                      <td>{new Intl.DateTimeFormat('es-MX', {dateStyle: 'medium'}).format(new Date(solicitud.created_at))}</td>
+                      <td><span className={`estado-badge estado-${solicitud.estado}`}>{etiquetaEstado(solicitud.estado, copy)}</span></td>
+                      <td>{new Intl.DateTimeFormat(copy.locale, {dateStyle: 'medium'}).format(new Date(solicitud.created_at))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -587,34 +670,37 @@ export default function PanelDocente({session, onLogout}) {
           </div>
         )}
 
+        {activeSection === 'perfil' && datos && <PerfilAspirante perfil={{...datos.docente, telefono: datos.docente.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, docente: {...actual.docente, ...actualizado}}))} />}
+
         {activeSection === 'reportes' && datos && (
           <div className="admin-grid-layout">
+            <DashboardAnalitico title={copy.reports.analytics} description={copy.reports.description} metrics={[{label:copy.reports.courses, value:datos.resumen.total_materias}, {label:copy.reports.students, value:datos.resumen.total_inscripciones}, {label:copy.reports.exams, value:datos.resumen.examenes_total}, {label:copy.reports.interviews, value:datos.resumen.entrevistas_total}]} distribution={[{label:copy.reports.passed, value:datos.resumen.inscripciones_aprobadas}, {label:copy.reports.failed, value:datos.resumen.inscripciones_reprobadas}, {label:copy.reports.completedExams, value:datos.resumen.examenes_completados}, {label:copy.reports.completedInterviews, value:datos.resumen.entrevistas_completadas}]} />
             <div className="admin-card">
               <div className="admin-card-head">
                 <div>
-                  <p className="panel-kicker">Desempeño</p>
-                  <h3>Estadísticas generales</h3>
+                  <p className="panel-kicker">{copy.reports.kicker}</p>
+                  <h3>{copy.reports.title}</h3>
                 </div>
               </div>
               <div className="report-list">
-                <div><span>Total de estudiantes</span><strong>{datos.resumen.total_inscripciones}</strong></div>
-                <div><span>Aprobados</span><strong>{datos.resumen.inscripciones_aprobadas}</strong></div>
-                <div><span>Reprobados</span><strong>{datos.resumen.inscripciones_reprobadas}</strong></div>
+                <div><span>{copy.reports.totalStudents}</span><strong>{datos.resumen.total_inscripciones}</strong></div>
+                <div><span>{copy.reports.passed}</span><strong>{datos.resumen.inscripciones_aprobadas}</strong></div>
+                <div><span>{copy.reports.failed}</span><strong>{datos.resumen.inscripciones_reprobadas}</strong></div>
               </div>
             </div>
 
             <div className="admin-card">
               <div className="admin-card-head">
                 <div>
-                  <p className="panel-kicker">Datos</p>
-                  <h3>Información del docente</h3>
+                  <p className="panel-kicker">{copy.reports.kicker}</p>
+                  <h3>{copy.brand}</h3>
                 </div>
               </div>
               <div style={{padding: '16px'}}>
-                <div><strong>Nombre:</strong> {datos.docente.nombre}</div>
-                <div><strong>Usuario:</strong> {datos.docente.usuario}</div>
-                <div><strong>Programa:</strong> {datos.docente.programa}</div>
-                <div><strong>Unidad:</strong> {datos.docente.unidad}</div>
+                <div><strong>{copy.courses.name}:</strong> {datos.docente.nombre}</div>
+                <div><strong>{copy.common.user}:</strong> {datos.docente.usuario}</div>
+                <div><strong>{copy.common.program}:</strong> {datos.docente.programa}</div>
+                <div><strong>{copy.reports.unit}:</strong> {datos.docente.unidad}</div>
               </div>
             </div>
           </div>
@@ -626,18 +712,18 @@ export default function PanelDocente({session, onLogout}) {
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <p className="panel-kicker">Calificaciones</p>
-                <h3>Registrar nueva calificación</h3>
+                <p className="panel-kicker">{copy.menu.calificaciones}</p>
+                <h3>{copy.grading.registration}</h3>
               </div>
               <button type="button" className="close-btn" onClick={() => setShowCalificacionForm(false)}>×</button>
             </div>
 
-            <form onSubmit={handleCalificacionSubmit} className="modal-form"><label>Tipo de evaluación<select name="numero_parcial" value={calificacionForm.numero_parcial} onChange={handleCalificacionChange}><option value="1">Parcial 1</option><option value="2">Parcial 2</option><option value="3">Parcial 3</option><option value="final">Calificación final</option></select></label>
+            <form onSubmit={handleCalificacionSubmit} className="modal-form"><label>{copy.grading.number}<select name="numero_parcial" value={calificacionForm.numero_parcial} onChange={handleCalificacionChange}><option value="1">{copy.common.partials} 1</option><option value="2">{copy.common.partials} 2</option><option value="3">{copy.common.partials} 3</option><option value="final">{copy.grading.final}</option></select></label>
               <div className="form-grid">
                 <label>
-                  Estudiante
+                  {copy.interviews.student}
                   <select name="inscripcion_id" value={calificacionForm.inscripcion_id} onChange={handleCalificacionChange}>
-                    <option value="">Selecciona un estudiante</option>
+                    <option value="">{copy.common.selectStudent}</option>
                     {datos?.inscripciones?.map((inscripcion) => (
                       <option key={inscripcion.id} value={inscripcion.id}>
                         {inscripcion.aspirante.nombre} - {inscripcion.materia_clave}
@@ -646,7 +732,7 @@ export default function PanelDocente({session, onLogout}) {
                   </select>
                 </label>
                 <label>
-                  Calificación (0-10)
+                  {copy.common.grade} (0-10)
                   <input 
                     type="number" 
                     name="calificacion" 
@@ -661,8 +747,8 @@ export default function PanelDocente({session, onLogout}) {
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowCalificacionForm(false)}>Cancelar</button>
-                <button type="submit" className="btn-primary">Registrar calificación</button>
+                <button type="button" className="btn-secondary" onClick={() => setShowCalificacionForm(false)}>{copy.grading.cancel}</button>
+                <button type="submit" className="btn-primary">{copy.common.registerGrade}</button>
               </div>
             </form>
           </div>

@@ -83,12 +83,48 @@
 
 .language-selector {
   height: 36px;
-  padding: 3px;
+  min-width: 142px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 10px;
 }
 
-.language-selector .lang-btn {
-  min-width: 36px;
-  padding: 7px 10px;
+.language-selector-icon {
+  color: #c8fff5;
+  font-size: .95rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.language-selector select {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: #f4fffd;
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 700;
+  padding: 8px 17px 8px 0;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 8px) 50%, calc(100% - 3px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.language-selector option {
+  background: #153b3b;
+  color: #fff;
+}
+
+.language-selector:focus-within {
+  outline: 3px solid rgba(144, 235, 219, .65);
+  outline-offset: 2px;
 }
 
 .menu-dropdown .menu {
@@ -134,7 +170,6 @@
 }
 
 .theme-toggle:focus-visible,
-.language-selector .lang-btn:focus-visible,
 .menu-dropdown .menu:focus-visible,
 .dropdown-menu .dropdown-item:focus-visible {
   outline: 3px solid rgba(144, 235, 219, .65);
@@ -196,12 +231,12 @@
 
   .language-selector {
     height: 32px;
+    min-width: 116px;
+    padding: 0 7px;
   }
 
-  .language-selector .lang-btn {
-    min-width: 29px;
-    padding: 6px 7px;
-    font-size: .68rem;
+  .language-selector select {
+    font-size: .7rem;
   }
 
   .menu-dropdown .menu {

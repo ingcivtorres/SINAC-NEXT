@@ -6,7 +6,11 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.urls import reverse
 import re
-from .models import Aspirante, DocumentoAspirante, ExpedienteDigital, FirmaElectronica, SeguimientoSolicitud, Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio
+from .models import (
+    Aspirante, DocumentoAspirante, ExpedienteDigital, FirmaElectronica, SeguimientoSolicitud,
+    Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual,
+    EvaluacionColegio, ProyectoTesis, RevisionAntiplagio, JuradoProyecto, DefensaTesis,
+)
 
 
 class AspiranteRegistroSerializer(serializers.ModelSerializer):
@@ -36,9 +40,6 @@ class AspiranteRegistroSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'correo': ['Ingresa un correo electrónico válido.']})
         if telefono and not re.fullmatch(r'[0-9]{10}', telefono):
             raise serializers.ValidationError({'telefono': ['El teléfono debe contener exactamente 10 dígitos.']})
-        if len(password) < 8 or not re.search(r'[A-Z]', password) or not re.search(r'[a-z]', password) or not re.search(r'[0-9]', password):
-            raise serializers.ValidationError({'password': ['La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.']})
-
         if usuario:
             if Aspirante.objects.filter(usuario__iexact=usuario).exists():
                 raise serializers.ValidationError({'usuario': ['Ya existe un aspirante registrado con este usuario.']})
@@ -48,6 +49,8 @@ class AspiranteRegistroSerializer(serializers.ModelSerializer):
         if correo:
             if Aspirante.objects.filter(correo__iexact=correo).exists():
                 raise serializers.ValidationError({'correo': ['Ya existe un aspirante registrado con este correo.']})
+        if len(password) < 8 or not re.search(r'[A-Z]', password) or not re.search(r'[a-z]', password) or not re.search(r'[0-9]', password):
+            raise serializers.ValidationError({'password': ['La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.']})
 
         return attrs
 
@@ -72,14 +75,17 @@ class InscripcionSerializer(serializers.ModelSerializer):
     materia_creditos = serializers.IntegerField(source='materia.creditos', read_only=True)
     materia_profesor = serializers.CharField(source='materia.profesor', read_only=True)
     materia_horario = serializers.CharField(source='materia.horario', read_only=True)
+    materia_salon = serializers.CharField(source='materia.get_salon_display', read_only=True)
+    materia_capacidad = serializers.IntegerField(source='materia.capacidad', read_only=True)
+    materia_inscritos = serializers.IntegerField(source='materia.inscripciones.count', read_only=True)
     periodo_nombre = serializers.CharField(source='periodo_inscripcion.nombre', read_only=True, default=None)
     estado_label = serializers.SerializerMethodField()
     color = serializers.SerializerMethodField()
 
     class Meta:
         model = Inscripcion
-        fields = ['id', 'materia', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'horario', 'created_at', 'updated_at', 'color']
-        read_only_fields = ['id', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'periodo_inscripcion', 'periodo_nombre', 'estado_label', 'color']
+        fields = ['id', 'materia', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'horario', 'created_at', 'updated_at', 'color']
+        read_only_fields = ['id', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'created_at', 'updated_at', 'color']
 
     def get_estado_label(self, obj):
         if obj.calificacion is None:
@@ -138,6 +144,96 @@ class FirmaElectronicaSerializer(serializers.ModelSerializer):
         model = FirmaElectronica
         fields = ['id', 'rol_firmante', 'huella', 'firmado_at', 'firmante_nombre']
         read_only_fields = fields
+
+
+class ProyectoTesisSerializer(serializers.ModelSerializer):
+    alumno_nombre = serializers.CharField(source='alumno.nombre', read_only=True)
+    alumno_matricula = serializers.CharField(source='alumno.matricula', read_only=True)
+    alumno_programa = serializers.CharField(source='alumno.programa', read_only=True)
+    director_nombre = serializers.CharField(source='director.nombre', read_only=True, allow_null=True)
+    director_usuario = serializers.CharField(source='director.usuario', read_only=True, allow_null=True)
+    estado_label = serializers.CharField(source='get_estado_display', read_only=True)
+    jurados = serializers.SerializerMethodField()
+    defensa = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProyectoTesis
+        fields = [
+            'id', 'alumno', 'alumno_nombre', 'alumno_matricula', 'alumno_programa',
+            'director', 'director_nombre', 'director_usuario', 'titulo', 'resumen',
+            'linea_investigacion', 'objetivos', 'metodologia', 'comentarios_revision',
+            'estado', 'estado_label', 'fecha_presentacion', 'jurados', 'defensa', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'alumno_nombre', 'alumno_matricula', 'alumno_programa',
+            'director_nombre', 'director_usuario', 'estado_label', 'jurados', 'defensa', 'created_at', 'updated_at',
+        ]
+
+    def validate_titulo(self, value):
+        value = (value or '').strip()
+        if len(value) < 10:
+            raise serializers.ValidationError('El título debe tener al menos 10 caracteres.')
+        return value
+
+    def validate_resumen(self, value):
+        value = (value or '').strip()
+        if len(value) < 30:
+            raise serializers.ValidationError('El resumen debe tener al menos 30 caracteres.')
+        return value
+
+    def validate_director(self, value):
+        if value is not None and (str(getattr(value, 'rol', '')).lower() not in {'director', 'director de tesis'} or value.is_staff):
+            raise serializers.ValidationError('El director seleccionado debe tener el rol Director de Tesis.')
+        return value
+
+    def get_jurados(self, obj):
+        jurados = obj.jurados.select_related('jurado').all()
+        return JuradoProyectoSerializer(jurados, many=True).data
+
+    def get_defensa(self, obj):
+        defensa = getattr(obj, 'defensa_tesis', None)
+        if not defensa:
+            return None
+        return DefensaTesisSerializer(defensa).data
+
+
+class JuradoProyectoSerializer(serializers.ModelSerializer):
+    jurado_nombre = serializers.CharField(source='jurado.nombre', read_only=True)
+    jurado_correo = serializers.CharField(source='jurado.correo', read_only=True)
+    jurado_usuario = serializers.CharField(source='jurado.usuario', read_only=True)
+    rol_label = serializers.CharField(source='get_rol_display', read_only=True)
+    estado_label = serializers.CharField(source='get_estado_display', read_only=True)
+
+    class Meta:
+        model = JuradoProyecto
+        fields = [
+            'id', 'proyecto', 'jurado', 'jurado_nombre', 'jurado_correo', 'jurado_usuario',
+            'rol', 'rol_label', 'orden', 'estado', 'estado_label', 'observaciones', 'fecha_confirmacion', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'jurado_nombre', 'jurado_correo', 'jurado_usuario', 'rol_label', 'estado_label', 'created_at', 'updated_at']
+
+
+class DefensaTesisSerializer(serializers.ModelSerializer):
+    estado_label = serializers.CharField(source='get_estado_display', read_only=True)
+    modalidad_label = serializers.CharField(source='get_modalidad_display', read_only=True)
+
+    class Meta:
+        model = DefensaTesis
+        fields = ['id', 'proyecto', 'fecha', 'lugar', 'modalidad', 'modalidad_label', 'enlace_virtual', 'estado', 'estado_label', 'observaciones', 'calificacion_final', 'acta_url', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'modalidad_label', 'estado_label', 'created_at', 'updated_at']
+
+
+class RevisionAntiplagioSerializer(serializers.ModelSerializer):
+    proyecto = serializers.PrimaryKeyRelatedField(read_only=True)
+    estado_label = serializers.CharField(source='get_estado_display', read_only=True)
+    archivo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RevisionAntiplagio
+        fields = ['id', 'proyecto', 'proveedor', 'nombre_original', 'porcentaje_similitud', 'estado', 'estado_label', 'observaciones', 'resultados', 'archivo_url', 'created_at', 'updated_at']
+
+    def get_archivo_url(self, obj):
+        return obj.archivo.url if obj.archivo else None
 
 
 class AspiranteDetalleSerializer(serializers.ModelSerializer):
@@ -211,7 +307,7 @@ class AspiranteCoordinacionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Aspirante
-        fields = ['id', 'nombre', 'usuario', 'matricula', 'correo', 'telefono', 'profile_photo', 'curp', 'rol',
+        fields = ['id', 'nombre', 'usuario', 'matricula', 'numero_periodo_actual', 'correo', 'telefono', 'profile_photo', 'curp', 'rol',
                   'programa', 'unidad', 'departamento', 'seccion', 'modalidad',
                   'ultimo_grado', 'institucion', 'promedio', 'tutor_propuesto', 'director_tesis', 'director_tesis_nombre',
                   'apoyos', 'comentarios', 'idiomas', 'publicaciones', 'experiencia',
@@ -232,12 +328,17 @@ class AspiranteCoordinacionUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Aspirante
-        fields = ['programa', 'unidad', 'departamento', 'seccion', 'modalidad',
+        fields = ['programa', 'unidad', 'departamento', 'seccion', 'modalidad', 'numero_periodo_actual',
                   'tutor_propuesto', 'director_tesis', 'ultimo_grado', 'institucion', 'promedio',
                   'idiomas', 'publicaciones', 'apoyos', 'comentarios', 'proceso_estado',
                   'fecha_examen_admision', 'fecha_entrevista', 'fecha_inicio_curso_propedeutico',
                   'curso_propedeutico_nota', 'curso_propedeutico_aprobado',
                   'apoyo_solicitado', 'apoyo_autorizado', 'banco_apoyo', 'clabe_interbancaria']
+
+    def validate_numero_periodo_actual(self, value):
+        if value is not None and value < 1:
+            raise serializers.ValidationError('El número de semestre o cuatrimestre debe ser mayor que cero.')
+        return value
 
 
 class InicioSesionSerializer(TokenObtainPairSerializer):
@@ -306,9 +407,12 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
 
 
 class MateriaSerializer(serializers.ModelSerializer):
+    salon_label = serializers.CharField(source='get_salon_display', read_only=True)
+    inscritos = serializers.IntegerField(source='inscripciones.count', read_only=True)
+
     class Meta:
         model = Materia
-        fields = ['id', 'clave', 'nombre', 'creditos', 'profesor', 'horario']
+        fields = ['id', 'clave', 'nombre', 'categoria', 'lgacs', 'creditos', 'profesor', 'horario', 'salon', 'salon_label', 'capacidad', 'inscritos']
         read_only_fields = ['id']
 
     def validate_creditos(self, value):
@@ -350,6 +454,7 @@ class ExamenEnLineaSerializer(serializers.ModelSerializer):
 
 
 class EntrevistaVirtualSerializer(serializers.ModelSerializer):
+    aspirante = serializers.SerializerMethodField()
     proposito_label = serializers.CharField(source='get_proposito_display', read_only=True)
     estado_label = serializers.CharField(source='get_estado_display', read_only=True)
     color = serializers.SerializerMethodField()
@@ -357,7 +462,7 @@ class EntrevistaVirtualSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EntrevistaVirtual
-        fields = ['id', 'proposito', 'proposito_label', 'titulo', 'descripcion',
+        fields = ['id', 'aspirante', 'proposito', 'proposito_label', 'titulo', 'descripcion',
                   'fecha_programada', 'fecha_inicio', 'fecha_fin', 'duracion_minutos',
                   'jitsi_room_id', 'jitsi_room_link', 'estado', 'estado_label',
                   'recording_link', 'notas_docente', 'retroalimentacion', 'color',
@@ -376,6 +481,14 @@ class EntrevistaVirtualSerializer(serializers.ModelSerializer):
         if obj.estado == 'cancelada':
             return 'secondary'
         return 'neutral'
+
+    def get_aspirante(self, obj):
+        return {
+            'id': obj.aspirante_id,
+            'nombre': obj.aspirante.nombre,
+            'usuario': obj.aspirante.usuario,
+            'programa': obj.aspirante.programa,
+        }
 
     def get_tiempo_restante(self, obj):
         """Calculate remaining time until interview starts."""

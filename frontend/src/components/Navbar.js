@@ -1,7 +1,7 @@
 import React, {useState, useEffect} from 'react';
 import cinvestavLogo from '../assets/logo2civ-removebg-preview.png';
 import sinacLogo from '../assets/SINAC5-removebg-preview.png';
-import {useLanguage} from '../translations';
+import {supportedLanguages, useLanguage} from '../translations';
 
 export default function Navbar({onNavigate, activeView, session, onLogout}){
   const {t, language, setLanguage} = useLanguage();
@@ -48,22 +48,12 @@ export default function Navbar({onNavigate, activeView, session, onLogout}){
         >
           <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
         </button>
-        <div className="language-selector">
-          <button 
-            className={`lang-btn ${language === 'es' ? 'active' : ''}`}
-            onClick={() => changeLanguage('es')}
-            title="Español"
-          >
-            ES
-          </button>
-          <button 
-            className={`lang-btn ${language === 'en' ? 'active' : ''}`}
-            onClick={() => changeLanguage('en')}
-            title="English"
-          >
-            EN
-          </button>
-        </div>
+        <label className="language-selector" aria-label="Selector de idioma">
+          <span className="language-selector-icon" aria-hidden="true">文</span>
+          <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
+            {supportedLanguages.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
+          </select>
+        </label>
         <div className="menu-dropdown">
           <button className="menu" aria-expanded="false" aria-haspopup="true">☰</button>
           <div className="dropdown-menu">
@@ -71,8 +61,8 @@ export default function Navbar({onNavigate, activeView, session, onLogout}){
             <button type="button" className={`dropdown-item ${activeView === 'portal' ? 'active' : ''}`} onClick={()=>navigateTo('portal')}>{t('navbar.portal')}</button>
             {session
               ? <>
-                  <button type="button" className={`dropdown-item ${(activeView === 'panel' || activeView === 'alumno-panel' || activeView === 'admin-panel' || activeView === 'coordinacion-panel' || activeView === 'docente-panel') ? 'active' : ''}`} onClick={()=>navigateTo(session.role === 'admin' ? 'admin-panel' : session.role === 'coordinacion' ? 'coordinacion-panel' : session.role === 'docente' ? 'docente-panel' : session.role === 'alumno' ? 'alumno-panel' : 'panel')}>
-                    {session.role === 'admin' ? t('navbar.adminPanel') : session.role === 'coordinacion' ? t('navbar.coordinacionPanel') : session.role === 'docente' ? t('navbar.docentePanel') : session.role === 'alumno' ? t('navbar.alumnoPanel') : t('navbar.panel')}
+                  <button type="button" className={`dropdown-item ${(activeView === 'panel' || activeView === 'alumno-panel' || activeView === 'admin-panel' || activeView === 'coordinacion-panel' || activeView === 'docente-panel' || activeView === 'director-panel' || activeView === 'servicios-panel') ? 'active' : ''}`} onClick={()=>navigateTo(session.role === 'admin' ? 'admin-panel' : session.role === 'coordinacion' ? 'coordinacion-panel' : session.role === 'docente' ? 'docente-panel' : session.role === 'director' ? 'director-panel' : session.role === 'servicios' ? 'servicios-panel' : session.role === 'alumno' ? 'alumno-panel' : 'panel')}>
+                    {session.role === 'admin' ? t('navbar.adminPanel') : session.role === 'coordinacion' ? t('navbar.coordinacionPanel') : session.role === 'docente' ? t('navbar.docentePanel') : session.role === 'director' ? t('role.director') : session.role === 'servicios' ? t('role.servicios') : session.role === 'alumno' ? t('navbar.alumnoPanel') : t('navbar.panel')}
                   </button>
                   <button type="button" className="dropdown-item dropdown-full" onClick={() => onLogout && onLogout(t('navbar.logoutMessage'))}>{t('navbar.logout')}</button>
                 </>

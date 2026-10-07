@@ -1,15 +1,20 @@
 import React, {useEffect, useRef, useState} from 'react';
+import {useApplicantCopy} from './aspirantPanelTranslations';
 
 // Usar la misma base de origen permite que funcione tanto en desarrollo
 // como detrás del proxy de nginx en Docker.
 const API = '';
 
-function fotoUrl(value) {
+export function fotoUrl(value) {
   if (!value) return '';
-  return value.startsWith('http') ? value : `${API}${value}`;
+  if (value.startsWith('http')) return value;
+  const path = String(value).replace(/^\/+/, '');
+  return path.startsWith('media/') ? `/${path}` : `/media/${path}`;
 }
 
 export default function PerfilAspirante({perfil, session, onActualizado}) {
+  const copy = useApplicantCopy();
+  const text = copy.profile;
   const [nombre, setNombre] = useState(perfil.nombre || '');
   const [correo, setCorreo] = useState(perfil.correo || '');
   const [telefono, setTelefono] = useState(perfil.telefono || '');
@@ -30,8 +35,8 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
   function seleccionarFoto(event) {
     const archivo = event.target.files?.[0];
     if (!archivo) return;
-    if (!archivo.type.startsWith('image/')) return setError('Selecciona una imagen válida.');
-    if (archivo.size > 5 * 1024 * 1024) return setError('La foto no debe superar 5 MB.');
+    if (!archivo.type.startsWith('image/')) return setError(text.selectImage);
+    if (archivo.size > 5 * 1024 * 1024) return setError(text.maxPhoto);
     setError('');
     setFoto(archivo);
     setPreview(URL.createObjectURL(archivo));
@@ -47,16 +52,19 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
     if (foto) form.append('profile_photo', foto);
     try {
       const response = await fetch(`${API}/api/preregistro/perfil/`, {method: 'PATCH', headers: {Authorization: `Bearer ${session.access}`}, body: form});
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.profile_photo || data.correo || data.detail || 'No se pudo actualizar el perfil.');
-      setFoto(null); setMensaje('Perfil actualizado correctamente.');
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {};
+      if (!response.ok) throw new Error(`${text.saveError} (HTTP ${response.status}).`);
+      if (!contentType.includes('application/json')) throw new Error(text.unexpected);
+      if (fileRef.current) fileRef.current.value = '';
+      setFoto(null); setMensaje(text.saved);
       onActualizado(data);
-    } catch (err) { setError(err.message || 'No se pudo actualizar el perfil.'); }
+    } catch (err) { setError(err.message || text.saveError); }
     finally { setGuardando(false); }
   }
 
   return <div className="profile-editor panel-card">
-    <div className="profile-editor-head"><div className="profile-avatar">{preview ? <img src={preview} alt="Foto de perfil"/> : <span>{(nombre || 'A').charAt(0).toUpperCase()}</span>}</div><div><h3>Mi perfil</h3><p>Actualiza tus datos de contacto y tu foto.</p></div></div>
-    <form className="profile-form" onSubmit={guardar}><label>Foto de perfil<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>JPG, PNG o WebP · máximo 5 MB</small></label><label>Nombre completo<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>Correo electrónico<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>Teléfono<input value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? 'Guardando...' : 'Guardar cambios'}</button></form>
+    <div className="profile-editor-head"><div className="profile-avatar">{preview ? <img src={preview} alt={text.photo} onError={() => setPreview('')}/> : <span>{(nombre || 'A').charAt(0).toUpperCase()}</span>}</div><div><h3>{text.name}</h3><p>{text.update}</p></div></div>
+    <form className="profile-form" onSubmit={guardar}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
   </div>;
 }

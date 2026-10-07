@@ -3,8 +3,8 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, ExpedienteDigital, Inscripcion
-from .serializers import ExpedienteDigitalSerializer, FirmaElectronicaSerializer, InscripcionSerializer
+from .models import Aspirante, ExpedienteDigital, Inscripcion, ProyectoTesis
+from .serializers import ExpedienteDigitalSerializer, FirmaElectronicaSerializer, InscripcionSerializer, ProyectoTesisSerializer
 
 
 def _es_director(user):
@@ -51,6 +51,9 @@ class DirectorPanelView(APIView):
             .select_related('aspirante')
             .prefetch_related('firmas__firmante')
         )
+        proyectos = ProyectoTesis.objects.filter(
+            Q(director=request.user) | Q(alumno_id__in=tesista_ids)
+        ).select_related('alumno', 'director').distinct()
         inscripciones_por_alumno = {tesista.id: [] for tesista in tesistas}
         for inscripcion in inscripciones:
             inscripciones_por_alumno.setdefault(inscripcion.aspirante_id, []).append(inscripcion)
@@ -91,16 +94,18 @@ class DirectorPanelView(APIView):
                 'correo': request.user.correo,
                 'departamento': request.user.departamento,
                 'programa': request.user.programa,
+                'profile_photo': request.user.profile_photo.url if request.user.profile_photo else None,
             },
             'tesistas': tesistas_data,
             'expedientes': expedientes_data,
+            'proyectos_tesis': ProyectoTesisSerializer(proyectos, many=True).data,
             'resumen': {
                 'tesistas_asignados': len(tesistas_data),
                 'expedientes_activos': sum(1 for item in expedientes if item.estado == 'activo'),
                 'expedientes_sin_firma': sum(1 for item in expedientes if not any(firma.rol_firmante == 'director' for firma in item.firmas.all())),
                 'evaluaciones': len(inscripciones),
-                'avances_por_revisar': 0,
+                'avances_por_revisar': proyectos.filter(estado='en_revision').count(),
             },
-            'avance_tesis_disponible': False,
-            'avance_tesis_mensaje': 'El avance de tesis requiere el módulo de seguimiento de tesis; la asignación y el expediente ya están conectados.',
+            'avance_tesis_disponible': True,
+            'avance_tesis_mensaje': 'Los proyectos enviados por tus tesistas aparecen aquí para revisión y dictamen.',
         })

@@ -21,6 +21,18 @@ import './components/Footer.css';
 import './components/RegistrationPrivacyGate.css';
 import './components/Login.css';
 
+const ROLE_HOME_VIEW = {
+  aspirante: 'panel',
+  alumno: 'alumno-panel',
+  docente: 'docente-panel',
+  director: 'director-panel',
+  coordinacion: 'coordinacion-panel',
+  servicios: 'servicios-panel',
+  admin: 'admin-panel',
+};
+
+const ROLE_VIEW_ACCESS = Object.fromEntries(Object.entries(ROLE_HOME_VIEW).map(([role, view]) => [view, [role]]));
+
 function clearAuthStorage(){
   localStorage.removeItem('sinac_access');
   localStorage.removeItem('sinac_refresh');
@@ -50,6 +62,12 @@ function getSession(){
   return access ? {access, role} : null;
 }
 
+function normalizedRole(role) {
+  const value = String(role || 'aspirante').trim().toLowerCase();
+  if (value === 'teacher' || value === 'profesor') return 'docente';
+  return ['servicios_escolares', 'servicios escolares'].includes(value) ? 'servicios' : value;
+}
+
 export default function App(){
   const [loading, setLoading]                 = useState(true);
   const [view, setView]                       = useState('home');
@@ -70,7 +88,13 @@ export default function App(){
     };
   }, []);
 
-  function handleNavigate(target){
+  function handleNavigate(target, nextSession = session){
+    const role = normalizedRole(nextSession?.role);
+    const allowedRoles = ROLE_VIEW_ACCESS[target];
+    if (allowedRoles && (!nextSession || !allowedRoles.includes(role))) {
+      setToastMessage('No tienes permisos para acceder a esa sección.');
+      target = nextSession ? ROLE_HOME_VIEW[role] || 'panel' : 'login';
+    }
     setView(target);
     if (target === displayView) return;
     if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
@@ -82,22 +106,11 @@ export default function App(){
   }
 
   function handleLoginSuccess(sess){
-    setSession(sess);
-    const authenticatedRole = String(sess.role || 'aspirante').trim().toLowerCase();
-    const target = authenticatedRole === 'admin'
-      ? 'admin-panel'
-      : authenticatedRole === 'coordinacion'
-        ? 'coordinacion-panel'
-        : authenticatedRole === 'docente'
-          ? 'docente-panel'
-          : authenticatedRole === 'alumno'
-          ? 'alumno-panel'
-            : authenticatedRole === 'director'
-              ? 'director-panel'
-              : authenticatedRole === 'servicios' || authenticatedRole === 'servicios_escolares'
-                ? 'servicios-panel'
-              : 'panel';
-    handleNavigate(target);
+    const authenticatedRole = normalizedRole(sess.role);
+    const authenticatedSession = {...sess, role: authenticatedRole};
+    setSession(authenticatedSession);
+    const target = ROLE_HOME_VIEW[authenticatedRole] || 'panel';
+    handleNavigate(target, authenticatedSession);
   }
 
   useEffect(() => {
@@ -134,40 +147,40 @@ export default function App(){
           />
         )}
             {displayView === 'panel'  && (
-          session
+              normalizedRole(session?.role) === 'aspirante'
             ? <PanelAspirante session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'admin-panel' && (
-          session
+          normalizedRole(session?.role) === 'admin'
             ? <PanelAdministrador session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'coordinacion-panel' && (
-          session
+          normalizedRole(session?.role) === 'coordinacion'
             ? <PanelCoordinacion session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'alumno-panel' && (
-          session
+          normalizedRole(session?.role) === 'alumno'
             ? <PanelAlumno session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'docente-panel' && (
-          session
+          normalizedRole(session?.role) === 'docente'
             ? <PanelDocente session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'director-panel' && (
-          session
+          normalizedRole(session?.role) === 'director'
             ? <PanelDirector session={session} onLogout={handleLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'servicios-panel' && (
-          session ? <PanelServiciosEscolares session={session} onLogout={handleLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
+          normalizedRole(session?.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={handleLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
       </main>
-      {session && <NotificationBell session={session} />}
+      {session && ['aspirante', 'alumno'].includes(normalizedRole(session.role)) && <NotificationBell session={session} />}
       {!loading && <Footer onNavigate={handleNavigate} />}
     </div>
   )

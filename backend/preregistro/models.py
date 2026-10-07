@@ -42,6 +42,7 @@ class Aspirante(AbstractBaseUser, PermissionsMixin):
     # Sección 1 – Datos Generales
     usuario    = models.CharField(max_length=20, unique=True)
     matricula  = models.CharField(max_length=30, unique=True, null=True, blank=True)
+    numero_periodo_actual = models.PositiveSmallIntegerField(null=True, blank=True)
     nombre     = models.CharField(max_length=180)
     curp       = models.CharField(max_length=18, unique=True)
     correo     = models.EmailField(unique=True)
@@ -198,6 +199,146 @@ class FirmaElectronica(models.Model):
         return f'{self.expediente.folio} - {self.firmante.nombre}'
 
 
+class ProyectoTesis(models.Model):
+    """Registro institucional del proyecto de tesis y su dictamen académico."""
+    ESTADOS = [
+        ('borrador', 'Borrador'),
+        ('en_revision', 'En revisión'),
+        ('observado', 'Con observaciones'),
+        ('aprobado', 'Aprobado'),
+        ('rechazado', 'Rechazado'),
+        ('concluido', 'Concluido'),
+    ]
+    alumno = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='proyectos_tesis')
+    director = models.ForeignKey(
+        Aspirante, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='proyectos_dirigidos', limit_choices_to={'rol': 'director'},
+    )
+    titulo = models.CharField(max_length=255)
+    resumen = models.TextField()
+    linea_investigacion = models.CharField(max_length=180, blank=True)
+    objetivos = models.TextField(blank=True)
+    metodologia = models.TextField(blank=True)
+    comentarios_revision = models.TextField(blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='borrador')
+    fecha_presentacion = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Proyecto de tesis'
+        verbose_name_plural = 'Proyectos de tesis'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.titulo} - {self.alumno.nombre}'
+
+
+class JuradoProyecto(models.Model):
+    """Asignación de jurado para la defensa de una tesis."""
+    ROLES = [
+        ('presidente', 'Presidente'),
+        ('secretario', 'Secretario'),
+        ('vocal', 'Vocal'),
+        ('suplente', 'Suplente'),
+    ]
+    ESTADOS = [
+        ('pendiente', 'Pendiente'),
+        ('confirmado', 'Confirmado'),
+        ('rechazado', 'Rechazado'),
+    ]
+
+    proyecto = models.ForeignKey(ProyectoTesis, on_delete=models.CASCADE, related_name='jurados')
+    jurado = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='jurados_asignados', limit_choices_to={'rol': 'docente'})
+    rol = models.CharField(max_length=20, choices=ROLES, default='vocal')
+    orden = models.PositiveSmallIntegerField(default=1)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    observaciones = models.TextField(blank=True)
+    fecha_confirmacion = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['orden', 'rol']
+        constraints = [
+            models.UniqueConstraint(fields=['proyecto', 'jurado'], name='jurado_unico_por_proyecto'),
+            models.UniqueConstraint(fields=['proyecto', 'rol'], condition=models.Q(rol__in=['presidente', 'secretario', 'vocal', 'suplente']), name='rol_unico_por_proyecto'),
+        ]
+
+    def __str__(self):
+        return f'{self.proyecto.titulo} · {self.jurado.nombre} ({self.get_rol_display()})'
+
+
+class DefensaTesis(models.Model):
+    """Programación y evaluación de la defensa pública del proyecto de tesis."""
+    MODALIDADES = [
+        ('presencial', 'Presencial'),
+        ('virtual', 'Virtual'),
+        ('hibrida', 'Híbrida'),
+    ]
+    ESTADOS = [
+        ('programada', 'Programada'),
+        ('realizada', 'Realizada'),
+        ('cancelada', 'Cancelada'),
+        ('revisada', 'Revisada'),
+    ]
+
+    proyecto = models.OneToOneField(ProyectoTesis, on_delete=models.CASCADE, related_name='defensa_tesis')
+    fecha = models.DateTimeField(null=True, blank=True)
+    lugar = models.CharField(max_length=200, blank=True)
+    modalidad = models.CharField(max_length=20, choices=MODALIDADES, default='presencial')
+    enlace_virtual = models.URLField(blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='programada')
+    observaciones = models.TextField(blank=True)
+    calificacion_final = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    acta_url = models.URLField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-fecha']
+        verbose_name = 'Defensa de tesis'
+        verbose_name_plural = 'Defensas de tesis'
+
+    def __str__(self):
+        return f'Defensa · {self.proyecto.titulo}'
+
+
+class RevisionAntiplagio(models.Model):
+    """Resultado de la revisión externa de similitud para un proyecto de tesis."""
+    PROVEEDORES = [
+        ('turnitin', 'Turnitin'),
+        ('copyleaks', 'Copyleaks'),
+        ('manual', 'Manual institucional'),
+    ]
+    ESTADOS = [
+        ('pendiente', 'Pendiente'),
+        ('en_revision', 'En revisión'),
+        ('aprobado', 'Aprobado'),
+        ('observado', 'Observado'),
+        ('rechazado', 'Rechazado'),
+    ]
+
+    proyecto = models.ForeignKey(ProyectoTesis, on_delete=models.CASCADE, related_name='revisiones_antiplagio')
+    proveedor = models.CharField(max_length=30, choices=PROVEEDORES, default='turnitin')
+    archivo = models.FileField(upload_to='antiplagio/%Y/%m/')
+    nombre_original = models.CharField(max_length=255)
+    porcentaje_similitud = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    observaciones = models.TextField(blank=True)
+    resultados = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Revisión anti-plagio'
+        verbose_name_plural = 'Revisiones anti-plagio'
+
+    def __str__(self):
+        return f'{self.proyecto.titulo} · {self.get_proveedor_display()} · {self.porcentaje_similitud}%'
+
+
 class CargaAcademica(models.Model):
     ESTADOS = [('borrador','Borrador'), ('en_revision','En revisión'), ('aprobada','Aprobada'), ('publicada','Publicada'), ('rechazada','Rechazada')]
     creador = models.ForeignKey(Aspirante, on_delete=models.PROTECT, related_name='cargas_creadas')
@@ -227,8 +368,23 @@ class SeguimientoSolicitud(models.Model):
 
 
 class Materia(models.Model):
+    CATEGORIAS = [
+        ('nucleo', 'Núcleo'),
+        ('formativo', 'Formativo'),
+        ('especializacion', 'Especialización / tópico'),
+        ('adicional', 'Curso adicional'),
+        ('seminario', 'Seminario'),
+        ('tesis', 'Trabajo de tesis'),
+    ]
+    SALONES = [
+        ('salon_1', 'Salón 1'),
+        ('laboratorio_harold', 'Laboratorio Harold V. McIntosh'),
+        ('sala_juntas', 'Sala de Juntas'),
+    ]
     clave = models.CharField(max_length=40, unique=True)
     nombre = models.CharField(max_length=200)
+    categoria = models.CharField(max_length=24, choices=CATEGORIAS, default='formativo')
+    lgacs = models.JSONField(default=list, blank=True)
     # Valor oficial de créditos de la materia. El catálogo inicial utiliza
     # únicamente 4, 5 o 7 créditos.
     creditos = models.PositiveSmallIntegerField(
@@ -237,6 +393,8 @@ class Materia(models.Model):
     )
     profesor = models.CharField(max_length=180, blank=True)
     horario = models.CharField(max_length=120, blank=True)
+    salon = models.CharField(max_length=40, choices=SALONES, default='salon_1')
+    capacidad = models.PositiveSmallIntegerField(default=42)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -246,6 +404,68 @@ class Materia(models.Model):
 
     def __str__(self):
         return f'{self.clave} - {self.nombre}'
+
+
+class ConfiguracionPrograma(models.Model):
+    """Reglas académicas que determinan cuándo un alumno puede iniciar tesis."""
+    GRADOS = [('maestria', 'Maestría'), ('doctorado', 'Doctorado')]
+    PERIODICIDADES = [('semestral', 'Semestral'), ('cuatrimestral', 'Cuatrimestral')]
+
+    programa = models.CharField(max_length=180, unique=True)
+    grado = models.CharField(max_length=20, choices=GRADOS)
+    periodicidad = models.CharField(max_length=20, choices=PERIODICIDADES, default='semestral')
+    duracion_anios = models.PositiveSmallIntegerField(default=2)
+    periodos_requeridos = models.PositiveSmallIntegerField(default=4)
+    creditos_requeridos = models.PositiveSmallIntegerField(default=0)
+    activo = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuración de programa'
+        verbose_name_plural = 'Configuraciones de programas'
+        ordering = ['programa']
+
+    def save(self, *args, **kwargs):
+        self.duracion_anios = 4 if self.grado == 'doctorado' else 2
+        if not self.periodos_requeridos:
+            self.periodos_requeridos = self.duracion_anios * (3 if self.periodicidad == 'cuatrimestral' else 2)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.programa} · {self.get_grado_display()}'
+
+
+class PlanEstudioMateria(models.Model):
+    configuracion = models.ForeignKey(ConfiguracionPrograma, on_delete=models.CASCADE, related_name='materias_plan')
+    materia = models.ForeignKey(Materia, on_delete=models.PROTECT, related_name='planes_estudio')
+    periodo_sugerido = models.PositiveSmallIntegerField(default=1)
+    obligatoria = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = [('configuracion', 'materia')]
+        ordering = ['periodo_sugerido', 'materia__clave']
+
+
+class SolicitudDireccionTesis(models.Model):
+    ESTADOS = [
+        ('pendiente', 'Pendiente de revisión'),
+        ('aprobada', 'Director asignado'),
+        ('rechazada', 'Rechazada'),
+        ('cancelada', 'Cancelada'),
+    ]
+    alumno = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='solicitudes_direccion_tesis')
+    director_sugerido = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='solicitudes_sugeridas')
+    director_asignado = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='asignaciones_direccion_tesis')
+    linea_investigacion = models.CharField(max_length=180, blank=True)
+    justificacion = models.TextField(blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    observaciones = models.TextField(blank=True)
+    revisado_por = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='solicitudes_tesis_revisadas')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
 
 class PeriodoInscripcion(models.Model):
     nombre = models.CharField(max_length=40, unique=True)
@@ -288,6 +508,11 @@ class Inscripcion(models.Model):
         ('aprobada', 'Aprobada'),
         ('reprobada', 'Reprobada'),
     ]
+    VALIDACIONES_SERVICIOS = [
+        ('pendiente', 'Pendiente'),
+        ('validada', 'Validada'),
+        ('observada', 'Observada'),
+    ]
 
     aspirante = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='inscripciones')
     materia = models.ForeignKey(Materia, on_delete=models.CASCADE, related_name='inscripciones')
@@ -299,6 +524,7 @@ class Inscripcion(models.Model):
         related_name='inscripciones',
     )
     estado = models.CharField(max_length=20, choices=ESTADOS, default='cursando')
+    validacion_servicios = models.CharField(max_length=12, choices=VALIDACIONES_SERVICIOS, default='pendiente')
     calificacion = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     parcial_1 = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     parcial_2 = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
@@ -310,7 +536,18 @@ class Inscripcion(models.Model):
     class Meta:
         verbose_name = 'Inscripción'
         verbose_name_plural = 'Inscripciones'
-        unique_together = [('aspirante', 'materia')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['aspirante', 'materia', 'periodo_inscripcion'],
+                condition=models.Q(periodo_inscripcion__isnull=False),
+                name='unique_inscripcion_por_periodo',
+            ),
+            models.UniqueConstraint(
+                fields=['aspirante', 'materia'],
+                condition=models.Q(periodo_inscripcion__isnull=True),
+                name='unique_inscripcion_sin_periodo',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.aspirante.usuario} - {self.materia.clave} ({self.estado})'
@@ -358,6 +595,7 @@ class ExamenEnLinea(models.Model):
         ('admision', 'Examen de Admisión'),
         ('seleccion', 'Examen de Selección'),
         ('diagnostico', 'Examen de Diagnóstico'),
+        ('predoctoral', 'Examen predoctoral'),
         ('otro', 'Otro'),
     ]
     

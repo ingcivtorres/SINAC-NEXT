@@ -53,11 +53,11 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'camunda',
-        'USER': 'camunda',
-        'PASSWORD': 'camunda',
-        'HOST': 'postgres',
-        'PORT': '5432',
+        'NAME': os.getenv('DB_NAME', 'camunda'),
+        'USER': os.getenv('DB_USER', 'camunda'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'camunda'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5433' if os.getenv('DB_HOST') is None else '5432'),
     }
 }
 

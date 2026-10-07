@@ -1,11 +1,18 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView, ConvertirMismaCuentaView
+from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView, ConvertirMismaCuentaView
 from .docente_views import PanelDocenteView, DocenteCatalogoMateriasView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
 from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, CoordinacionReporteView
 from .servicios_views import ServiciosEscolaresPanelView, ServiciosEscolaresAlumnoView, ServiciosEscolaresValidacionView, ServiciosEscolaresReporteView, ServiciosEscolaresDocumentoView
 from .admin_views import AdminUsuariosView, AdminUsuarioDetailView, AdminCatalogosView, AdminAlumnosView, AdminDocentesView, AdminReportesView, AdminAuditoriaView, AdminConfiguracionView
 from .director_views import DirectorPanelView
+from .tesis_views import ProyectoTesisView
+from .predoctoral_views import PredoctoralExamView, PredoctoralExamDetailView
+from .tesis_flujo_views import FlujoTesisView, SolicitudDireccionTesisDetailView
+from .antiplagio_views import RevisionAntiplagioView
+from .jurado_views import JuradoProyectoView, DefensaTesisView, JuradosDisponiblesView
+from .diploma_views import DiplomaDigitalView
+from .expediente_central_views import ExpedienteCentralizadoView
 
 urlpatterns = [
     path('servicios-escolares/panel/', ServiciosEscolaresPanelView.as_view(), name='servicios-panel'),
@@ -15,6 +22,7 @@ urlpatterns = [
     path('servicios-escolares/alumnos/<int:pk>/documentos/<str:tipo>/', ServiciosEscolaresDocumentoView.as_view(), name='servicios-documento'),
     path('servicios-escolares/expedientes/', ExpedienteDigitalView.as_view(), name='expedientes-digitales'),
     path('servicios-escolares/expedientes/<int:pk>/', ExpedienteDigitalView.as_view(), name='expediente-digital-detail'),
+    path('expedientes/<int:pk>/centralizado/', ExpedienteCentralizadoView.as_view(), name='expediente-centralizado'),
     path('expedientes/<int:pk>/firma/', FirmaElectronicaView.as_view(), name='firma-electronica'),
     path('cargas-academicas/', CargaAcademicaWorkflowView.as_view(), name='cargas-academicas'),
     path('cargas-academicas/<int:pk>/', CargaAcademicaWorkflowView.as_view(), name='carga-academica-detail'),
@@ -60,12 +68,25 @@ urlpatterns = [
     path('docente/entrevistas/', DocenteEntrevistaView.as_view(), name='docente-entrevistas'),
     path('docente/entrevistas/<int:pk>/', DocenteEntrevistaDetailView.as_view(), name='docente-entrevista-detail'),
     path('director/panel/', DirectorPanelView.as_view(), name='director-panel'),
+    path('proyectos-tesis/', ProyectoTesisView.as_view(), name='proyectos-tesis'),
+    path('proyectos-tesis/<int:pk>/', ProyectoTesisView.as_view(), name='proyecto-tesis-detail'),
+    path('proyectos-tesis/<int:pk>/jurado/', JuradoProyectoView.as_view(), name='proyecto-jurado-list'),
+    path('proyectos-tesis/<int:pk>/jurado/<int:jurado_id>/', JuradoProyectoView.as_view(), name='proyecto-jurado-detail'),
+    path('proyectos-tesis/<int:pk>/defensa/', DefensaTesisView.as_view(), name='proyecto-defensa'),
+    path('proyectos-tesis/<int:pk>/diploma/', DiplomaDigitalView.as_view(), name='proyecto-diploma'),
+    path('jurados-disponibles/', JuradosDisponiblesView.as_view(), name='jurados-disponibles'),
+    path('proyectos-tesis/<int:pk>/revision-antiplagio/', RevisionAntiplagioView.as_view(), name='revision-antiplagio'),
+    path('tesis/flujo/', FlujoTesisView.as_view(), name='tesis-flujo'),
+    path('tesis/solicitudes/<int:pk>/', SolicitudDireccionTesisDetailView.as_view(), name='tesis-solicitud-detail'),
+    path('predoctoral/examenes/', PredoctoralExamView.as_view(), name='predoctoral-examenes'),
+    path('predoctoral/examenes/<int:pk>/', PredoctoralExamDetailView.as_view(), name='predoctoral-examen-detail'),
     path('preregistro/entrevistas/', MisEntrevistasView.as_view(), name='mis-entrevistas'),
     path('preregistro/examenes/', MisExamenesView.as_view(), name='mis-examenes'),
     path('preregistro/evaluaciones-colegio/', EvaluacionColegioView.as_view(), name='evaluaciones-colegio'),
     path('preregistro/evaluaciones-colegio/<int:pk>/', EvaluacionColegioView.as_view(), name='evaluacion-colegio-detail'),
     path('preregistro/apoyo/solicitar/', SolicitarApoyoView.as_view(), name='solicitar-apoyo'),
     path('preregistro/notificaciones/marcar-leidas/', MarcarNotificacionesLeidasView.as_view(), name='marcar-notificaciones-leidas'),
+    path('alertas-automatizadas/', AlertasAutomatizadasView.as_view(), name='alertas-automatizadas'),
     path('preregistro/convertir-misma-cuenta/', ConvertirMismaCuentaView.as_view(), name='convertir-misma-cuenta'),
     path('preregistro/materias/', MisMateriasDisponiblesView.as_view(), name='materias-disponibles'),
     path('preregistro/inscripciones/', MisInscripcionesView.as_view(), name='mis-inscripciones'),

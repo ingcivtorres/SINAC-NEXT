@@ -7,6 +7,7 @@ from io import StringIO
 from decimal import Decimal
 import requests as http
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.core.mail import send_mail
 from django.http import FileResponse
@@ -18,8 +19,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Aspirante, DocumentoAspirante, ExpedienteDigital, CargaAcademica, SeguimientoSolicitud, Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion
+from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion
 from .admin_views import AdminRolePermission
+from .alertas import generar_alertas_automatizadas
 from .serializers import (
     AspiranteRegistroSerializer,
     AspiranteDetalleSerializer,
@@ -333,8 +335,15 @@ class PerfilAspiranteView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     max_photo_size = 5 * 1024 * 1024
 
+    @staticmethod
+    def _puede_editar(user):
+        rol = str(getattr(user, 'rol', '')).strip().casefold()
+        return not user.is_superuser and rol in {
+            'aspirante', 'alumno', 'docente', 'director', 'director de tesis', 'coordinacion',
+        }
+
     def get(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if not self._puede_editar(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         return Response(PerfilAspiranteSerializer(request.user, context={'request': request}).data)
 
@@ -345,7 +354,7 @@ class PerfilAspiranteView(APIView):
         return self._update(request)
 
     def _update(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if not self._puede_editar(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         photo = request.FILES.get('profile_photo')
         if photo and photo.size > self.max_photo_size:
@@ -360,7 +369,7 @@ class SeguimientoAspiranteView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if request.user.is_staff or getattr(request.user, 'rol', '') not in {'aspirante', 'alumno'}:
             return Response(status=status.HTTP_403_FORBIDDEN)
         aspirante = request.user
         seguimientos = aspirante.seguimientos.all()
@@ -382,6 +391,16 @@ def _periodo_inscripcion_vigente():
     ).order_by('-apertura').first()
 
 
+def _materias_plan_disponibles(alumno, configuracion):
+    periodo_actual = getattr(alumno, 'numero_periodo_actual', None)
+    if not periodo_actual:
+        return PlanEstudioMateria.objects.none()
+    aprobadas = Inscripcion.objects.filter(aspirante=alumno, calificacion__gte=7).values_list('materia_id', flat=True)
+    return PlanEstudioMateria.objects.filter(configuracion=configuracion).filter(
+        Q(periodo_sugerido=periodo_actual) | Q(periodo_sugerido__lt=periodo_actual, obligatoria=True)
+    ).exclude(materia_id__in=aprobadas).select_related('materia').order_by('periodo_sugerido', 'materia__clave')
+
+
 class MisMateriasDisponiblesView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -390,38 +409,112 @@ class MisMateriasDisponiblesView(APIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
         periodo = _periodo_inscripcion_vigente()
         if not periodo: return Response([])
-        materias = Materia.objects.all().order_by('clave')
-        return Response([MateriaSerializer(m).data for m in materias])
+        configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=request.user.programa, activo=True).first()
+        if not configuracion or not request.user.numero_periodo_actual:
+            return Response([])
+        materias_plan = _materias_plan_disponibles(request.user, configuracion)
+        return Response([
+            {
+                **MateriaSerializer(item.materia if hasattr(item, 'materia') else item).data,
+                'periodo_sugerido': getattr(item, 'periodo_sugerido', None),
+                'obligatoria': getattr(item, 'obligatoria', False),
+            }
+            for item in materias_plan
+        ])
 
 class PeriodoInscripcionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
+
+    @staticmethod
+    def puede_gestionar(user):
+        return bool(user.is_staff or str(getattr(user, 'rol', '')).strip().lower() in {
+            'admin', 'administrador', 'coordinacion', 'coordinador',
+        })
+
+    @staticmethod
+    def serializar(periodo):
         from django.utils import timezone
-        p = _periodo_inscripcion_vigente() or PeriodoInscripcion.objects.order_by('-apertura').first()
-        if not p: return Response({'activo': False})
-        ahora=timezone.now(); vigente=p.activo and p.apertura<=ahora<=p.cierre
-        return Response({'id':p.id,'nombre':p.nombre,'apertura':p.apertura,'cierre':p.cierre,'activo':vigente})
-    def post(self, request):
-        if not request.user.is_staff: return Response(status=status.HTTP_403_FORBIDDEN)
+        ahora = timezone.now()
+        vigente = periodo.activo and periodo.apertura <= ahora <= periodo.cierre
+        return {
+            'id': periodo.id,
+            'nombre': periodo.nombre,
+            'apertura': periodo.apertura,
+            'cierre': periodo.cierre,
+            'activo': vigente,
+            'habilitado': periodo.activo,
+        }
+
+    def guardar_periodo(self, request, periodo=None):
         from django.utils.dateparse import parse_datetime
         from django.utils import timezone
-        nombre = (request.data.get('nombre') or '').strip()
-        apertura = parse_datetime(str(request.data.get('apertura') or ''))
-        cierre = parse_datetime(str(request.data.get('cierre') or ''))
-        activo_raw = request.data.get('activo', False)
+
+        data = request.data
+        nombre = str(data.get('nombre', periodo.nombre if periodo else '') or '').strip()
+        apertura_raw = data.get('apertura')
+        cierre_raw = data.get('cierre')
+        apertura = parse_datetime(str(apertura_raw)) if apertura_raw else (periodo.apertura if periodo else None)
+        cierre = parse_datetime(str(cierre_raw)) if cierre_raw else (periodo.cierre if periodo else None)
+        activo_raw = data.get('activo', periodo.activo if periodo else False)
         activo = activo_raw if isinstance(activo_raw, bool) else str(activo_raw).strip().lower() in ('1', 'true', 'si', 'sí', 'activo')
+
         if not nombre or not apertura or not cierre:
             return Response({'detail': 'Nombre, apertura y cierre son obligatorios y deben usar fechas válidas.'}, status=status.HTTP_400_BAD_REQUEST)
-        if timezone.is_naive(apertura): apertura = timezone.make_aware(apertura)
-        if timezone.is_naive(cierre): cierre = timezone.make_aware(cierre)
+        if timezone.is_naive(apertura):
+            apertura = timezone.make_aware(apertura)
+        if timezone.is_naive(cierre):
+            cierre = timezone.make_aware(cierre)
         if apertura >= cierre:
             return Response({'detail': 'La fecha de apertura debe ser anterior a la fecha de cierre.'}, status=status.HTTP_400_BAD_REQUEST)
-        if PeriodoInscripcion.objects.filter(nombre=nombre).exists():
+
+        duplicado = PeriodoInscripcion.objects.filter(nombre=nombre)
+        traslapado = PeriodoInscripcion.objects.filter(activo=True, apertura__lt=cierre, cierre__gt=apertura)
+        if periodo:
+            duplicado = duplicado.exclude(pk=periodo.pk)
+            traslapado = traslapado.exclude(pk=periodo.pk)
+        if duplicado.exists():
             return Response({'detail': 'Ya existe un periodo con ese nombre.'}, status=status.HTTP_409_CONFLICT)
-        if PeriodoInscripcion.objects.filter(activo=True, apertura__lt=cierre, cierre__gt=apertura).exists():
+        if activo and traslapado.exists():
             return Response({'detail': 'El periodo se traslapa con otro periodo de inscripción activo.'}, status=status.HTTP_409_CONFLICT)
-        p=PeriodoInscripcion.objects.create(nombre=nombre, apertura=apertura, cierre=cierre, activo=activo)
-        return Response({'id':p.id,'nombre':p.nombre,'apertura':p.apertura,'cierre':p.cierre,'activo':p.activo},status=status.HTTP_201_CREATED)
+
+        if periodo is None:
+            periodo = PeriodoInscripcion.objects.create(nombre=nombre, apertura=apertura, cierre=cierre, activo=activo)
+            response_status = status.HTTP_201_CREATED
+        else:
+            periodo.nombre = nombre
+            periodo.apertura = apertura
+            periodo.cierre = cierre
+            periodo.activo = activo
+            periodo.save(update_fields=['nombre', 'apertura', 'cierre', 'activo'])
+            response_status = status.HTTP_200_OK
+        return Response(self.serializar(periodo), status=response_status)
+
+    def get(self, request):
+        if request.query_params.get('todos') in ('1', 'true', 'True'):
+            if not self.puede_gestionar(request.user):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            periodos = PeriodoInscripcion.objects.order_by('-apertura')
+            return Response([self.serializar(periodo) for periodo in periodos])
+        p = _periodo_inscripcion_vigente() or PeriodoInscripcion.objects.order_by('-apertura').first()
+        if not p:
+            return Response({'activo': False, 'habilitado': False})
+        return Response(self.serializar(p))
+
+    def post(self, request):
+        if not self.puede_gestionar(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        return self.guardar_periodo(request)
+
+    def put(self, request):
+        if not self.puede_gestionar(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        periodo_id = request.data.get('id')
+        if not periodo_id:
+            return Response({'detail': 'Se requiere el identificador del periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+        periodo = PeriodoInscripcion.objects.filter(pk=periodo_id).first()
+        if not periodo:
+            return Response({'detail': 'No se encontró el periodo de inscripción.'}, status=status.HTTP_404_NOT_FOUND)
+        return self.guardar_periodo(request, periodo)
 
 
 class MisInscripcionesView(APIView):
@@ -430,7 +523,7 @@ class MisInscripcionesView(APIView):
     def get(self, request):
         if request.user.is_staff:
             return Response(status=status.HTTP_403_FORBIDDEN)
-        inscripciones = request.user.inscripciones.select_related('materia').order_by('materia__clave')
+        inscripciones = request.user.inscripciones.select_related('materia', 'periodo_inscripcion').order_by('materia__clave')
         return Response(InscripcionSerializer(inscripciones, many=True).data)
 
     def post(self, request):
@@ -439,21 +532,53 @@ class MisInscripcionesView(APIView):
         periodo = _periodo_inscripcion_vigente()
         if not periodo:
             return Response({'detail': 'El periodo de inscripción está cerrado o no ha sido habilitado por Coordinación Académica.'}, status=status.HTTP_409_CONFLICT)
-        materia_id = request.data.get('materia')
-        horario = (request.data.get('horario') or '').strip()
-        try:
-            materia = Materia.objects.get(pk=materia_id)
-        except Materia.DoesNotExist:
-            return Response({'materia': 'Materia no encontrada.'}, status=status.HTTP_400_BAD_REQUEST)
-        inscripcion, created = Inscripcion.objects.get_or_create(
-            aspirante=request.user,
-            materia=materia,
-            defaults={'horario': horario, 'periodo_inscripcion': periodo},
-        )
-        if not created:
-            return Response({'detail': 'Ya estás inscrito en esta materia.'}, status=status.HTTP_400_BAD_REQUEST)
-        _registrar_seguimiento(request.user, 'pendiente', f'Solicitud de inscripción recibida para {materia.clave} - {materia.nombre}.', 'Alumno', notificar=True, asunto='Solicitud de inscripción recibida')
-        return Response(InscripcionSerializer(inscripcion).data, status=status.HTTP_201_CREATED)
+        numero_periodo = getattr(request.user, 'numero_periodo_actual', None)
+        if not numero_periodo:
+            return Response({'detail': 'Coordinación Académica debe asignarte el semestre o cuatrimestre actual.'}, status=status.HTTP_409_CONFLICT)
+        configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=request.user.programa, activo=True).first()
+        if not configuracion:
+            return Response({'detail': 'Tu programa aún no tiene un plan de estudios configurado.'}, status=status.HTTP_409_CONFLICT)
+
+        materias_ids = request.data.get('materias')
+        if not isinstance(materias_ids, list) or not all(str(item).isdigit() for item in materias_ids):
+            return Response({'materias': 'Envía una lista de materias para completar la carga del periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+        materias_ids = [int(item) for item in materias_ids]
+        if len(set(materias_ids)) != len(materias_ids):
+            return Response({'materias': 'No repitas materias en la selección.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            existentes_periodo = Inscripcion.objects.filter(aspirante=request.user, periodo_inscripcion=periodo)
+            existentes_ids = set(existentes_periodo.values_list('materia_id', flat=True))
+            if existentes_periodo.count() + len(materias_ids) != 4:
+                faltantes = max(0, 4 - existentes_periodo.count())
+                return Response({'detail': f'Debes completar exactamente 4 materias este periodo. Selecciona {faltantes}.'}, status=status.HTTP_400_BAD_REQUEST)
+            if existentes_ids.intersection(materias_ids):
+                return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            plan_ids = set(_materias_plan_disponibles(request.user, configuracion).filter(
+                materia_id__in=materias_ids,
+            ).values_list('materia_id', flat=True))
+            if plan_ids != set(materias_ids):
+                return Response({'detail': 'Solo puedes inscribir materias del plan correspondiente a tu semestre o cuatrimestre actual.'}, status=status.HTTP_400_BAD_REQUEST)
+            if Inscripcion.objects.filter(aspirante=request.user, materia_id__in=materias_ids, periodo_inscripcion=periodo).exists():
+                return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            materias = list(Materia.objects.select_for_update().filter(pk__in=materias_ids).order_by('clave'))
+            if len(materias) != len(materias_ids):
+                return Response({'materias': 'Una o más materias ya no están disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
+            llenas = [materia for materia in materias if Inscripcion.objects.filter(materia=materia).count() >= materia.capacidad]
+            if llenas:
+                return Response({'detail': f'No hay cupo en: {", ".join(materia.clave for materia in llenas)}.'}, status=status.HTTP_409_CONFLICT)
+
+            inscripciones = [
+                Inscripcion(aspirante=request.user, materia=materia, periodo_inscripcion=periodo, horario=materia.horario)
+                for materia in materias
+            ]
+            Inscripcion.objects.bulk_create(inscripciones)
+
+        for materia in materias:
+            _registrar_seguimiento(request.user, 'pendiente', f'Solicitud de inscripción recibida para {materia.clave} - {materia.nombre}.', 'Alumno', notificar=True, asunto='Solicitud de inscripción recibida')
+        return Response(InscripcionSerializer(inscripciones, many=True).data, status=status.HTTP_201_CREATED)
 
 
 class SolicitudAcademicaView(APIView):
@@ -517,9 +642,10 @@ class MisEntrevistasView(APIView):
                     'entrevistas_completadas': entrevistas_completadas,
                 }
             })
-        except Exception as e:
+        except Exception:
+            logger.exception('Error al consultar las entrevistas del alumno %s', request.user.pk)
             return Response(
-                {'error': str(e)},
+                {'error': 'No se pudieron cargar las entrevistas virtuales.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -536,6 +662,7 @@ class MisExamenesView(APIView):
     def post(self, request):
         try: examen = request.user.examenes_en_linea.get(pk=request.data.get('id'))
         except ExamenEnLinea.DoesNotExist: return Response({'detail': 'Examen no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if examen.tipo == 'predoctoral': return Response({'detail': 'El examen predoctoral debe ser evaluado por tu Director de Tesis o Coordinación Académica.'}, status=status.HTTP_400_BAD_REQUEST)
         if examen.estado != 'programado': return Response({'detail': 'Este examen no está disponible.'}, status=status.HTTP_400_BAD_REQUEST)
         examen.estado = 'iniciado'; examen.fecha_inicio = timezone.now(); examen.intentos += 1; examen.save(update_fields=['estado','fecha_inicio','intentos','updated_at'])
         return Response(ExamenEnLineaSerializer(examen).data)
@@ -543,6 +670,7 @@ class MisExamenesView(APIView):
     def put(self, request):
         try: examen = request.user.examenes_en_linea.get(pk=request.data.get('id'))
         except ExamenEnLinea.DoesNotExist: return Response({'detail': 'Examen no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if examen.tipo == 'predoctoral': return Response({'detail': 'El examen predoctoral debe ser evaluado por tu Director de Tesis o Coordinación Académica.'}, status=status.HTTP_400_BAD_REQUEST)
         if examen.estado != 'iniciado': return Response({'detail': 'El examen no está iniciado.'}, status=status.HTTP_400_BAD_REQUEST)
         respuestas = request.data.get('respuestas', {})
         preguntas = list(examen.preguntas.all()); correctas = 0
@@ -592,6 +720,7 @@ class HorarioFormalDescargaView(APIView):
 
     def get(self, request):
         if request.user.is_staff: return Response(status=status.HTTP_403_FORBIDDEN)
+        datos_academicos = _datos_academicos_boleta(request.user)
         bio = BytesIO(); doc = SimpleDocTemplate(bio, pagesize=landscape(letter), rightMargin=.45*inch, leftMargin=.45*inch, topMargin=.4*inch, bottomMargin=.5*inch)
         styles = getSampleStyleSheet(); title = ParagraphStyle('HorarioFormalTitle', parent=styles['Title'], alignment=1, fontSize=13, leading=16, textColor=colors.HexColor('#00695c'))
         def logo(name, width):
@@ -599,13 +728,17 @@ class HorarioFormalDescargaView(APIView):
             return Image(path, width=width, height=width*.62) if os.path.exists(path) else Paragraph('', styles['Normal'])
         header = Table([[logo('logociv.png', .72*inch), Paragraph('<b>Centro de Investigación y de Estudios Avanzados</b><br/><font size="12">Horario Académico</font>', title), logo('6-removebg-preview.png', .9*inch)]], colWidths=[1.05*inch,4.55*inch,1.05*inch])
         header.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),('ALIGN',(0,0),(0,0),'LEFT'),('ALIGN',(2,0),(2,0),'RIGHT'),('LINEBELOW',(0,0),(-1,-1),1,colors.HexColor('#00695c')),('BOTTOMPADDING',(0,0),(-1,-1),8)]))
-        datos = Table([[Paragraph(f'<b>Alumno:</b> {request.user.nombre or "—"}', styles['BodyText']), Paragraph(f'<b>Matrícula:</b> {request.user.matricula or request.user.usuario or "—"}', styles['BodyText'])], [Paragraph(f'<b>Programa:</b> {request.user.programa or "—"}', styles['BodyText']), Paragraph(f'<b>Unidad:</b> {request.user.unidad or "—"}', styles['BodyText'])]], colWidths=[4.5*inch, 3.2*inch]); datos.setStyle(TableStyle([('BOX',(0,0),(-1,-1),.6,colors.HexColor('#00695c')),('INNERGRID',(0,0),(-1,-1),.3,colors.HexColor('#b8c7d1')),('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f1f8f7')),('PADDING',(0,0),(-1,-1),8)]))
+        datos = Table([
+            [Paragraph(f'<b>Alumno:</b> {request.user.nombre or "—"}', styles['BodyText']), Paragraph(f'<b>Matrícula:</b> {request.user.matricula or request.user.usuario or "—"}', styles['BodyText'])],
+            [Paragraph(f'<b>Programa:</b> {request.user.programa or "—"}', styles['BodyText']), Paragraph(f'<b>Unidad:</b> {request.user.unidad or "—"}', styles['BodyText'])],
+            [Paragraph(f'<b>Ciclo escolar:</b> {datos_academicos["periodo_escolar"]}', styles['BodyText']), Paragraph(f'<b>{datos_academicos["etiqueta_ciclo"]}:</b> {datos_academicos["numero_ciclo"]}', styles['BodyText'])],
+        ], colWidths=[4.5*inch, 3.2*inch]); datos.setStyle(TableStyle([('BOX',(0,0),(-1,-1),.6,colors.HexColor('#00695c')),('INNERGRID',(0,0),(-1,-1),.3,colors.HexColor('#b8c7d1')),('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f1f8f7')),('PADDING',(0,0),(-1,-1),8)]))
         story = [header, Spacer(1,12), datos, Spacer(1,16)]
         cell = lambda value: Paragraph(str(value), ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK'))
-        rows = [[cell('Clave del curso'),cell('Materia'),cell('Profesor'),cell('Horario'),cell('Estado')]]
-        for ins in request.user.inscripciones.select_related('materia').all(): rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.materia.profesor or 'Por asignar'),cell(ins.horario or ins.materia.horario or 'Por asignar'),cell(ins.get_estado_display())])
+        rows = [[cell('Clave del curso'),cell('Materia'),cell('Profesor'),cell('Horario'),cell('Salón / lugar'),cell('Estado')]]
+        for ins in request.user.inscripciones.select_related('materia').all(): rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.materia.profesor or 'Por asignar'),cell(ins.horario or ins.materia.horario or 'Por asignar'),cell(ins.materia.get_salon_display() or 'Por asignar'),cell(ins.get_estado_display())])
         if len(rows) > 1:
-            table = Table(rows, colWidths=[1.05*inch,2.75*inch,1.8*inch,2.35*inch,1.05*inch], repeatRows=1)
+            table = Table(rows, colWidths=[1.0*inch,2.55*inch,1.7*inch,2.15*inch,1.45*inch,1.2*inch], repeatRows=1)
             table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),('FONTSIZE',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f1f5f9')]),('PADDING',(0,0),(-1,-1),6)])); story.append(table)
         else: story.append(Paragraph('No hay materias inscritas para este periodo escolar.', styles['BodyText']))
         def pie_pagina(canvas, documento):
@@ -653,12 +786,37 @@ class ReinscripcionDescargaView(APIView):
         return FileResponse(bio, as_attachment=True, filename=f'{request.user.usuario}_reinscripcion.pdf', content_type='application/pdf')
 
 
+def _datos_academicos_boleta(alumno):
+    inscripcion = (
+        alumno.inscripciones.select_related('periodo_inscripcion')
+        .exclude(periodo_inscripcion__isnull=True)
+        .order_by('-periodo_inscripcion__apertura')
+        .first()
+    )
+    periodo = inscripcion.periodo_inscripcion if inscripcion else _periodo_inscripcion_vigente()
+    if not periodo:
+        periodo = PeriodoInscripcion.objects.order_by('-apertura').first()
+    configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
+    periodicidad = getattr(configuracion, 'periodicidad', None)
+    etiqueta_ciclo = {
+        'semestral': 'Semestre',
+        'cuatrimestral': 'Cuatrimestre',
+    }.get(periodicidad, 'Periodo académico')
+    return {
+        'periodo_escolar': periodo.nombre if periodo else '—',
+        'etiqueta_ciclo': etiqueta_ciclo,
+        'numero_ciclo': getattr(alumno, 'numero_periodo_actual', None) or '—',
+    }
+
+
 class BoletaInscripcionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         if request.user.is_staff:
             return Response(status=status.HTTP_403_FORBIDDEN)
+        matricula = getattr(request.user, 'matricula', None) or getattr(request.user, 'usuario', None) or '—'
+        datos_academicos = _datos_academicos_boleta(request.user)
         bio = BytesIO()
         doc = SimpleDocTemplate(bio, pagesize=letter, rightMargin=.55*inch, leftMargin=.55*inch, topMargin=.5*inch, bottomMargin=.5*inch)
         styles = getSampleStyleSheet()
@@ -669,7 +827,7 @@ class BoletaInscripcionView(APIView):
         header = Table([[logo('logociv.png', .72*inch), Paragraph('<b>Centro de Investigación y de Estudios Avanzados</b>', title), logo('6-removebg-preview.png', .9*inch)]], colWidths=[1.05*inch, 4.55*inch, 1.05*inch])
         header.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),('LINEBELOW',(0,0),(-1,-1),1,colors.HexColor('#00695c'))]))
         story = [header, Spacer(1,12), Paragraph('Boleta de Inscripción', ParagraphStyle('BoletaHead', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'))), Spacer(1,12)]
-        datos = [['Nombre del alumno', request.user.nombre or '—', 'Matrícula', request.user.usuario or '—'], ['CURP', request.user.curp or '—', 'Periodo Escolar', getattr(request.user, 'periodo_escolar', None) or '—'], ['Cuatrimestre', getattr(request.user, 'cuatrimestre', None) or '—', 'Departamento', request.user.departamento or '—'], ['Programa', request.user.programa or '—', 'Unidad', request.user.unidad or '—']]
+        datos = [['Nombre del alumno', request.user.nombre or '—', 'Matrícula', matricula], ['CURP', request.user.curp or '—', 'Periodo Escolar', datos_academicos['periodo_escolar']], [datos_academicos['etiqueta_ciclo'], datos_academicos['numero_ciclo'], 'Departamento', request.user.departamento or '—'], ['Programa', request.user.programa or '—', 'Unidad', request.user.unidad or '—']]
         label_style = ParagraphStyle('BoletaDataLabel', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=10)
         value_style = ParagraphStyle('BoletaDataValue', parent=styles['Normal'], fontSize=8.5, leading=10, wordWrap='CJK')
         datos = [[Paragraph(str(value), label_style if index in (0, 2) else value_style) for index, value in enumerate(row)] for row in datos]
@@ -693,7 +851,7 @@ class BoletaInscripcionView(APIView):
             canvas.setFont('Helvetica', 8); canvas.setFillColor(colors.HexColor('#41515a'))
             canvas.drawCentredString(letter[0]/2, .2*inch, 'Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco'); canvas.restoreState()
         doc.build(story, onFirstPage=pie_pagina, onLaterPages=pie_pagina); bio.seek(0)
-        return FileResponse(bio, as_attachment=True, filename=f'{request.user.usuario}_boleta_inscripcion.pdf', content_type='application/pdf')
+        return FileResponse(bio, as_attachment=True, filename=f'{matricula}_boleta_inscripcion.pdf', content_type='application/pdf')
 
 
 class ExpedienteDigitalView(APIView):
@@ -739,17 +897,20 @@ class ExpedienteDigitalView(APIView):
 class FirmaElectronicaView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self, request, pk):
-        if getattr(request.user, 'rol', '') not in ('director', 'docente') and not request.user.is_staff:
+        rol_usuario = str(getattr(request.user, 'rol', '')).strip().lower()
+        if rol_usuario not in ('director', 'director de tesis') and not request.user.is_staff:
             return Response({'detail': 'Solo el tutor o director puede firmar.'}, status=status.HTTP_403_FORBIDDEN)
         expediente = ExpedienteDigital.objects.select_related('aspirante').filter(pk=pk).first()
         if not expediente: return Response(status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_staff and str(getattr(request.user, 'rol', '')).strip().lower() in ('director', 'director de tesis'):
+        if not request.user.is_staff:
             if not (expediente.aspirante.director_tesis_id == request.user.id or expediente.aspirante.tutor_propuesto.strip().lower() in {
                 str(getattr(request.user, 'nombre', '')).strip().lower(),
                 str(getattr(request.user, 'usuario', '')).strip().lower(),
             }):
                 return Response({'detail': 'Este expediente no pertenece a uno de tus tesistas.'}, status=status.HTTP_403_FORBIDDEN)
-        rol = request.data.get('rol_firmante', 'director')
+            if request.data.get('rol_firmante', 'director') != 'director':
+                return Response({'detail': 'Un director solo puede firmar con el rol director.'}, status=status.HTTP_400_BAD_REQUEST)
+        rol = 'director' if not request.user.is_staff else request.data.get('rol_firmante', 'director')
         if FirmaElectronica.objects.filter(expediente=expediente, firmante=request.user, rol_firmante=rol).exists():
             return Response({'detail': 'El expediente ya fue firmado por este usuario.'}, status=status.HTTP_400_BAD_REQUEST)
         huella = hashlib.sha256(f'{expediente.folio}|{request.user.pk}|{rol}|{timezone.now().isoformat()}'.encode()).hexdigest()
@@ -821,6 +982,16 @@ class MarcarNotificacionesLeidasView(APIView):
         pendientes = aspirante.seguimientos.filter(leido=False)
         count = pendientes.update(leido=True)
         return Response({'updated': count})
+
+
+class AlertasAutomatizadasView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        rol = str(getattr(request.user, 'rol', '') or '').strip().lower()
+        if not (request.user.is_staff or rol in {'coordinacion', 'coordinador', 'servicios', 'servicios_escolares', 'servicios escolares'}):
+            return Response({'detail': 'No tienes permisos para ejecutar alertas automatizadas.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response(generar_alertas_automatizadas())
 
 
 class DocumentoAspiranteView(APIView):
@@ -1157,6 +1328,7 @@ class PanelCoordinacionView(APIView):
 
     def get(self, request):
         aspirantes = Aspirante.objects.filter(is_staff=False).order_by('-created_at')
+        solicitudes = aspirantes.filter(rol='aspirante')
         personas = AspiranteCoordinacionSerializer(aspirantes, many=True).data
         for item, persona in zip(personas, aspirantes):
             if persona.rol not in ('docente', 'director', 'investigador'):
@@ -1165,11 +1337,19 @@ class PanelCoordinacionView(APIView):
             tesistas = list(Aspirante.objects.filter(Q(director_tesis=persona) | Q(tutor_propuesto__iexact=persona.nombre), is_staff=False).exclude(rol__in=('docente', 'director', 'investigador')).values('id', 'nombre', 'matricula', 'programa', 'proceso_estado').distinct()) if persona.rol == 'director' else []
             item.update({'materias': materias, 'total_materias': len(materias), 'horarios': [m['horario'] for m in materias if m['horario']], 'creditos_impartidos': sum(m['creditos'] or 0 for m in materias), 'tesistas': tesistas, 'total_tesistas': len(tesistas)})
         return Response({
+            'usuario': {
+                'id': request.user.id,
+                'nombre': request.user.nombre,
+                'usuario': request.user.usuario,
+                'correo': request.user.correo,
+                'telefono': request.user.telefono,
+                'profile_photo': request.user.profile_photo.url if request.user.profile_photo else None,
+            },
             'resumen': {
-                'total': aspirantes.count(),
-                'por_revisar': aspirantes.filter(proceso_estado__in=['pendiente', 'iniciado']).count(),
-                'revision': aspirantes.filter(proceso_estado='revision').count(),
-                'aceptado': aspirantes.filter(proceso_estado='aceptado').count(),
+                'total': solicitudes.count(),
+                'por_revisar': solicitudes.filter(proceso_estado__in=['pendiente', 'iniciado']).count(),
+                'revision': solicitudes.filter(proceso_estado='revision').count(),
+                'aceptado': solicitudes.filter(proceso_estado='aceptado').count(),
             },
             'aspirantes': personas,
         })
@@ -1462,6 +1642,8 @@ class ConvertirMismaCuentaView(APIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
         if aspirante.rol == 'alumno':
             return Response({'detail': 'La cuenta ya está convertida a alumno.', 'rol': 'alumno'})
+        if aspirante.rol != 'aspirante' or aspirante.proceso_estado != 'aceptado':
+            return Response({'detail': 'Solo puedes convertir tu cuenta después de que Coordinación Académica acepte tu solicitud.'}, status=status.HTTP_403_FORBIDDEN)
         aspirante.rol = 'alumno'
         if not aspirante.matricula:
             aspirante.matricula = f'CINV-{timezone.now().year}-{Aspirante.objects.filter(matricula__startswith=f"CINV-{timezone.now().year}-").count() + 1:04d}'

@@ -1,16 +1,22 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import './NotificationBell.css';
 import notificIcon from '../assets/notific.png';
 
 export default function NotificationBell({session}) {
   const [eventos, setEventos] = useState([]);
   const [abierto, setAbierto] = useState(false);
+  const detenido = useRef(false);
 
   async function cargar() {
+    if (detenido.current) return;
     try {
       const respuesta = await fetch('/api/preregistro/seguimiento/', {
         headers: {Authorization: `Bearer ${session.access}`},
       });
+      if (respuesta.status === 403) {
+        detenido.current = true;
+        return;
+      }
       if (respuesta.ok) {
         const data = await respuesta.json();
         setEventos(data.eventos || []);
