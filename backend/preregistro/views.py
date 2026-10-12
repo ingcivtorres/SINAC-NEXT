@@ -19,7 +19,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion
+from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion, FirmaElectronica
 from .admin_views import AdminRolePermission
 from .alertas import generar_alertas_automatizadas
 from .serializers import (
@@ -1041,6 +1041,8 @@ class DocumentoAspiranteView(APIView):
             documento.nombre_original = archivo.name
             documento.tamano = tamano
             documento.lida_notificado = False
+            documento.revisado = False
+            documento.revisado_en = None
             documento.save()
         documento.lida_notificado = _notificar_documento_lida(documento)
         documento.save(update_fields=['lida_notificado', 'updated_at'])
@@ -1068,7 +1070,15 @@ class DocumentoDescargaView(APIView):
         except DocumentoAspirante.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
         if not request.user.is_staff and documento.aspirante_id != request.user.id:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            from .expediente_central_views import _es_gestion
+            director = str(getattr(request.user, 'rol', '')).strip().lower() in ('director', 'director de tesis') and (
+                documento.aspirante.director_tesis_id == request.user.id
+                or documento.aspirante.tutor_propuesto.strip().lower() in {str(getattr(request.user, 'nombre', '')).strip().lower(), str(getattr(request.user, 'usuario', '')).strip().lower()}
+            )
+            if not (_es_gestion(request.user) or director):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+        if request.query_params.get('inline') == '1':
+            return FileResponse(documento.archivo.open('rb'), as_attachment=False, filename=documento.nombre_original, content_type='application/pdf')
         return FileResponse(documento.archivo.open('rb'), as_attachment=True, filename=documento.nombre_original)
 
 
@@ -1371,6 +1381,20 @@ class EstadoAspiranteCoordinacionView(APIView):
         except Aspirante.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
+        if estado == 'aceptado':
+            documentos = list(aspirante.documentos.all())
+            if not documentos:
+                return Response(
+                    {'detail': 'No se puede aceptar al aspirante: aún no ha cargado documentos para revisar.', 'codigo': 'documentos_pendientes'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            sin_revisar = [documento.get_tipo_display() for documento in documentos if not documento.revisado]
+            if sin_revisar:
+                return Response(
+                    {'detail': f'Debes revisar todos los documentos antes de aceptar al aspirante. Pendientes: {", ".join(sin_revisar)}.', 'codigo': 'documentos_pendientes', 'pendientes': sin_revisar},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
         estado_anterior = aspirante.proceso_estado
         aspirante.proceso_estado = estado
         aspirante.save(update_fields=['proceso_estado', 'updated_at'])
@@ -1390,6 +1414,25 @@ class EstadoAspiranteCoordinacionView(APIView):
         if expediente:
             respuesta['expediente_digital'] = {'id': expediente.id, 'folio': expediente.folio, 'estado': expediente.estado, 'fecha_creacion': expediente.fecha_creacion}
         return Response(respuesta)
+
+
+class DocumentoRevisionCoordinacionView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def patch(self, request, pk):
+        from django.utils import timezone
+        try:
+            documento = DocumentoAspirante.objects.get(pk=pk, aspirante__is_staff=False)
+        except DocumentoAspirante.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        revisado = request.data.get('revisado', True)
+        if not isinstance(revisado, bool):
+            return Response({'revisado': 'Envía verdadero o falso.'}, status=status.HTTP_400_BAD_REQUEST)
+        documento.revisado = revisado
+        documento.revisado_en = timezone.now() if revisado else None
+        documento.save(update_fields=['revisado', 'revisado_en', 'updated_at'])
+        aspirante = Aspirante.objects.prefetch_related('documentos', 'seguimientos').get(pk=documento.aspirante_id)
+        return Response(AspiranteCoordinacionSerializer(aspirante).data)
 
 
 class AspiranteCoordinacionDetailView(APIView):

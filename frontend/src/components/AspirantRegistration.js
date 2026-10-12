@@ -3,14 +3,14 @@ import {useLanguage} from '../translations';
 
 const DRAFT_KEY = 'sinac_preregistro_draft_v2';
 const DEPARTAMENTOS = ['Biología Celular','Biomedicina Molecular','Bioquímica','Biotecnología y Bioingeniería','Computación','Control Automático','Farmacología','Física','Fisiología, Biofísica y Neurociencias','Genética y Biología Molecular','Infectómica y Patogénesis Molecular','Ingeniería Eléctrica','Investigación y Estudios Multidisciplinarios','Matemática Educativa','Matemáticas','Química','Toxicología'];
-const PROGRAMAS = ['Maestría — Teoría de la Computación (2 años)','Maestría — Inteligencia Artificial (2 años)','Maestría — Sistemas de Cómputo (2 años)','Maestría — Sistemas de Información (2 años)','Maestría — Ciencias de la Computación (2 años)','Doctorado — Teoría de la Computación (4 años)','Doctorado — Inteligencia Artificial (4 años)','Doctorado — Sistemas de Cómputo (4 años)','Doctorado — Sistemas de Información (4 años)','Doctorado — Ciencias de la Computación (4 años)'];
+import {PROGRAMAS} from './programasCatalogo';
 const SECCIONES = Array.from({length:65},(_,i)=>String(i+1));
 const REGISTRATION_COPY = {
   es: {
     privacyKicker:'PORTAL DE ASPIRANTES · SINAC NEXT', privacyTitle:'Antes de comenzar', privacyIntro:'Si tienes dudas sobre la información que vas a capturar a continuación, te invitamos a consultar nuestro', privacyNotice:'Aviso de Privacidad', privacyAvailable:'disponible en el pie de página.', privacyNote:'La información proporcionada será utilizada para gestionar tu proceso de registro y admisión.', accept:'Aceptar y continuar',
     successTitle:'Pre-registro enviado correctamente', successText:'Tu solicitud fue recibida. Guarda estos datos para acceder al sistema.', businessKey:'Clave de negocio', processState:'Estado LIDA', instance:'Instancia Camunda', credentials:'Guarda tu usuario y contraseña para iniciar sesión como Aspirante.',
     portalTitle:'Portal de Pre-registro SINAC', portalIntro:'Selecciona una sección del menú izquierdo para completarla.', progress:'completado', requiredNote:'* campos obligatorios', submit:'Enviar pre-registro', sending:'Enviando...',
-    required:'Obligatorio.', invalidCurp:'CURP no válida (18 caracteres, formato oficial).', invalidEmail:'Correo no válido.', minPassword:'Mínimo 8 caracteres.', passwordMismatch:'Las contraseñas no coinciden.', submitError:'Error al enviar el pre-registro.', connectionError:'No se pudo conectar con el servidor. Verifica tu conexión.',
+    required:'Obligatorio.', invalidCurp:'CURP no válida (18 caracteres, formato oficial).', invalidEmail:'Correo no válido.', minPassword:'Mínimo 8 caracteres, con mayúscula, minúscula y número.', passwordMismatch:'Las contraseñas no coinciden.', submitError:'Error al enviar el pre-registro.', connectionError:'No se pudo conectar con el servidor. Verifica tu conexión.',
     selectUnit:'Selecciona unidad', selectDepartment:'Selecciona departamento', selectSection:'Selecciona sección', selectProgram:'Selecciona programa',
     sections:{generales:'1. Datos Generales', domicilioActual:'2. Domicilio Actual', domicilioPermanente:'3. Domicilio Permanente', familiar:'4. Datos de un Familiar', escolaridad:'5. Escolaridad', idiomas:'6. Idiomas', publicaciones:'7. Publicaciones', apoyos:'8. Apoyos', experiencia:'9. Experiencia Profesional', cinvestav:'10. Cinvestav', adscripcion:'11. Adscripción'},
     fields:{nombre:'Nombre completo', usuario:'Usuario', curp:'CURP', correo:'Correo electrónico', telefono:'Teléfono / celular', nacimiento:'Fecha de nacimiento', password:'Contraseña', passwordConfirm:'Confirmar contraseña', estado:'Estado', municipio:'Municipio', direccion:'Dirección', familiar:'Nombre', parentesco:'Parentesco', telefonoFamiliar:'Teléfono', ultimoGrado:'Último grado', institucion:'Institución', promedio:'Promedio', idiomas:'Idiomas que dominas', publicaciones:'Publicaciones (artículos, libros, etc.)', apoyos:'Becas o apoyos recibidos', experiencia:'Experiencia laboral o de investigación', unidad:'Unidad', departamento:'Departamento', seccion:'Sección', programa:'Programa de interés', modalidad:'Modalidad', tutor:'Tutor propuesto', comentarios:'Comentarios'},
@@ -21,7 +21,7 @@ const REGISTRATION_COPY = {
     privacyKicker:'APPLICANT PORTAL · SINAC NEXT', privacyTitle:'Before you begin', privacyIntro:'If you have questions about the information you are about to provide, please read our', privacyNotice:'Privacy Notice', privacyAvailable:'available in the page footer.', privacyNote:'The information provided will be used to manage your registration and admission process.', accept:'Accept and continue',
     successTitle:'Pre-registration submitted successfully', successText:'Your application was received. Save these details to access the system.', businessKey:'Business key', processState:'LIDA status', instance:'Camunda instance', credentials:'Save your username and password to sign in as an Applicant.',
     portalTitle:'SINAC Pre-registration Portal', portalIntro:'Select a section from the menu on the left to complete it.', progress:'complete', requiredNote:'* required fields', submit:'Submit pre-registration', sending:'Submitting...',
-    required:'Required.', invalidCurp:'Invalid CURP (18 characters, official format).', invalidEmail:'Invalid email address.', minPassword:'At least 8 characters.', passwordMismatch:'Passwords do not match.', submitError:'Could not submit the pre-registration.', connectionError:'Could not connect to the server. Check your connection.',
+    required:'Required.', invalidCurp:'Invalid CURP (18 characters, official format).', invalidEmail:'Invalid email address.', minPassword:'At least 8 characters, with uppercase, lowercase and a number.', passwordMismatch:'Passwords do not match.', submitError:'Could not submit the pre-registration.', connectionError:'Could not connect to the server. Check your connection.',
     selectUnit:'Select a unit', selectDepartment:'Select a department', selectSection:'Select a section', selectProgram:'Select a program',
     sections:{generales:'1. Personal Information', domicilioActual:'2. Current Address', domicilioPermanente:'3. Permanent Address', familiar:'4. Family Contact', escolaridad:'5. Education', idiomas:'6. Languages', publicaciones:'7. Publications', apoyos:'8. Financial Support', experiencia:'9. Professional Experience', cinvestav:'10. Cinvestav', adscripcion:'11. Academic Affiliation'},
     fields:{nombre:'Full name', usuario:'Username', curp:'CURP', correo:'Email address', telefono:'Phone / mobile', nacimiento:'Date of birth', password:'Password', passwordConfirm:'Confirm password', estado:'State', municipio:'City / municipality', direccion:'Address', familiar:'Name', parentesco:'Relationship', telefonoFamiliar:'Phone', ultimoGrado:'Highest degree', institucion:'Institution', promedio:'Grade average', idiomas:'Languages you speak', publicaciones:'Publications (articles, books, etc.)', apoyos:'Scholarships or support received', experiencia:'Work or research experience', unidad:'Unit', departamento:'Department', seccion:'Section', programa:'Program of interest', modalidad:'Study mode', tutor:'Proposed advisor', comentarios:'Comments'},
@@ -32,7 +32,7 @@ const REGISTRATION_COPY = {
     privacyKicker:'BEWERBERPORTAL · SINAC NEXT', privacyTitle:'Bevor Sie beginnen', privacyIntro:'Wenn Sie Fragen zu den folgenden Angaben haben, lesen Sie bitte unseren', privacyNotice:'Datenschutzhinweis', privacyAvailable:'im Fußbereich der Seite.', privacyNote:'Die Angaben werden zur Verwaltung Ihres Registrierungs- und Zulassungsverfahrens verwendet.', accept:'Akzeptieren und fortfahren',
     successTitle:'Vorregistrierung erfolgreich gesendet', successText:'Ihr Antrag ist eingegangen. Speichern Sie diese Daten für den Systemzugang.', businessKey:'Geschäftsschlüssel', processState:'LIDA-Status', instance:'Camunda-Instanz', credentials:'Speichern Sie Benutzername und Passwort für die Anmeldung als Bewerber.',
     portalTitle:'SINAC-Vorregistrierungsportal', portalIntro:'Wählen Sie links einen Abschnitt aus und füllen Sie ihn aus.', progress:'abgeschlossen', requiredNote:'* Pflichtfelder', submit:'Vorregistrierung senden', sending:'Wird gesendet...',
-    required:'Pflichtfeld.', invalidCurp:'Ungültige CURP (18 Zeichen, offizielles Format).', invalidEmail:'Ungültige E-Mail-Adresse.', minPassword:'Mindestens 8 Zeichen.', passwordMismatch:'Die Passwörter stimmen nicht überein.', submitError:'Die Vorregistrierung konnte nicht gesendet werden.', connectionError:'Keine Verbindung zum Server. Bitte prüfen Sie Ihre Verbindung.',
+    required:'Pflichtfeld.', invalidCurp:'Ungültige CURP (18 Zeichen, offizielles Format).', invalidEmail:'Ungültige E-Mail-Adresse.', minPassword:'Mindestens 8 Zeichen mit Groß-, Kleinbuchstaben und Zahl.', passwordMismatch:'Die Passwörter stimmen nicht überein.', submitError:'Die Vorregistrierung konnte nicht gesendet werden.', connectionError:'Keine Verbindung zum Server. Bitte prüfen Sie Ihre Verbindung.',
     selectUnit:'Einheit auswählen', selectDepartment:'Abteilung auswählen', selectSection:'Bereich auswählen', selectProgram:'Studiengang auswählen',
     sections:{generales:'1. Persönliche Angaben', domicilioActual:'2. Aktuelle Anschrift', domicilioPermanente:'3. Dauerhafte Anschrift', familiar:'4. Familienkontakt', escolaridad:'5. Ausbildung', idiomas:'6. Sprachen', publicaciones:'7. Veröffentlichungen', apoyos:'8. Förderungen', experiencia:'9. Berufserfahrung', cinvestav:'10. Cinvestav', adscripcion:'11. Akademische Zuordnung'},
     fields:{nombre:'Vollständiger Name', usuario:'Benutzername', curp:'CURP', correo:'E-Mail-Adresse', telefono:'Telefon / Mobiltelefon', nacimiento:'Geburtsdatum', password:'Passwort', passwordConfirm:'Passwort bestätigen', estado:'Bundesstaat', municipio:'Ort / Gemeinde', direccion:'Anschrift', familiar:'Name', parentesco:'Verwandtschaftsverhältnis', telefonoFamiliar:'Telefon', ultimoGrado:'Höchster Abschluss', institucion:'Einrichtung', promedio:'Notendurchschnitt', idiomas:'Beherrschte Sprachen', publicaciones:'Veröffentlichungen (Artikel, Bücher usw.)', apoyos:'Erhaltene Stipendien oder Förderungen', experiencia:'Berufs- oder Forschungserfahrung', unidad:'Einheit', departamento:'Abteilung', seccion:'Bereich', programa:'Gewünschter Studiengang', modalidad:'Studienform', tutor:'Vorgeschlagene Betreuung', comentarios:'Kommentare'},
@@ -43,7 +43,7 @@ const REGISTRATION_COPY = {
     privacyKicker:'申请门户 · SINAC NEXT', privacyTitle:'开始之前', privacyIntro:'如果您对接下来填写的信息有疑问，请查阅我们的', privacyNotice:'隐私声明', privacyAvailable:'可在页面底部查看。', privacyNote:'所提供的信息将用于管理您的注册和录取流程。', accept:'接受并继续',
     successTitle:'预注册提交成功', successText:'已收到您的申请。请保存这些信息以访问系统。', businessKey:'业务密钥', processState:'LIDA 状态', instance:'Camunda 实例', credentials:'请保存用户名和密码，以申请人身份登录。',
     portalTitle:'SINAC 预注册门户', portalIntro:'请从左侧菜单选择一个部分并填写。', progress:'已完成', requiredNote:'* 必填项', submit:'提交预注册', sending:'正在提交...',
-    required:'必填项。', invalidCurp:'CURP 无效（18 个字符，须符合官方格式）。', invalidEmail:'电子邮件地址无效。', minPassword:'至少 8 个字符。', passwordMismatch:'两次密码不一致。', submitError:'无法提交预注册。', connectionError:'无法连接服务器，请检查网络连接。',
+    required:'必填项。', invalidCurp:'CURP 无效（18 个字符，须符合官方格式）。', invalidEmail:'电子邮件地址无效。', minPassword:'至少 8 个字符，含大写、小写字母和数字。', passwordMismatch:'两次密码不一致。', submitError:'无法提交预注册。', connectionError:'无法连接服务器，请检查网络连接。',
     selectUnit:'选择单位', selectDepartment:'选择部门', selectSection:'选择组别', selectProgram:'选择项目',
     sections:{generales:'1. 个人信息', domicilioActual:'2. 当前地址', domicilioPermanente:'3. 常住地址', familiar:'4. 家庭联系人', escolaridad:'5. 教育背景', idiomas:'6. 语言', publicaciones:'7. 出版物', apoyos:'8. 资助', experiencia:'9. 工作经历', cinvestav:'10. Cinvestav', adscripcion:'11. 学术归属'},
     fields:{nombre:'姓名', usuario:'用户名', curp:'CURP', correo:'电子邮件', telefono:'电话 / 手机', nacimiento:'出生日期', password:'密码', passwordConfirm:'确认密码', estado:'州', municipio:'市 / 县', direccion:'地址', familiar:'姓名', parentesco:'关系', telefonoFamiliar:'电话', ultimoGrado:'最高学历', institucion:'院校', promedio:'平均成绩', idiomas:'掌握的语言', publicaciones:'出版物（文章、书籍等）', apoyos:'获得的奖学金或资助', experiencia:'工作或研究经历', unidad:'单位', departamento:'部门', seccion:'组别', programa:'意向项目', modalidad:'学习方式', tutor:'拟定导师', comentarios:'备注'},
@@ -54,7 +54,7 @@ const REGISTRATION_COPY = {
     privacyKicker:'PORTAL DE CANDIDATOS · SINAC NEXT', privacyTitle:'Antes de começar', privacyIntro:'Se tiver dúvidas sobre as informações que serão preenchidas, consulte nosso', privacyNotice:'Aviso de Privacidade', privacyAvailable:'disponível no rodapé da página.', privacyNote:'As informações fornecidas serão usadas para gerenciar seu processo de cadastro e admissão.', accept:'Aceitar e continuar',
     successTitle:'Pré-cadastro enviado com sucesso', successText:'Sua solicitação foi recebida. Salve estes dados para acessar o sistema.', businessKey:'Chave de negócio', processState:'Status LIDA', instance:'Instância Camunda', credentials:'Salve seu usuário e senha para entrar como candidato.',
     portalTitle:'Portal de Pré-cadastro SINAC', portalIntro:'Selecione uma seção no menu à esquerda para preenchê-la.', progress:'concluído', requiredNote:'* campos obrigatórios', submit:'Enviar pré-cadastro', sending:'Enviando...',
-    required:'Obrigatório.', invalidCurp:'CURP inválida (18 caracteres, formato oficial).', invalidEmail:'E-mail inválido.', minPassword:'Mínimo de 8 caracteres.', passwordMismatch:'As senhas não coincidem.', submitError:'Não foi possível enviar o pré-cadastro.', connectionError:'Não foi possível conectar ao servidor. Verifique sua conexão.',
+    required:'Obrigatório.', invalidCurp:'CURP inválida (18 caracteres, formato oficial).', invalidEmail:'E-mail inválido.', minPassword:'Mínimo de 8 caracteres, com maiúscula, minúscula e número.', passwordMismatch:'As senhas não coincidem.', submitError:'Não foi possível enviar o pré-cadastro.', connectionError:'Não foi possível conectar ao servidor. Verifique sua conexão.',
     selectUnit:'Selecione uma unidade', selectDepartment:'Selecione um departamento', selectSection:'Selecione uma seção', selectProgram:'Selecione um programa',
     sections:{generales:'1. Dados pessoais', domicilioActual:'2. Endereço atual', domicilioPermanente:'3. Endereço permanente', familiar:'4. Contato familiar', escolaridad:'5. Escolaridade', idiomas:'6. Idiomas', publicaciones:'7. Publicações', apoyos:'8. Apoios financeiros', experiencia:'9. Experiência profissional', cinvestav:'10. Cinvestav', adscripcion:'11. Vínculo acadêmico'},
     fields:{nombre:'Nome completo', usuario:'Usuário', curp:'CURP', correo:'E-mail', telefono:'Telefone / celular', nacimiento:'Data de nascimento', password:'Senha', passwordConfirm:'Confirmar senha', estado:'Estado', municipio:'Município', direccion:'Endereço', familiar:'Nome', parentesco:'Parentesco', telefonoFamiliar:'Telefone', ultimoGrado:'Último grau', institucion:'Instituição', promedio:'Média', idiomas:'Idiomas que você domina', publicaciones:'Publicações (artigos, livros etc.)', apoyos:'Bolsas ou apoios recebidos', experiencia:'Experiência profissional ou de pesquisa', unidad:'Unidade', departamento:'Departamento', seccion:'Seção', programa:'Programa de interesse', modalidad:'Modalidade', tutor:'Orientador proposto', comentarios:'Comentários'},
@@ -115,7 +115,7 @@ function SectionBadge({def, form, errors}){
   return <span className="sec-badge sec-badge--partial">{done}/{total}</span>;
 }
 
-function Field({label, req, error, children}){
+function Field({label, req, error, ok, hint, children}){
   const {language} = useLanguage();
   const errorText = error?.startsWith('i18n:')
     ? (REGISTRATION_COPY[language] || REGISTRATION_COPY.es)[error.slice(5)]
@@ -123,9 +123,38 @@ function Field({label, req, error, children}){
   return (
     <label className="af-label">
       <span className="af-label-text">{label}{req && <em> *</em>}</span>
-      {children}
+      <span className={`af-valid-wrap ${ok ? 'is-valid' : ''}`}>
+        {children}
+        {ok && <span className="af-valid-check" role="img" aria-label="OK">✔</span>}
+      </span>
+      {hint}
       {errorText && <span className="field-error">{errorText}</span>}
     </label>
+  );
+}
+
+const CURP_RE = /^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9]$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const telefonoValido = valor => /^\d{10,15}$/.test(String(valor || '').replace(/[\s\-().+]/g, ''));
+
+const PASSWORD_RULES = {
+  es: ['Mínimo 8 caracteres', 'Una mayúscula', 'Una minúscula', 'Un número'],
+  en: ['At least 8 characters', 'One uppercase letter', 'One lowercase letter', 'One number'],
+  de: ['Mindestens 8 Zeichen', 'Ein Großbuchstabe', 'Ein Kleinbuchstabe', 'Eine Zahl'],
+  zh: ['至少 8 个字符', '一个大写字母', '一个小写字母', '一个数字'],
+  pt: ['Mínimo de 8 caracteres', 'Uma maiúscula', 'Uma minúscula', 'Um número'],
+};
+const passwordChecks = valor => [valor.length >= 8, /[A-Z]/.test(valor), /[a-z]/.test(valor), /\d/.test(valor)];
+const passwordValida = valor => passwordChecks(valor).every(Boolean);
+
+function PasswordRules({valor}) {
+  const {language} = useLanguage();
+  const labels = PASSWORD_RULES[language] || PASSWORD_RULES.es;
+  const checks = passwordChecks(valor);
+  return (
+    <ul className="af-pass-rules">
+      {labels.map((texto, i) => <li key={texto} className={checks[i] ? 'met' : ''}><span aria-hidden="true">{checks[i] ? '✔' : '○'}</span> {texto}</li>)}
+    </ul>
   );
 }
 
@@ -166,9 +195,9 @@ export default function AspirantRegistration(){
   function validate(){
     const errs = {};
     requiredFields.forEach(f => { if(!`${form[f]||''}`.trim()) errs[f]='i18n:required'; });
-    if(form.curp && !/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9]$/.test(form.curp)) errs.curp='i18n:invalidCurp';
-    if(form.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.correo)) errs.correo='i18n:invalidEmail';
-    if(form.password && form.password.length < 8) errs.password='i18n:minPassword';
+    if(form.curp && !CURP_RE.test(form.curp)) errs.curp='i18n:invalidCurp';
+    if(form.correo && !EMAIL_RE.test(form.correo)) errs.correo='i18n:invalidEmail';
+    if(form.password && !passwordValida(form.password)) errs.password='i18n:minPassword';
     if(form.password !== form.passwordConfirm) errs.passwordConfirm='i18n:passwordMismatch';
     setErrors(errs);
     const errSec = sectionDefs.find(s => s.required.some(f => errs[f]));
@@ -269,12 +298,12 @@ export default function AspirantRegistration(){
         <div className="cf-grid">
           <Field label={copy.fields.nombre} req error={errors.nombre}><input name="nombre" value={form.nombre} onChange={handleChange}/></Field>
           <Field label={copy.fields.usuario} req error={errors.usuario}><input name="usuario" value={form.usuario} onChange={handleChange} maxLength="20"/></Field>
-          <Field label={copy.fields.curp} req error={errors.curp}><input name="curp" value={form.curp} onChange={handleChange} maxLength="18" placeholder={copy.placeholders.curp}/></Field>
-          <Field label={copy.fields.correo} req error={errors.correo}><input name="correo" type="email" value={form.correo} onChange={handleChange}/></Field>
-          <Field label={copy.fields.telefono} req error={errors.telefono}><input name="telefono" type="tel" value={form.telefono} onChange={handleChange}/></Field>
+          <Field label={copy.fields.curp} req error={errors.curp} ok={CURP_RE.test(form.curp)}><input name="curp" value={form.curp} onChange={handleChange} maxLength="18" placeholder={copy.placeholders.curp}/></Field>
+          <Field label={copy.fields.correo} req error={errors.correo} ok={EMAIL_RE.test(form.correo)}><input name="correo" type="email" value={form.correo} onChange={handleChange}/></Field>
+          <Field label={copy.fields.telefono} req error={errors.telefono} ok={telefonoValido(form.telefono)}><input name="telefono" type="tel" value={form.telefono} onChange={handleChange}/></Field>
           <Field label={copy.fields.nacimiento} req error={errors.nacimiento}><input name="nacimiento" type="date" value={form.nacimiento} onChange={handleChange}/></Field>
-          <Field label={copy.fields.password} req error={errors.password}><input name="password" type="password" value={form.password} onChange={handleChange} placeholder={copy.placeholders.password}/></Field>
-          <Field label={copy.fields.passwordConfirm} req error={errors.passwordConfirm}><input name="passwordConfirm" type="password" value={form.passwordConfirm} onChange={handleChange}/></Field>
+          <Field label={copy.fields.password} req error={errors.password} ok={passwordValida(form.password)} hint={<PasswordRules valor={form.password}/>}><input name="password" type="password" value={form.password} onChange={handleChange} placeholder={copy.placeholders.password}/></Field>
+          <Field label={copy.fields.passwordConfirm} req error={errors.passwordConfirm} ok={passwordValida(form.password) && form.password === form.passwordConfirm}><input name="passwordConfirm" type="password" value={form.passwordConfirm} onChange={handleChange}/></Field>
         </div>
       );
       case 'domicilioActual': return (

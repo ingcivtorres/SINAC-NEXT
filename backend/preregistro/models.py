@@ -156,6 +156,8 @@ class DocumentoAspirante(models.Model):
     nombre_original = models.CharField(max_length=255)
     tamano = models.PositiveIntegerField()
     lida_notificado = models.BooleanField(default=False)
+    revisado = models.BooleanField(default=False)
+    revisado_en = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -365,6 +367,46 @@ class SeguimientoSolicitud(models.Model):
 
     def __str__(self):
         return f'{self.aspirante.usuario} - {self.estado}'
+
+
+class HistorialPersona(models.Model):
+    """Bitácora de cambios de alumnos, docentes y directores de tesis."""
+    persona = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='historial')
+    rol = models.CharField(max_length=20, blank=True)
+    evento = models.CharField(max_length=30)
+    campo = models.CharField(max_length=60, blank=True)
+    valor_anterior = models.CharField(max_length=255, blank=True)
+    valor_nuevo = models.CharField(max_length=255, blank=True)
+    realizado_por = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='historial_realizado')
+    realizado_por_nombre = models.CharField(max_length=180, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Historial de persona'
+        verbose_name_plural = 'Historial de personas'
+        ordering = ['-created_at', '-id']
+
+
+class EgresoAlumno(models.Model):
+    """Registro formal del egreso de un alumno."""
+    alumno = models.OneToOneField(Aspirante, on_delete=models.CASCADE, related_name='egreso')
+    fecha_egreso = models.DateField()
+    generacion = models.CharField(max_length=40, blank=True)
+    promedio_final = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    titulo_tesis = models.CharField(max_length=255, blank=True)
+    observaciones = models.TextField(blank=True)
+    excepcion_motivo = models.TextField(blank=True)
+    registrado_por = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='egresos_registrados')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Egreso de alumno'
+        verbose_name_plural = 'Egresos de alumnos'
+        ordering = ['-fecha_egreso', '-id']
+
+    def __str__(self):
+        return f'Egreso {self.alumno.usuario}'
 
 
 class Materia(models.Model):

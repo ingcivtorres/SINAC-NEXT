@@ -1,11 +1,13 @@
 ﻿import React, {useEffect, useMemo, useRef, useState} from "react";
 import ExpedienteCentralizadoCard from "./ExpedienteCentralizadoCard";
+import EgresadosPanel from "./EgresadosPanel";
+import HistoricoPanel from "./HistoricoPanel";
 import {useSchoolServicesCopy} from "./schoolServicesPanelTranslations";
 
 const buildMenu = (copy) => [
   {label: copy.groups.panorama, items: [["resumen", copy.menu.resumen, "▦"], ["alumnos", copy.menu.alumnos, "♙"]]},
   {label: copy.groups.academicControl, items: [["inscripciones", copy.menu.inscripciones, "◫"], ["historial", copy.menu.historial, "▤"], ["calificaciones", copy.menu.calificaciones, "✓"]]},
-  {label: copy.groups.documentation, items: [["constancias", copy.menu.constancias, "▣"], ["egreso", copy.menu.egreso, "◆"]]},
+  {label: copy.groups.documentation, items: [["constancias", copy.menu.constancias, "▣"], ["egreso", copy.menu.egreso, "◆"], ["egresados", copy.menu.egresados, "♛"], ["historico", copy.menu.historico, "⟲"]]},
   {label: copy.groups.institutional, items: [["reportes", copy.menu.reportes, "▥"]]},
 ];
 
@@ -508,6 +510,9 @@ export default function PanelServiciosEscolares({session, onLogout}) {
         </div>
       );
     }
+
+    if (active === "egresados") return <EgresadosPanel session={session} onLogout={onLogout}/>;
+    if (active === "historico") return <HistoricoPanel session={session} onLogout={onLogout}/>;
 
     return null;
   }

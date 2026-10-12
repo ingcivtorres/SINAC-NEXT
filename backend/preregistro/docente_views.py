@@ -647,3 +647,8 @@ class DocenteEntrevistaDetailView(APIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
         
         return Response(EntrevistaVirtualSerializer(entrevista).data)
+
+    def put(self, request, pk):
+        return DocenteEntrevistaView().put(request, pk)
+
+    patch = put

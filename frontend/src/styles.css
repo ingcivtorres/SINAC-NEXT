@@ -835,3 +835,18 @@ html { transition: background-color .2s ease, color .2s ease }
 @media(max-width:700px){.entrevista-form-grid{grid-template-columns:1fr}.entrevista-form-wide{grid-column:auto}.entrevista-alumno-item{display:grid;gap:14px}.entrevista-alumno-actions{justify-content:flex-start;min-width:0;text-align:left}}
 /* Registro y revisión de proyectos de tesis */
 .director-project-list{display:grid;gap:14px}.director-project-list article{display:flex;justify-content:space-between;gap:20px;padding:18px;border:1px solid rgba(0,137,123,.16);border-radius:15px;background:var(--surface)}.director-project-list article>div:first-child{min-width:0}.director-project-list strong{display:block;color:var(--text);font-size:1.05rem}.director-project-list small,.director-project-meta{display:block;color:var(--muted);margin-top:6px}.director-project-list p{color:var(--muted);line-height:1.5;margin:12px 0 0}.director-project-list blockquote{margin:12px 0 0;padding:10px 12px;border-left:3px solid var(--primary);background:rgba(0,137,123,.07);color:var(--text)}.director-project-actions{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:180px}.director-project-actions .director-status-badge{width:100%;text-align:right}.director-project-actions button{font-size:.78rem;padding:8px 10px}@media(max-width:700px){.director-project-list article{display:grid}.director-project-actions{justify-content:flex-start;min-width:0}.director-project-actions .director-status-badge{text-align:left}}
+.clabe-field{position:relative;display:block}.clabe-field input{width:100%;box-sizing:border-box;padding-right:38px}.clabe-field input.clabe-ok{border-color:#16a34a}.clabe-field input.clabe-bad{border-color:#dc2626}.clabe-check{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;background:#16a34a;color:#fff;font-size:.8rem;display:grid;place-items:center}.clabe-error{color:#dc2626;font-weight:600}
+.af-valid-wrap{position:relative;display:block}.af-valid-wrap>input{width:100%;box-sizing:border-box}.af-valid-wrap.is-valid>input{border-color:#16a34a;padding-right:38px}.af-valid-check{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;background:#16a34a;color:#fff;font-size:.8rem;display:grid;place-items:center;pointer-events:none}
+.af-pass-rules{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px;font-size:.78rem;font-weight:600;color:var(--muted)}.af-pass-rules li.met{color:#16a34a}
+
+.exp-alumno{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:12px 0}
+.exp-alumno-datos{display:flex;flex-direction:column;flex:1;min-width:180px}
+.exp-foto{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid #00695c}
+.exp-foto-vacia{display:flex;align-items:center;justify-content:center;background:#e0f2f1;color:#00695c;font-weight:700;font-size:1.5rem}
+.exp-acciones{display:flex;gap:8px;flex-wrap:wrap}
+.exp-sello{display:flex;gap:10px;align-items:flex-start;border:1px solid #80cbc4;background:#f1f8f7;border-radius:8px;padding:8px 10px;margin-top:6px}
+.exp-sello-check{color:#fff;background:#2e7d32;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;flex:none}
+.exp-sello small,.exp-sello code{display:block;word-break:break-all}
+.exp-sello code{font-size:.68rem;color:#52616b}
+.exp-doc{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px}
+.exp-doc small{display:block;color:#64748b}

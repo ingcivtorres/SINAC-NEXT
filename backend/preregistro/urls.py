@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView, ConvertirMismaCuentaView
+from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView, ConvertirMismaCuentaView
 from .docente_views import PanelDocenteView, DocenteCatalogoMateriasView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
 from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, CoordinacionReporteView
 from .servicios_views import ServiciosEscolaresPanelView, ServiciosEscolaresAlumnoView, ServiciosEscolaresValidacionView, ServiciosEscolaresReporteView, ServiciosEscolaresDocumentoView
@@ -12,7 +12,9 @@ from .tesis_flujo_views import FlujoTesisView, SolicitudDireccionTesisDetailView
 from .antiplagio_views import RevisionAntiplagioView
 from .jurado_views import JuradoProyectoView, DefensaTesisView, JuradosDisponiblesView
 from .diploma_views import DiplomaDigitalView
-from .expediente_central_views import ExpedienteCentralizadoView
+from .expediente_central_views import ExpedienteCentralizadoView, ExpedientePDFView
+from .egresados_views import EgresadosView, EgresadoDetailView
+from .historico_views import HistoricoPersonasView
 
 urlpatterns = [
     path('servicios-escolares/panel/', ServiciosEscolaresPanelView.as_view(), name='servicios-panel'),
@@ -22,7 +24,11 @@ urlpatterns = [
     path('servicios-escolares/alumnos/<int:pk>/documentos/<str:tipo>/', ServiciosEscolaresDocumentoView.as_view(), name='servicios-documento'),
     path('servicios-escolares/expedientes/', ExpedienteDigitalView.as_view(), name='expedientes-digitales'),
     path('servicios-escolares/expedientes/<int:pk>/', ExpedienteDigitalView.as_view(), name='expediente-digital-detail'),
+    path('historico/', HistoricoPersonasView.as_view(), name='historico-personas'),
+    path('egresados/', EgresadosView.as_view(), name='egresados'),
+    path('egresados/<int:pk>/', EgresadoDetailView.as_view(), name='egresado-detail'),
     path('expedientes/<int:pk>/centralizado/', ExpedienteCentralizadoView.as_view(), name='expediente-centralizado'),
+    path('expedientes/<int:pk>/pdf/', ExpedientePDFView.as_view(), name='expediente-pdf'),
     path('expedientes/<int:pk>/firma/', FirmaElectronicaView.as_view(), name='firma-electronica'),
     path('cargas-academicas/', CargaAcademicaWorkflowView.as_view(), name='cargas-academicas'),
     path('cargas-academicas/<int:pk>/', CargaAcademicaWorkflowView.as_view(), name='carga-academica-detail'),
@@ -46,6 +52,7 @@ urlpatterns = [
     path('administracion/auditoria/', AdminAuditoriaView.as_view(), name='admin-auditoria'),
     path('administracion/configuracion/', AdminConfiguracionView.as_view(), name='admin-configuracion'),
     path('coordinacion/panel/', PanelCoordinacionView.as_view(), name='coordinacion-panel'),
+    path('coordinacion/documentos/<int:pk>/revision/', DocumentoRevisionCoordinacionView.as_view(), name='coordinacion-documento-revision'),
     path('coordinacion/aspirantes/<int:pk>/estado/', EstadoAspiranteCoordinacionView.as_view(), name='coordinacion-estado-aspirante'),
     path('coordinacion/aspirantes/<int:pk>/', AspiranteCoordinacionDetailView.as_view(), name='coordinacion-aspirante-detail'),
     path('coordinacion/materias/',                MateriasListView.as_view(), name='coordinacion-materias'),

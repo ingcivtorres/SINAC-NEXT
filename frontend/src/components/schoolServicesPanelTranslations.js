@@ -27,6 +27,8 @@ const catalog = {
       calificaciones: 'Calificaciones',
       constancias: 'Constancias y documentos',
       egreso: 'Egreso',
+      egresados: 'Egresados',
+      historico: 'Histórico',
       reportes: 'Reportes',
     },
     status: {
@@ -203,7 +205,7 @@ const catalog = {
     role: 'Administrative role',
     roleText: 'Review, validate, and generate documents.',
     groups: { panorama: 'Overview', academicControl: 'Academic control', documentation: 'Documentation and closure', institutional: 'Institutional intelligence' },
-    menu: { resumen: 'Overview', alumnos: 'Students', inscripciones: 'Enrollments', historial: 'Academic history', calificaciones: 'Grades', constancias: 'Certificates and documents', egreso: 'Graduation', reportes: 'Reports' },
+    menu: { resumen: 'Overview', alumnos: 'Students', inscripciones: 'Enrollments', historial: 'Academic history', calificaciones: 'Grades', constancias: 'Certificates and documents', egreso: 'Graduation', egresados: 'Graduates', historico: 'History', reportes: 'Reports' },
     status: { activo: 'Active', baja: 'Inactive', inactivo: 'Inactive', egresado: 'Graduated', cursando: 'In progress', aprobada: 'Passed', reprobada: 'Failed', pendiente: 'Pending', validada: 'Validated', observada: 'Observed', pending: 'Pending' },
     common: { noEnrollment: 'No enrollment', noProgram: 'No program', noDepartment: '—', noStudent: 'Select a student', noResults: 'There are no students matching the filters.', noSubjects: 'No enrolled subjects.', noGrades: 'No grades registered.', noComments: 'No comment.', byInstitution: 'Official record', activeStudents: 'Active students', totalStudents: 'Total students', institutionalAverage: 'Institutional average', academicPrevalidations: 'Academic prevalidations', activeAccount: 'With active account', officialRecord: 'Official record', quickConsult: 'QUICK SEARCH', registeredStudents: 'Registered students', viewAllStudents: 'View student management', institutionalManagement: 'Official management of students, enrollments, history, and documents.', close: 'Close', save: 'Save', cancel: 'Cancel', selectFirst: 'Select a student first.', generatePdf: 'Generate PDF', update: 'Update', allPrograms: 'All programs', allDepartments: 'All departments', allStatuses: 'All statuses', registered: 'Registered', pendingDocuments: 'Pending generation', graduate: 'Graduate', online: 'Online', newStudent: 'New student', noThreshold: 'No threshold' },
     table: { student: 'Student', enrollment: 'Enrollment', program: 'Program', department: 'Department', status: 'Status', actions: 'Actions', key: 'Code', subject: 'Subject', credits: 'Credits', professor: 'Professor', final: 'Final', validation: 'Validation', consult: 'View record', searchPlaceholder: 'Search by name, enrollment, username, or email', validate: 'Validate', observe: 'Observe', viewAll: 'View all', viewStudentData: 'Subjects for', enrolledStudents: 'Enrolled students', approvedSubjects: 'Approved subjects', creditsEarned: 'Earned credits', finalAverage: 'Final average', subjectHistory: 'Academic history', academicTrajectory: 'Complete trajectory', institutionalGrades: 'Institutional grades', documents: 'Certificates and documents', allDocuments: 'Official documents', byAcademicProgram: 'Enrollment by program', byDepartment: 'Enrollment by department', reportes: 'Reports', partial1: 'Partial 1', partial2: 'Partial 2', partial3: 'Partial 3' },

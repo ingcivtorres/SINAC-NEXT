@@ -1,4 +1,4 @@
-import os
+﻿import os
 from datetime import timedelta
 from io import BytesIO
 from unittest.mock import patch
@@ -13,7 +13,7 @@ from PIL import Image
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
-from preregistro.models import Aspirante, ConfiguracionPrograma, ExpedienteDigital, Materia, PeriodoInscripcion, SeguimientoSolicitud, ProyectoTesis, JuradoProyecto, DefensaTesis, Inscripcion, PlanEstudioMateria
+from preregistro.models import Aspirante, ConfiguracionPrograma, ExpedienteDigital, Materia, PeriodoInscripcion, SeguimientoSolicitud, ProyectoTesis, JuradoProyecto, DefensaTesis, Inscripcion, PlanEstudioMateria, DocumentoAspirante, EgresoAlumno
 from preregistro.alertas import generar_alertas_automatizadas
 from preregistro.serializers import AspiranteRegistroSerializer
 
@@ -1289,6 +1289,79 @@ class ConvertirMismaCuentaTests(TestCase):
         self.assertEqual(response.data['rol'], 'alumno')
 
 
+class AceptacionRequiereRevisionDocumentosTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.coordinacion = Aspirante.objects.create_user(
+            usuario='COORD01', correo='coord.docs@example.com', password='password123',
+            nombre='Coordinación', is_staff=True,
+        )
+        self.aspirante = Aspirante.objects.create_user(
+            usuario='ASPDOC01', correo='asp.docs@example.com', password='password123',
+            nombre='Aspirante Docs', curp='ASPD850101HDFRNN01', telefono='5512345678',
+            estado_actual='Ciudad de México', municipio_actual='Coyoacán', direccion_actual='Calle 1',
+            estado_permanente='Ciudad de México', municipio_permanente='Coyoacán', direccion_permanente='Calle 1',
+            nombre_familiar='Familiar', parentesco='Madre', telefono_familiar='5511111111',
+            ultimo_grado='Licenciatura', institucion='Cinvestav', unidad='Cinvestav',
+            departamento='Academia', seccion='Posgrado', programa='Ingeniería', business_key='ASPDOC-01',
+        )
+        self.documento = DocumentoAspirante.objects.create(
+            aspirante=self.aspirante, tipo='cv', nombre_original='cv.pdf', tamano=10,
+            archivo=SimpleUploadedFile('cv.pdf', b'%PDF-1.4'),
+        )
+        self.client.force_authenticate(user=self.coordinacion)
+
+    def aceptar(self):
+        return self.client.patch(f'/api/coordinacion/aspirantes/{self.aspirante.pk}/estado/', {'proceso_estado': 'aceptado'}, format='json')
+
+    def test_no_acepta_con_documentos_sin_revisar(self):
+        response = self.aceptar()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['codigo'], 'documentos_pendientes')
+        self.aspirante.refresh_from_db()
+        self.assertNotEqual(self.aspirante.proceso_estado, 'aceptado')
+
+    def test_no_acepta_sin_documentos(self):
+        self.documento.delete()
+
+        self.assertEqual(self.aceptar().status_code, 409)
+
+    def test_acepta_tras_revisar_documentos(self):
+        revision = self.client.patch(f'/api/coordinacion/documentos/{self.documento.pk}/revision/', {'revisado': True}, format='json')
+        self.assertEqual(revision.status_code, 200)
+
+        response = self.aceptar()
+
+        self.assertEqual(response.status_code, 200)
+        self.aspirante.refresh_from_db()
+        self.assertEqual(self.aspirante.proceso_estado, 'aceptado')
+
+    def test_coordinacion_puede_ver_documento_en_linea(self):
+        response = self.client.get(f'/api/preregistro/documentos/{self.documento.pk}/descarga/?inline=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response['Content-Disposition'].startswith('inline'))
+
+    def test_documento_sin_sesion_responde_no_autorizado(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.get(f'/api/preregistro/documentos/{self.documento.pk}/descarga/?inline=1')
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_resubir_documento_reinicia_la_revision(self):
+        self.documento.revisado = True
+        self.documento.save()
+        self.client.force_authenticate(user=self.aspirante)
+
+        self.client.post('/api/preregistro/documentos/', {'tipo': 'cv', 'archivo': SimpleUploadedFile('nuevo.pdf', b'%PDF-1.4')}, format='multipart')
+
+        self.documento.refresh_from_db()
+        self.assertFalse(self.documento.revisado)
+
+
 class RevisionAntiplagioProyectoTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -1450,3 +1523,95 @@ class JuradoYDefensaProyectoTests(TestCase):
         pdf_content = b''.join(response.streaming_content)
         self.assertTrue(pdf_content.startswith(b'%PDF'))
         self.assertIn(f'SINAC-DIP-{self.proyecto.pk:06d}-{defensa.pk:06d}'.encode(), response['Content-Disposition'].encode())
+
+
+class EgresadosTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.coordinacion = Aspirante.objects.create_user(
+            usuario='COORDEG', correo='coord.eg@example.com', password='password123',             nombre='Coordinación', is_staff=True, business_key='COORDEG-01',
+        )
+        self.alumno = Aspirante.objects.create_user(
+            usuario='ALUEG01', correo='alu.eg@example.com', password='password123', nombre='Alumno Egreso',
+            curp='ALEG850101HDFRNN01', rol='alumno', matricula='M-100', programa='Ingeniería', business_key='ALUEG-01',
+            profile_photo=SimpleUploadedFile('foto.png', b'x', content_type='image/png'),
+        )
+        self.client.force_authenticate(user=self.coordinacion)
+
+    def registrar(self, **extra):
+        return self.client.post('/api/egresados/', {'alumno_id': self.alumno.pk, 'fecha_egreso': '2025-06-30', 'generacion': '2023-2025', **extra}, format='json')
+
+    def test_exige_excepcion_si_prevalidacion_incompleta(self):
+        response = self.registrar()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['codigo'], 'prevalidacion_incompleta')
+        self.assertFalse(EgresoAlumno.objects.exists())
+
+    def test_registra_con_excepcion_y_crea_expediente(self):
+        response = self.registrar(excepcion_motivo='Convenio especial')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data['profile_photo'])
+        self.assertTrue(response.data['expediente_id'])
+        self.alumno.refresh_from_db()
+        self.assertEqual(self.alumno.proceso_estado, 'egresado')
+        self.assertEqual(self.registrar(excepcion_motivo='x').status_code, 409)
+
+    def test_lista_y_busca_egresados(self):
+        self.registrar(excepcion_motivo='Convenio especial')
+
+        data = self.client.get('/api/egresados/?q=Egreso').data
+        self.assertEqual(len(data['egresados']), 1)
+        self.assertEqual(data['candidatos'], [])
+        self.assertEqual(len(self.client.get('/api/egresados/?q=zzz').data['egresados']), 0)
+
+    def test_alumno_no_puede_consultar(self):
+        self.client.force_authenticate(user=self.alumno)
+
+        self.assertEqual(self.client.get('/api/egresados/').status_code, 403)
+
+
+class HistoricoPersonasTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.coordinacion = Aspirante.objects.create_user(
+            usuario='COORDHI', correo='coord.hi@example.com', password='password123',
+            nombre='Coord Historial', rol='servicios', business_key='COORDHI-01',
+        )
+        self.alumno = Aspirante.objects.create_user(
+            usuario='ALUHI01', correo='alu.hi@example.com', password='password123', nombre='Alumno Historial',
+            curp='ALHI850101HDFRNN01', rol='alumno', programa='Ingeniería', business_key='ALUHI-01',
+        )
+
+    def test_registra_alta_y_cambios_con_actor(self):
+        login = self.client.post('/api/auth/login/', {'usuario': 'COORDHI', 'password': 'password123'}, format='json')
+        token = login.data.get('access')
+        self.assertTrue(token, login.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        response = self.client.patch(f'/api/servicios-escolares/alumnos/{self.alumno.pk}/', {'programa': 'Maestría', 'proceso_estado': 'inactivo'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+
+        data = self.client.get(f'/api/historico/?persona={self.alumno.pk}').data
+        eventos = {(e['campo'], e['valor_anterior'], e['valor_nuevo'], e['realizado_por']) for e in data['eventos']}
+        self.assertIn(('Programa', 'Ingeniería', 'Maestría', 'Coord Historial'), eventos)
+        self.assertTrue(any(e['evento'] == 'alta' for e in data['eventos']))
+
+    def test_historial_de_director_asignado(self):
+        director = Aspirante.objects.create_user(
+            usuario='DIRHI01', correo='dir.hi@example.com', password='password123', nombre='Director Uno',
+            curp='DIHI850101HDFRNN01', rol='director', business_key='DIRHI-01',
+        )
+        self.alumno.director_tesis = director
+        self.alumno.save()
+        self.client.force_authenticate(user=self.coordinacion)
+
+        eventos = self.client.get(f'/api/historico/?persona={self.alumno.pk}').data['eventos']
+        self.assertTrue(any(e['campo'] == 'Director de tesis' and e['valor_nuevo'] == 'Director Uno' for e in eventos))
+        self.assertEqual(len(self.client.get('/api/historico/?rol=director').data['eventos']), 1)
+
+    def test_alumno_no_consulta_historico(self):
+        self.client.force_authenticate(user=self.alumno)
+
+        self.assertEqual(self.client.get('/api/historico/').status_code, 403)

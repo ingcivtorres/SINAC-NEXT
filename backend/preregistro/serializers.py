@@ -288,7 +288,7 @@ class DocumentoAspiranteSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentoAspirante
         fields = ['id', 'tipo', 'tipo_label', 'archivo', 'nombre_original', 'tamano',
-                  'lida_notificado', 'updated_at']
+                  'lida_notificado', 'revisado', 'revisado_en', 'updated_at']
         read_only_fields = fields
 
 

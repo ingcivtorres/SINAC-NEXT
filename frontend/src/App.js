@@ -180,7 +180,7 @@ export default function App(){
           normalizedRole(session?.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={handleLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
       </main>
-      {session && ['aspirante', 'alumno'].includes(normalizedRole(session.role)) && <NotificationBell session={session} />}
+      {session && <NotificationBell session={session} />}
       {!loading && <Footer onNavigate={handleNavigate} />}
     </div>
   )

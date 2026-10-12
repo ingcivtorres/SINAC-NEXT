@@ -1,6 +1,9 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
+import EgresadosPanel from './EgresadosPanel';
+import HistoricoPanel from './HistoricoPanel';
+import {PROGRAMAS, gradoDePrograma} from './programasCatalogo';
 import {useCoordinationCopy} from './coordinationPanelTranslations';
 import './PanelCoordinacion.css';
 
@@ -15,7 +18,7 @@ const COORDINATION_NAV = [
   {label: 'overview', items: [['resumen', 'Resumen', '▦'], ['bandeja', 'Bandeja de solicitudes', '◷'], ['detalle', 'Detalle de expediente', '◉']]},
   {label: 'academic', items: [['periodos', 'Periodos de inscripción', '◫'], ['planes', 'Planes de estudio', '▧'], ['materias', 'Materias y cursos', '▤'], ['cargas', 'Aprobación de carga', '↗']]},
   {label: 'research', items: [['tesis', 'Proyectos de tesis', '◆'], ['asignaciones', 'Asignación de directores', '↔'], ['predoctoral', 'Examen predoctoral', '✦'], ['colegio', 'Colegio de Profesores', '◈']]},
-  {label: 'community', items: [['alumnos', 'Alumnos', '♙'], ['aspirantes', 'Aspirantes', '◎'], ['personal', 'Docentes y Directores', '◇'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
+  {label: 'community', items: [['alumnos', 'Alumnos', '♙'], ['aspirantes', 'Aspirantes', '◎'], ['egresados', 'Egresados', '♛'], ['historico', 'Histórico', '⟲'], ['personal', 'Docentes y Directores', '◇'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
 
 function etiquetaEstado(estado, copy) {
@@ -541,7 +544,10 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
         headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
         body: JSON.stringify({proceso_estado: estado}),
       });
-      if (!response.ok) throw new Error(copy.detail.updateError);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || copy.detail.updateError);
+      }
       const actualizado = await response.json();
       setDatos((actual) => ({...actual, aspirantes: actual.aspirantes.map((aspirante) => aspirante.id === actualizado.id ? actualizado : aspirante)}));
       setSeleccionado(actualizado);
@@ -552,6 +558,53 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     } finally {
       setActualizando(false);
     }
+  }
+
+  async function revisarDocumento(documento, revisado) {
+    if (actualizando) return;
+    setActualizando(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/coordinacion/documentos/${documento.id}/revision/`, {
+        method: 'PATCH',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({revisado}),
+      });
+      if (!response.ok) throw new Error(copy.detail.updateError);
+      const actualizado = await response.json();
+      setDetalle((actual) => ({...actual, documentos: actualizado.documentos}));
+    } catch (err) {
+      setError(err.message || copy.detail.updateError);
+    } finally {
+      setActualizando(false);
+    }
+  }
+
+  async function verDocumento(documento) {
+    const ventana = window.open('', '_blank');
+    try {
+      const response = await fetch(`${documento.archivo}?inline=1`, {headers: {Authorization: `Bearer ${session.access}`}});
+      if (!response.ok) throw new Error(copy.detail.downloadError);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(new Blob([blob], {type: 'application/pdf'}));
+      if (ventana) ventana.location.href = url;
+      else window.location.assign(url);
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      if (ventana) ventana.close();
+      setError(err.message || copy.detail.downloadError);
+    }
+  }
+
+  function intentarAceptar() {
+    const documentos = detalle?.documentos || [];
+    if (!documentos.length || documentos.some((documento) => !documento.revisado)) {
+      setSaveSuccess('');
+      setSaveError(copy.detail.reviewDocsFirst);
+      return;
+    }
+    setSaveError('');
+    cambiarEstado('aceptado');
   }
 
   // Helper to download generated PDF/XLSX files
@@ -751,7 +804,15 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                 {configuracionesPlan.length === 0 && <p className="coord-plan-notice">{copy.plans.noPlans}</p>}
                 <form className="coord-plan-form" onSubmit={guardarPlanEstudio}>
                   <div className="coord-plan-fields">
-                    <label><span>{copy.plans.program}</span><input value={planForm.programa} disabled={guardandoPlan} maxLength="180" required onChange={event => setPlanForm({...planForm,programa:event.target.value})}/></label>
+                    <label><span>{copy.plans.program}</span><select value={planForm.programa} disabled={guardandoPlan} required onChange={event => {
+                      const programa = event.target.value;
+                      setPlanForm(current => ({...current,programa}));
+                      if (programa) actualizarDuracionPlan({grado:gradoDePrograma(programa)});
+                    }}>
+                      <option value="">—</option>
+                      {planForm.programa && !PROGRAMAS.includes(planForm.programa) && <option value={planForm.programa}>{planForm.programa}</option>}
+                      {PROGRAMAS.map(programa => <option key={programa} value={programa}>{programa}</option>)}
+                    </select></label>
                     <label><span>{copy.plans.degree}</span><select value={planForm.grado} disabled={guardandoPlan} onChange={event => actualizarDuracionPlan({grado:event.target.value})}><option value="maestria">{copy.plans.masters}</option><option value="doctorado">{copy.plans.doctorate}</option></select></label>
                     <label><span>{copy.plans.periodicity}</span><select value={planForm.periodicidad} disabled={guardandoPlan} onChange={event => actualizarDuracionPlan({periodicidad:event.target.value})}><option value="semestral">{copy.plans.semesters}</option><option value="cuatrimestral">{copy.plans.quarters}</option></select></label>
                     <label><span>{copy.plans.periods}</span><input type="number" min="1" max="24" value={planForm.periodos_requeridos} disabled={guardandoPlan} required onChange={event => {
@@ -864,6 +925,9 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
               <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.reports.title}</h3><p>{copy.reports.intro}</p><div className="coord-report-grid"><div><strong>{datos.resumen.total || 0}</strong><span>{copy.reports.total}</span></div><div><strong>{datos.resumen.por_revisar || 0}</strong><span>{copy.reports.review}</span></div><div><strong>{datos.resumen.revision || 0}</strong><span>{copy.reports.inReview}</span></div><div><strong>{datos.resumen.aceptado || 0}</strong><span>{copy.reports.accepted}</span></div></div></div></div></div>
             )}
 
+            {activeSection === 'egresados' && <EgresadosPanel session={session} onLogout={onLogout}/>}
+            {activeSection === 'historico' && <HistoricoPanel session={session} onLogout={onLogout}/>}
+
             {activeSection === 'colegio' && (
               <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.college.title}</h3><p>{copy.college.intro}</p><form className="colegio-evaluacion-form" onSubmit={guardarEvaluacionColegio}><label>{copy.college.applicant}<select value={evaluacionForm.aspirante} onChange={e => setEvaluacionForm({...evaluacionForm, aspirante: e.target.value})}><option value="">{copy.college.selectApplicant}</option>{(datos.aspirantes || []).filter(a => a.rol === 'aspirante').map(a => <option key={a.id} value={a.id}>{a.nombre} — {a.programa || copy.college.noProgram}</option>)}</select></label><label>{copy.college.decision}<select value={evaluacionForm.estado} onChange={e => setEvaluacionForm({...evaluacionForm, estado: e.target.value})}><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.status.favorable}</option><option value="no_favorable">{copy.status.no_favorable}</option></select></label><label>{copy.college.comments}<textarea rows="4" value={evaluacionForm.dictamen} onChange={e => setEvaluacionForm({...evaluacionForm, dictamen: e.target.value})} placeholder={copy.college.placeholder} required /></label><button type="submit" className="qa-btn">{evaluacionForm.id ? copy.college.update : copy.college.save}</button>{evaluacionForm.id && <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setEvaluacionForm({aspirante: '', estado: 'en_revision', dictamen: ''})}>{copy.college.cancel}</button>}</form></div><div className="panel-card"><div className="admin-card-head"><div><h3>{copy.college.registered}</h3><p>{copy.college.history}</p></div><select className="coord-filter-select" value={evaluacionFiltro} onChange={e => setEvaluacionFiltro(e.target.value)}><option value="todas">{copy.college.all}</option><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.college.favorable}</option><option value="no_favorable">{copy.college.noFavorable}</option></select></div>{evaluacionesVisibles.length ? <div className="colegio-evaluaciones-list">{evaluacionesVisibles.map(e => <article key={e.id}><div><strong>{e.aspirante_nombre || `Aspirante #${e.aspirante}`}</strong><small>{e.evaluador_nombre || copy.predoctoral.unavailable} · {formatearFecha(e.fecha_evaluacion, copy.locale)}</small><p>{e.dictamen || '—'}</p></div><div className="coord-action-row"><span className={`estado-badge estado-${e.estado}`}>{etiquetaEstado(e.estado, copy)}</span><button type="button" className="qa-btn" onClick={() => setEvaluacionForm({id:e.id, aspirante:e.aspirante, estado:e.estado, dictamen:e.dictamen || ''})}>{copy.college.update}</button></div></article>)}</div> : <p className="empty-state">{copy.college.selectDecision}</p>}</div></div></div>
             )}
@@ -902,7 +966,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                           <div className="coord-action-row">
                                 {detalle?.rol === 'aspirante' && <>
                                   <button type="button" className="qa-btn" onClick={() => cambiarEstado('revision')} disabled={actualizando}>{copy.detail.markReview}</button>
-                                  <button type="button" className="qa-btn" onClick={() => cambiarEstado('aceptado')} disabled={actualizando}>{copy.detail.accept}</button>
+                                  <button type="button" className="qa-btn" onClick={intentarAceptar} disabled={actualizando}>{copy.detail.accept}</button>
                                   <button type="button" className="qa-btn" onClick={() => cambiarEstado('rechazado')} disabled={actualizando}>{copy.detail.reject}</button>
                                 </>}
                             {/* Conversion actions: only available once the aspirante is an alumno */}
@@ -1030,12 +1094,24 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
 
                           <div className="coord-documents">
                             <h4>{copy.detail.docs}</h4>
+                            {detalle.rol === 'aspirante' && detalle.proceso_estado !== 'aceptado' && (!detalle.documentos?.length || detalle.documentos.some((documento) => !documento.revisado)) && (
+                              <div className="api-error" role="alert">{copy.detail.reviewDocsFirst}</div>
+                            )}
                             {detalle.documentos?.length ? (
                               <ul>
                                 {detalle.documentos.map((documento) => (
                                   <li key={documento.id}>
                                     <span>{documento.tipo_label}</span>
-                                    <a href={documento.archivo} target="_blank" rel="noreferrer">{copy.detail.viewFile}</a>
+                                    <button type="button" className="link-btn" onClick={() => verDocumento(documento)}>{copy.detail.viewFile}</button>
+                                    <label className="coord-checkbox">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(documento.revisado)}
+                                        disabled={actualizando}
+                                        onChange={(event) => revisarDocumento(documento, event.target.checked)}
+                                      />
+                                      {documento.revisado ? copy.detail.docReviewed : copy.detail.markDocReviewed}
+                                    </label>
                                   </li>
                                 ))}
                               </ul>

@@ -1,0 +1,3 @@
+export const PROGRAMAS = ['Maestría — Teoría de la Computación (2 años)','Maestría — Inteligencia Artificial (2 años)','Maestría — Sistemas de Cómputo (2 años)','Maestría — Sistemas de Información (2 años)','Maestría — Ciencias de la Computación (2 años)','Doctorado — Teoría de la Computación (4 años)','Doctorado — Inteligencia Artificial (4 años)','Doctorado — Sistemas de Cómputo (4 años)','Doctorado — Sistemas de Información (4 años)','Doctorado — Ciencias de la Computación (4 años)'];
+
+export const gradoDePrograma = programa => (String(programa).startsWith('Doctorado') ? 'doctorado' : 'maestria');
