@@ -164,6 +164,7 @@ export default function AspirantRegistration(){
   const t = (key) => copy[key] || REGISTRATION_COPY.es[key] || key;
   const sectionTitle = (id) => copy.sections[id] || REGISTRATION_COPY.es.sections[id];
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [privacyTransitioning, setPrivacyTransitioning] = useState(false);
   const [form, setForm]           = useState(() => ({...initialForm, ...(getDraft()||{})}));
   const [submitted, setSubmitted]  = useState(false);
   const [submitData, setSubmitData] = useState(null);
@@ -185,6 +186,16 @@ export default function AspirantRegistration(){
   }), [form]);
 
   function selectSection(id){ setActiveId(id); }
+
+  function acceptPrivacyNotice(){
+    if (privacyTransitioning) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setPrivacyAccepted(true);
+      return;
+    }
+    setPrivacyTransitioning(true);
+    window.setTimeout(() => setPrivacyAccepted(true), 360);
+  }
 
   function handleChange(e){
     const {name, value} = e.target;
@@ -277,14 +288,14 @@ export default function AspirantRegistration(){
 
   if(!privacyAccepted){
     return (
-      <section className="registration-privacy-gate" aria-labelledby="privacy-gate-title">
+      <section className={`registration-privacy-gate${privacyTransitioning ? ' is-leaving' : ''}`} aria-labelledby="privacy-gate-title">
         <div className="registration-privacy-card">
           <div className="privacy-gate-icon" aria-hidden="true">✓</div>
           <span className="privacy-gate-kicker">{t('privacyKicker')}</span>
           <h1 id="privacy-gate-title">{t('privacyTitle')}</h1>
           <p>{t('privacyIntro')} <strong>{t('privacyNotice')}</strong>, {t('privacyAvailable')}</p>
           <div className="privacy-gate-note"><span aria-hidden="true">i</span><span>{t('privacyNote')}</span></div>
-          <button type="button" className="privacy-gate-accept" onClick={() => setPrivacyAccepted(true)}>{t('accept')}</button>
+          <button type="button" className="privacy-gate-accept" disabled={privacyTransitioning} onClick={acceptPrivacyNotice}>{t('accept')}</button>
         </div>
       </section>
     );
@@ -385,7 +396,7 @@ export default function AspirantRegistration(){
   }
 
   return (
-    <section id="portal-aspirantes" className="registration-section">
+    <section id="portal-aspirantes" className={`registration-section${privacyTransitioning ? ' registration-section--entering' : ''}`}>
       <div className="registration-hero">
         <div>
           <h1>{t('portalTitle')}</h1>

@@ -3,6 +3,7 @@ import DocumentosAspirante from './DocumentosAspirante';
 import SeguimientoSolicitud from './SeguimientoSolicitud';
 import SolicitudApoyo from './SolicitudApoyo';
 import PerfilAspirante from './PerfilAspirante';
+import ExamenesEnLinea from './ExamenesEnLinea';
 import {useApplicantCopy} from './aspirantPanelTranslations';
 import './PanelAspirante.css';
 import './PanelAspiranteSingle.css';
@@ -72,7 +73,7 @@ export default function PanelAspirante({session, onLogout}) {
   const [perfil, setPerfil] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
-  const [openSections, setOpenSections] = useState({inicio: true, perfil: false, expediente: false, proceso: false, documentos: false, notificaciones: false});
+  const [openSections, setOpenSections] = useState({inicio: true, perfil: false, expediente: false, proceso: false, documentos: false, examenes: false, notificaciones: false});
   const [seguimiento, setSeguimiento] = useState(null);
   const [seguimientoCargando, setSeguimientoCargando] = useState(true);
   const [confirmarConversion, setConfirmarConversion] = useState(false);
@@ -383,7 +384,7 @@ export default function PanelAspirante({session, onLogout}) {
           </SectionPanel>
 
           <SectionPanel id="examenes" label={copy.menu.examenes} open={openSections.examenes} onToggle={() => toggleSection('examenes')}>
-            <div className="panel-card"><h3>{copy.overview.examsTitle}</h3>{examenes.length ? <div className="request-list">{examenes.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.tipo_label} · {examen.duracion_minutos} {copy.overview.minutes}</p><span>{examen.estado_label}</span></article>)}</div> : <p className="empty-state">{copy.messages.noExams}</p>}</div>
+            <ExamenesEnLinea session={session} examenes={examenes} onChange={setExamenes} />
           </SectionPanel>
         </div>
       </div>}

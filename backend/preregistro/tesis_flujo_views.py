@@ -15,7 +15,17 @@ def _rol(user):
 
 
 def _es_coordinacion(user):
-    return bool(user.is_staff or _rol(user) in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+    rol = _rol(user)
+    if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+        return False
+    return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+
+
+def _puede_gestionar_planes(user):
+    rol = _rol(user)
+    return rol in {
+        'admin', 'administrador', 'servicios', 'servicios_escolares', 'servicios escolares',
+    }
 
 
 def _configuracion_data(configuracion):
@@ -127,17 +137,27 @@ class FlujoTesisView(APIView):
                 'solicitud': _solicitud_data(solicitud) if solicitud else None,
                 'directores': [{'id': item.id, 'nombre': item.nombre, 'departamento': item.departamento, 'programa': item.programa} for item in directores],
             })
+        if _puede_gestionar_planes(request.user) and _rol(request.user) in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+            configuraciones = ConfiguracionPrograma.objects.prefetch_related('materias_plan__materia').all()
+            return Response({
+                'configuraciones': [_configuracion_data(item) for item in configuraciones],
+                'materias': [{'id': item.id, 'clave': item.clave, 'nombre': item.nombre, 'creditos': item.creditos} for item in Materia.objects.order_by('clave')],
+            })
         if not _es_coordinacion(request.user):
             return Response({'detail': 'Solo el alumno o Coordinación Académica pueden consultar este flujo.'}, status=status.HTTP_403_FORBIDDEN)
         solicitudes = SolicitudDireccionTesis.objects.select_related('alumno', 'director_sugerido', 'director_asignado').all()
-        configuraciones = ConfiguracionPrograma.objects.prefetch_related('materias_plan__materia').all()
         directores = Aspirante.objects.filter(rol__in=['director', 'director de tesis'], is_active=True).order_by('nombre')
-        return Response({
+        resultado = {
             'solicitudes': [_solicitud_data(item) for item in solicitudes],
-            'configuraciones': [_configuracion_data(item) for item in configuraciones],
             'directores': [{'id': item.id, 'nombre': item.nombre, 'departamento': item.departamento, 'programa': item.programa} for item in directores],
-            'materias': [{'id': item.id, 'clave': item.clave, 'nombre': item.nombre, 'creditos': item.creditos} for item in Materia.objects.order_by('clave')],
-        })
+        }
+        if _puede_gestionar_planes(request.user):
+            configuraciones = ConfiguracionPrograma.objects.prefetch_related('materias_plan__materia').all()
+            resultado.update({
+                'configuraciones': [_configuracion_data(item) for item in configuraciones],
+                'materias': [{'id': item.id, 'clave': item.clave, 'nombre': item.nombre, 'creditos': item.creditos} for item in Materia.objects.order_by('clave')],
+            })
+        return Response(resultado)
 
     def post(self, request):
         if _rol(request.user) == 'alumno':
@@ -153,8 +173,8 @@ class FlujoTesisView(APIView):
             solicitud = SolicitudDireccionTesis.objects.create(alumno=request.user, director_sugerido=director, linea_investigacion=str(request.data.get('linea_investigacion') or '')[:180], justificacion=str(request.data.get('justificacion') or ''))
             _registrar_seguimiento(request.user, 'solicitud_direccion_tesis', 'Tu solicitud de asignación de Director de Tesis fue enviada a Coordinación Académica.', 'Tesis', notificar=False)
             return Response(_solicitud_data(solicitud), status=status.HTTP_201_CREATED)
-        if not _es_coordinacion(request.user):
-            return Response({'detail': 'No tienes permisos para configurar planes de estudio.'}, status=status.HTTP_403_FORBIDDEN)
+        if not _puede_gestionar_planes(request.user):
+            return Response({'detail': 'Solo Servicios Escolares puede configurar planes de estudio.'}, status=status.HTTP_403_FORBIDDEN)
         programa = str(request.data.get('programa') or '').strip()
         grado = request.data.get('grado')
         if not programa or grado not in {'maestria', 'doctorado'}:

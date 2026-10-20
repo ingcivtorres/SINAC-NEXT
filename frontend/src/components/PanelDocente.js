@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import DashboardAnalitico from './DashboardAnalitico';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
+import MiPerfilAcademico from './MiPerfilAcademico';
 import {useTeacherCopy} from './teacherPanelTranslations';
 
 const MENU_ITEMS = [
@@ -10,12 +11,20 @@ const MENU_ITEMS = [
   {label: 'followup', items: [['solicitudes', 'Solicitudes', '◈'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
 
+const CARGA_DOCENTE_TEXT = {
+  es: {subject: 'Materia', selectSubject: 'Selecciona una materia', teacher: 'Docente responsable', room: 'Salón', selectRoom: 'Selecciona salón', capacity: 'Cupo', modality: 'Modalidad', remove: 'Quitar', add: 'Agregar materia', save: 'Guardar borrador', update: 'Actualizar borrador', edit: 'Editar', cancel: 'Cancelar edición', count: 'Materias', actions: 'Acciones', saving: 'Guardando...'},
+  en: {subject: 'Subject', selectSubject: 'Select a subject', teacher: 'Instructor', room: 'Room', selectRoom: 'Select a room', capacity: 'Capacity', modality: 'Mode', remove: 'Remove', add: 'Add subject', save: 'Save draft', update: 'Update draft', edit: 'Edit', cancel: 'Cancel editing', count: 'Subjects', actions: 'Actions', saving: 'Saving...'},
+  de: {subject: 'Fach', selectSubject: 'Fach auswählen', teacher: 'Lehrkraft', room: 'Raum', selectRoom: 'Raum auswählen', capacity: 'Kapazität', modality: 'Modus', remove: 'Entfernen', add: 'Fach hinzufügen', save: 'Entwurf speichern', update: 'Entwurf aktualisieren', edit: 'Bearbeiten', cancel: 'Bearbeitung abbrechen', count: 'Fächer', actions: 'Aktionen', saving: 'Wird gespeichert...'},
+  zh: {subject: '课程', selectSubject: '选择课程', teacher: '负责教师', room: '教室', selectRoom: '选择教室', capacity: '容量', modality: '授课方式', remove: '移除', add: '添加课程', save: '保存草稿', update: '更新草稿', edit: '编辑', cancel: '取消编辑', count: '门课程', actions: '操作', saving: '正在保存...'},
+  pt: {subject: 'Disciplina', selectSubject: 'Selecione uma disciplina', teacher: 'Docente responsável', room: 'Sala', selectRoom: 'Selecione uma sala', capacity: 'Vagas', modality: 'Modalidade', remove: 'Remover', add: 'Adicionar disciplina', save: 'Salvar rascunho', update: 'Atualizar rascunho', edit: 'Editar', cancel: 'Cancelar edição', count: 'Disciplinas', actions: 'Ações', saving: 'Salvando...'},
+};
+
 function etiquetaEstado(estado, copy) {
   return copy.status[estado] || estado || copy.common.pending;
 }
 
 function TablaAlumnosMateria({materia, inscripciones, copy, soloCalificaciones = false}) {
-  const alumnos = inscripciones.filter(inscripcion => inscripcion.materia === materia.id);
+  const alumnos = inscripciones.filter(inscripcion => String(inscripcion.materia) === String(materia.id));
   return <section className="docente-materia-section">
     <div className="docente-materia-section-head">
       <div><span className="materia-card-clave">{materia.clave}</span><h4>{materia.nombre}</h4><small>{copy.common.schedule}: {materia.horario || copy.common.notAssigned} · {alumnos.length} {copy.common.student}{alumnos.length === 1 ? '' : 's'}</small></div>
@@ -39,6 +48,7 @@ function TablaAlumnosMateria({materia, inscripciones, copy, soloCalificaciones =
 
 export default function PanelDocente({session, onLogout}) {
   const copy = useTeacherCopy();
+  const cargaText = CARGA_DOCENTE_TEXT[(document.documentElement.lang || 'es').slice(0, 2)] || CARGA_DOCENTE_TEXT.es;
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -63,13 +73,24 @@ export default function PanelDocente({session, onLogout}) {
   async function leerJson(response, mensaje) { const tipo=response.headers.get('content-type')||''; if (!response.ok || !tipo.includes('application/json')) throw new Error(mensaje); return response.json(); }
   const [cargas, setCargas] = useState([]);
   const [periodoCarga, setPeriodoCarga] = useState('');
+  const [catalogoCarga, setCatalogoCarga] = useState({materias: [], docentes: [], salones: [], modalidades: [], docente_propio_id: null});
+  const [materiasCarga, setMateriasCarga] = useState([]);
+  const [cargaEditando, setCargaEditando] = useState(null);
+  const [guardandoCarga, setGuardandoCarga] = useState(false);
 
   async function cargarCargas() {
     try {
       const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`} });
-      const body = await r.json().catch(() => []);
+      const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.detail || copy.load.loadError);
-      setCargas(body);
+      setCargas(body.cargas || []);
+      setCatalogoCarga({
+        materias: body.materias_catalogo || [],
+        docentes: body.docentes_catalogo || [],
+        salones: body.salones || [],
+        modalidades: body.modalidades || [],
+        docente_propio_id: body.docente_propio_id,
+      });
     } catch (e) { setError(e.message || copy.load.loadError); }
   }
   useEffect(() => { if (activeSection === 'carga') cargarCargas(); }, [activeSection]);
@@ -80,6 +101,82 @@ export default function PanelDocente({session, onLogout}) {
       if (!r.ok) throw new Error(body.detail || copy.load.sendError);
       setPeriodoCarga(''); setError(''); cargarCargas();
     } catch (e) { setError(e.message || copy.load.sendError); }
+  }
+
+  function agregarMateriaCargaDocente() {
+    setMateriasCarga(items => [...items, {
+      materia: '',
+      docente: catalogoCarga.docente_propio_id ? String(catalogoCarga.docente_propio_id) : '',
+      horario: '',
+      salon: '',
+      capacidad: 42,
+      modalidad: 'presencial',
+    }]);
+  }
+
+  function editarCargaDocente(carga) {
+    setCargaEditando(carga.id);
+    setPeriodoCarga(carga.periodo);
+    setMateriasCarga(carga.materias.map(item => ({
+      materia: String(item.materia),
+      docente: String(catalogoCarga.docente_propio_id || item.docente || ''),
+      horario: item.horario,
+      salon: item.salon,
+      capacidad: item.capacidad,
+      modalidad: item.modalidad,
+    })));
+  }
+
+  function cancelarCargaDocente() {
+    setCargaEditando(null);
+    setPeriodoCarga('');
+    setMateriasCarga([]);
+  }
+
+  async function guardarCargaDocente(event) {
+    event.preventDefault();
+    setError('');
+    setGuardandoCarga(true);
+    try {
+      const url = cargaEditando ? `/api/cargas-academicas/${cargaEditando}/` : '/api/cargas-academicas/';
+      const r = await fetch(url, {
+        method: cargaEditando ? 'PATCH' : 'POST',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          periodo: periodoCarga.trim(),
+          materias: materiasCarga.map(item => ({
+            ...item,
+            materia: item.materia ? Number(item.materia) : null,
+            docente: item.docente ? Number(item.docente) : null,
+            capacidad: Number(item.capacidad),
+          })),
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
+      cancelarCargaDocente();
+      await cargarCargas();
+    } catch (e) {
+      setError(e.message || copy.load.sendError);
+    } finally {
+      setGuardandoCarga(false);
+    }
+  }
+
+  async function enviarBorradorCarga(id) {
+    setError('');
+    try {
+      const r = await fetch(`/api/cargas-academicas/${id}/`, {
+        method: 'PATCH',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({estado: 'en_revision'}),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
+      await cargarCargas();
+    } catch (e) {
+      setError(e.message || copy.load.sendError);
+    }
   }
 
   const cargarPanel = useCallback(async (signal) => {
@@ -160,16 +257,27 @@ export default function PanelDocente({session, onLogout}) {
         body: JSON.stringify(calificacionForm.numero_parcial === 'final' ? {inscripcion_id: calificacionForm.inscripcion_id, calificacion: calificacionForm.calificacion} : {inscripcion_id: calificacionForm.inscripcion_id, parcial: calificacionForm.calificacion, numero_parcial: calificacionForm.numero_parcial}),
       });
 
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json().catch(() => null) : null;
       if (!response.ok) {
-        const errData = (response.headers.get('content-type') || '').includes('application/json') ? await response.json().catch(() => ({})) : {};
+        const errData = data || {};
         setError(errData.error || copy.grading.saveError);
         return;
       }
+      if (!data || data.id == null) {
+        throw new Error(copy.grading.saveError);
+      }
 
+      setDatos(actual => actual ? {
+        ...actual,
+        inscripciones: actual.inscripciones.map(inscripcion => (
+          String(inscripcion.id) === String(data.id) ? data : inscripcion
+        )),
+      } : actual);
       setShowCalificacionForm(false);
       setCalificacionForm({inscripcion_id: '', calificacion: '', parcial: '', numero_parcial: '1'});
       setError('');
-      cargarPanel(new AbortController().signal);
+      await cargarPanel(new AbortController().signal);
     } catch (err) {
       setError(err.message || copy.grading.saveError);
     }
@@ -414,7 +522,41 @@ export default function PanelDocente({session, onLogout}) {
         )}
 
         {activeSection === 'carga' && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.load.kicker}</p><h3>{copy.load.title}</h3></div><button type="button" className="btn-secondary" onClick={cargarCargas}>{copy.load.refresh}</button></div><p>{copy.load.intro}</p><div className="coord-action-row"><input className="coord-search" placeholder={copy.load.periodPlaceholder} value={periodoCarga} onChange={e=>setPeriodoCarga(e.target.value)} /><button type="button" className="btn-primary" disabled={!periodoCarga.trim()} onClick={enviarCarga}>{copy.load.send}</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.load.period}</th><th>{copy.common.status}</th></tr></thead><tbody>{cargas.length ? cargas.map(c=><tr key={c.id}><td>{c.periodo || copy.load.noPeriod}</td><td><span className="estado-badge">{etiquetaEstado(c.estado, copy)}</span></td></tr>) : <tr><td colSpan="2">{copy.load.noLoads}</td></tr>}</tbody></table></div></div>
+          <div className="admin-card">
+            <div className="admin-card-head"><div><p className="panel-kicker">{copy.load.kicker}</p><h3>{copy.load.title}</h3></div><button type="button" className="btn-secondary" onClick={cargarCargas}>{copy.load.refresh}</button></div>
+            <p>{copy.load.intro}</p>
+            <form className="coord-carga-form" onSubmit={guardarCargaDocente}>
+              <label><span>{copy.load.period}</span><input className="coord-search" required placeholder={copy.load.periodPlaceholder} value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /></label>
+              <div className="coord-carga-rows">
+                {materiasCarga.map((item, index) => <div className="coord-carga-row" key={`docente-carga-${index}`}>
+                  <label><span>{cargaText.subject}</span><select required value={item.materia} onChange={e => {
+                    const materia = catalogoCarga.materias.find(m => String(m.id) === e.target.value);
+                    setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, materia: e.target.value, horario: materia?.horario || '', salon: materia?.salon || catalogoCarga.salones[0]?.id || '', capacidad: materia?.capacidad || 42} : row));
+                  }}>
+                    <option value="">{cargaText.selectSubject}</option>{catalogoCarga.materias.map(m => <option key={m.id} value={m.id}>{m.clave} · {m.nombre}</option>)}
+                  </select></label>
+                  <label><span>{cargaText.teacher}</span><input readOnly value={catalogoCarga.docentes.find(d => d.id === catalogoCarga.docente_propio_id)?.nombre || ''} required /></label>
+                  <label><span>{copy.common.schedule}</span><input required maxLength="120" value={item.horario} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, horario: e.target.value} : row))}/></label>
+                  <label><span>{cargaText.room}</span><select required value={item.salon} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, salon: e.target.value} : row))}>
+                    <option value="">{cargaText.selectRoom}</option>{catalogoCarga.salones.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                  </select></label>
+                  <label><span>{cargaText.capacity}</span><input type="number" min="1" max="32767" required value={item.capacidad} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, capacidad: e.target.value} : row))}/></label>
+                  <label><span>{cargaText.modality}</span><select required value={item.modalidad} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, modalidad: e.target.value} : row))}>
+                    {catalogoCarga.modalidades.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                  </select></label>
+                  <button type="button" className="btn-secondary" onClick={() => setMateriasCarga(rows => rows.filter((_, rowIndex) => rowIndex !== index))}>{cargaText.remove}</button>
+                </div>)}
+              </div>
+              <div className="coord-action-row">
+                <button type="button" className="btn-secondary" disabled={!catalogoCarga.materias.length} onClick={agregarMateriaCargaDocente}>{cargaText.add}</button>
+                <button type="submit" className="btn-primary" disabled={guardandoCarga || !periodoCarga.trim() || !materiasCarga.length}>{guardandoCarga ? cargaText.saving : cargaEditando ? cargaText.update : cargaText.save}</button>
+                {cargaEditando && <button type="button" className="btn-secondary" onClick={cancelarCargaDocente}>{cargaText.cancel}</button>}
+              </div>
+            </form>
+            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.load.period}</th><th>{copy.common.status}</th><th>{cargaText.count}</th><th>{cargaText.actions}</th></tr></thead><tbody>
+              {cargas.length ? cargas.map(c => <tr key={c.id}><td>{c.periodo || copy.load.noPeriod}</td><td><span className={`estado-badge estado-${c.estado}`}>{etiquetaEstado(c.estado, copy)}</span></td><td>{c.materias.length}</td><td>{c.estado === 'borrador' && <div className="coord-action-row"><button type="button" className="btn-secondary" onClick={() => editarCargaDocente(c)}>{cargaText.edit}</button><button type="button" className="btn-primary" onClick={() => enviarBorradorCarga(c.id)}>{copy.load.send}</button></div>}</td></tr>) : <tr><td colSpan="4">{copy.load.noLoads}</td></tr>}
+            </tbody></table></div>
+          </div>
         )}
 
         {activeSection === 'cursos' && datos && (
@@ -670,6 +812,7 @@ export default function PanelDocente({session, onLogout}) {
           </div>
         )}
 
+        {activeSection === 'perfil' && datos && <MiPerfilAcademico session={session} docenteId={datos.docente.id} onLogout={onLogout} />}
         {activeSection === 'perfil' && datos && <PerfilAspirante perfil={{...datos.docente, telefono: datos.docente.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, docente: {...actual.docente, ...actualizado}}))} />}
 
         {activeSection === 'reportes' && datos && (

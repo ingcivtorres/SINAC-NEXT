@@ -2,7 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView, ConvertirMismaCuentaView
 from .docente_views import PanelDocenteView, DocenteCatalogoMateriasView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
-from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, CoordinacionReporteView
+from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, InscripcionExtemporaneaView, CoordinacionReporteView
 from .servicios_views import ServiciosEscolaresPanelView, ServiciosEscolaresAlumnoView, ServiciosEscolaresValidacionView, ServiciosEscolaresReporteView, ServiciosEscolaresDocumentoView
 from .admin_views import AdminUsuariosView, AdminUsuarioDetailView, AdminCatalogosView, AdminAlumnosView, AdminDocentesView, AdminReportesView, AdminAuditoriaView, AdminConfiguracionView
 from .director_views import DirectorPanelView
@@ -15,6 +15,8 @@ from .diploma_views import DiplomaDigitalView
 from .expediente_central_views import ExpedienteCentralizadoView, ExpedientePDFView
 from .egresados_views import EgresadosView, EgresadoDetailView
 from .historico_views import HistoricoPersonasView
+from .docentes_views import ServiciosDocentesView, ServiciosDocenteDetailView
+from .examenes_gestion_views import ExamenesGestionView, ExamenesGestionDetailView, ExamenesCandidatosView
 
 urlpatterns = [
     path('servicios-escolares/panel/', ServiciosEscolaresPanelView.as_view(), name='servicios-panel'),
@@ -24,6 +26,11 @@ urlpatterns = [
     path('servicios-escolares/alumnos/<int:pk>/documentos/<str:tipo>/', ServiciosEscolaresDocumentoView.as_view(), name='servicios-documento'),
     path('servicios-escolares/expedientes/', ExpedienteDigitalView.as_view(), name='expedientes-digitales'),
     path('servicios-escolares/expedientes/<int:pk>/', ExpedienteDigitalView.as_view(), name='expediente-digital-detail'),
+    path('servicios-escolares/docentes/', ServiciosDocentesView.as_view(), name='servicios-docentes'),
+    path('servicios-escolares/docentes/<int:pk>/', ServiciosDocenteDetailView.as_view(), name='servicios-docente-detail'),
+    path('examenes-gestion/', ExamenesGestionView.as_view(), name='examenes-gestion'),
+    path('examenes-gestion/candidatos/', ExamenesCandidatosView.as_view(), name='examenes-candidatos'),
+    path('examenes-gestion/<int:pk>/', ExamenesGestionDetailView.as_view(), name='examenes-gestion-detail'),
     path('historico/', HistoricoPersonasView.as_view(), name='historico-personas'),
     path('egresados/', EgresadosView.as_view(), name='egresados'),
     path('egresados/<int:pk>/', EgresadoDetailView.as_view(), name='egresado-detail'),
@@ -33,6 +40,7 @@ urlpatterns = [
     path('cargas-academicas/', CargaAcademicaWorkflowView.as_view(), name='cargas-academicas'),
     path('cargas-academicas/<int:pk>/', CargaAcademicaWorkflowView.as_view(), name='carga-academica-detail'),
     path('periodos-inscripcion/', PeriodoInscripcionView.as_view(), name='periodos-inscripcion'),
+    path('coordinacion/alumnos/<int:pk>/inscripciones-extemporaneas/', InscripcionExtemporaneaView.as_view(), name='inscripciones-extemporaneas'),
     path('preregistro/',    PreregistroCreateView.as_view(), name='preregistro-create'),
     path('preregistro/me/', MiPerfilView.as_view(),          name='preregistro-me'),
     path('preregistro/perfil/', PerfilAspiranteView.as_view(), name='perfil-aspirante'),

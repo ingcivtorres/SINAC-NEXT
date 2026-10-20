@@ -1,5 +1,6 @@
 """Registro y consulta de egresados para Coordinación Académica y Servicios Escolares."""
 import uuid
+from collections import defaultdict
 from datetime import date
 
 from django.db import transaction
@@ -98,7 +99,20 @@ class EgresadosView(APIView):
         if generacion:
             egresos = egresos.filter(generacion__iexact=generacion)
         base = EgresoAlumno.objects.select_related('alumno')
-        candidatos = Aspirante.objects.filter(rol='alumno', egreso__isnull=True).exclude(proceso_estado='baja').order_by('nombre')
+        candidatos = list(
+            Aspirante.objects.filter(rol='alumno', egreso__isnull=True)
+            .exclude(proceso_estado='baja')
+            .order_by('nombre')
+        )
+        configuraciones = {}
+        for item in ConfiguracionPrograma.objects.filter(activo=True).order_by('id').prefetch_related('materias_plan__materia'):
+            configuraciones.setdefault(str(item.programa or '').strip().casefold(), item)
+        inscripciones_por_alumno = defaultdict(list)
+        if candidatos:
+            for inscripcion in Inscripcion.objects.filter(
+                aspirante_id__in=[alumno.pk for alumno in candidatos],
+            ).select_related('materia', 'periodo_inscripcion'):
+                inscripciones_por_alumno[inscripcion.aspirante_id].append(inscripcion)
         return Response({
             'egresados': [_serializar(item) for item in egresos],
             'filtros': {
@@ -106,7 +120,18 @@ class EgresadosView(APIView):
                 'generaciones': sorted({item.generacion for item in base if item.generacion}),
             },
             'candidatos': [
-                {'id': a.id, 'nombre': a.nombre, 'matricula': a.matricula, 'programa': a.programa, 'profile_photo': _foto(a)}
+                {
+                    'id': a.id,
+                    'nombre': a.nombre,
+                    'matricula': a.matricula,
+                    'programa': a.programa,
+                    'profile_photo': _foto(a),
+                    'prevalidacion_egreso': evaluar_prevalidacion_egreso(
+                        a,
+                        inscripciones_por_alumno[a.pk],
+                        configuraciones.get(str(a.programa or '').strip().casefold()),
+                    ),
+                }
                 for a in candidatos
             ],
         })

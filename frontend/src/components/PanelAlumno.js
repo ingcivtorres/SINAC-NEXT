@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
+import ExamenesEnLinea from './ExamenesEnLinea';
 import {useStudentCopy} from './studentPanelTranslations';
 import './PanelAlumno.css';
 import './PanelAlumnoFixes.css';
@@ -138,8 +139,8 @@ export default function PanelAlumno({session, onLogout}) {
   const [revisionAntiplagio, setRevisionAntiplagio] = useState(null);
   const [subiendoAntiplagio, setSubiendoAntiplagio] = useState(false);
   const [seccion, setSeccion] = useState('resumen'), [error, setError] = useState(''), [loading, setLoading] = useState(true), [message, setMessage] = useState('');
+  const [modalInscripcion, setModalInscripcion] = useState(null);
   const [periodoInscripcion, setPeriodoInscripcion] = useState(null);
-  const [respuestasExamen, setRespuestasExamen] = useState({});
   const [proyectoForm, setProyectoForm] = useState({titulo:'', resumen:'', linea_investigacion:'', objetivos:'', metodologia:''});
   const [flujoTesis, setFlujoTesis] = useState(null);
   const [solicitudTesisForm, setSolicitudTesisForm] = useState({director_sugerido:'', linea_investigacion:'', justificacion:''});
@@ -169,15 +170,18 @@ export default function PanelAlumno({session, onLogout}) {
     if (inscribiendo) return;
     if (!periodoInscripcion?.activo) {
       setError(copy.enrollment.activeClosed);
+      setModalInscripcion({kind: 'error', message: copy.enrollment.activeClosed});
       return;
     }
     const inscripcionesPeriodo = inscripciones.filter(item => item.periodo_nombre === periodoInscripcion.nombre).length;
     const faltan = Math.max(0, 4 - inscripcionesPeriodo);
     if (materiasSeleccionadas.length !== faltan) {
-      setError(copy.enrollment.exactCount.replace('{count}', faltan));
+      const detalle = copy.enrollment.exactCount.replace('{count}', faltan);
+      setError(detalle);
+      setModalInscripcion({kind: 'error', message: detalle});
       return;
     }
-    if (!window.confirm(copy.enrollment.confirm.replace('{count}', materiasSeleccionadas.length).replace('{period}', periodoInscripcion.nombre))) return;
+    setModalInscripcion({kind: 'processing'});
     setInscribiendo(true); setError(''); setMessage('');
     try {
       const r = await fetch('/api/preregistro/inscripciones/', {method: 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({materias: materiasSeleccionadas})});
@@ -191,10 +195,31 @@ export default function PanelAlumno({session, onLogout}) {
       setInscripciones(items => [...items, ...data]);
       setMateriasSeleccionadas([]);
       setMessage(copy.enrollment.registered.replace('{period}', periodoInscripcion.nombre));
-    } catch (e) { setError(e.message || copy.messages.courseLoadError); } finally { setInscribiendo(false); }
+      setModalInscripcion({kind: 'success', message: copy.enrollment.registered.replace('{period}', periodoInscripcion.nombre)});
+    } catch (e) {
+      const detalle = e.message || copy.messages.courseLoadError;
+      setError(detalle);
+      setModalInscripcion({kind: 'error', message: detalle});
+    } finally { setInscribiendo(false); }
   }
-  async function iniciarExamen(examen) { const r = await fetch('/api/preregistro/examenes/', {method: 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({id: examen.id})}); const data = await r.json(); if (!r.ok) return setError(data.detail || copy.exams.noStart); setExamenes(items => items.map(item => item.id === data.id ? data : item)); setMessage(copy.exams.started); }
-  async function enviarExamen(examen) { const r = await fetch('/api/preregistro/examenes/', {method: 'PUT', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify({id: examen.id, respuestas: respuestasExamen})}); const data = await r.json(); if (!r.ok) return setError(data.detail || copy.exams.noSend); setExamenes(items => items.map(item => item.id === data.id ? data : item)); setMessage(`${copy.exams.sent} ${copy.exams.score}: ${data.calificacion}`); }
+  function prepararInscripcion() {
+    if (!periodoInscripcion?.activo) {
+      setError(copy.enrollment.activeClosed);
+      setModalInscripcion({kind: 'error', message: copy.enrollment.activeClosed});
+      return;
+    }
+    const actuales = inscripciones.filter(item => item.periodo_nombre === periodoInscripcion.nombre).length;
+    const faltan = Math.max(0, 4 - actuales);
+    if (materiasSeleccionadas.length !== faltan) {
+      const detalle = copy.enrollment.exactCount.replace('{count}', faltan);
+      setError(detalle);
+      setModalInscripcion({kind: 'error', message: detalle});
+      return;
+    }
+    const detalle = copy.enrollment.confirm.replace('{count}', materiasSeleccionadas.length).replace('{period}', periodoInscripcion.nombre);
+    setError('');
+    setModalInscripcion({kind: 'confirm', message: detalle});
+  }
   async function guardarProyecto(event, enviarRevision = false) {
     event.preventDefault();
     setError('');
@@ -258,23 +283,87 @@ export default function PanelAlumno({session, onLogout}) {
       const examenesPredoctorales = examenes.filter(examen => examen.tipo === 'predoctoral');
       return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3></div><Badge tone="info">{copy.predoctoral.academic}</Badge></div><p>{copy.predoctoral.intro}</p>{examenesPredoctorales.length ? <div className="request-list">{examenesPredoctorales.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.descripcion || copy.predoctoral.evaluation}</p><p><strong>{copy.common.date}:</strong> {formatoFecha(examen.fecha_programada, copy.locale, copy.communication.datePending)} · <strong>{copy.common.duration}:</strong> {examen.duracion_minutos || 120} {copy.common.minutes}</p><Badge tone={examen.color || 'neutral'}>{etiquetaEstado(examen.estado, copy)}</Badge>{examen.calificacion !== null && examen.calificacion !== undefined && <p>{copy.common.result}: <strong>{examen.calificacion}</strong></p>}{examen.retroalimentacion && <p><strong>{copy.common.feedback}:</strong> {examen.retroalimentacion}</p>}</article>)}</div> : <p>{copy.predoctoral.noExam}</p>}</div>;
     }
-    if (seccion === 'examenes') return <div className="panel-card"><h3>{copy.exams.title}</h3><p>{copy.exams.intro}</p>{examenes.length ? <div className="request-list">{examenes.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.tipo_label} · {examen.duracion_minutos} {copy.common.minutes}</p><span>{etiquetaEstado(examen.estado, copy)}</span>{examen.estado === 'programado' && <button type="button" className="btn-primary" onClick={() => iniciarExamen(examen)}>{copy.exams.start}</button>}{examen.estado === 'iniciado' && <p>{copy.exams.started}</p>}{examen.calificacion !== null && <p>{copy.exams.score}: <strong>{examen.calificacion}</strong></p>}</article>)}</div> : <p>{copy.exams.noExams}</p>}</div>;
+    if (seccion === 'examenes') return <ExamenesEnLinea session={session} examenes={examenes} onChange={setExamenes} />;
     if (seccion === 'resumen') return <div className="alumno-dashboard-grid"><div className="panel-card alumno-welcome-card"><h3>{copy.summary.welcome}, {perfil.nombre || copy.summary.student}</h3><p>{copy.summary.user}: <strong>{perfil.usuario || perfil.correo || '-'}</strong></p><div className="info-grid"><InfoRow label={copy.summary.program} value={perfil.programa}/><InfoRow label={copy.summary.unit} value={perfil.unidad}/><InfoRow label={copy.summary.modality} value={perfil.modalidad}/><InfoRow label={copy.summary.currentStatus} value={etiquetaEstado(perfil.proceso_estado, copy)}/></div></div><div className="alumno-stats"><div><strong>{inscripciones.length}</strong><span>{copy.summary.registered}</span></div><div><strong>{promedio || '-'}</strong><span>{copy.summary.average}</span></div><div><strong>{solicitudes.length}</strong><span>{copy.summary.requests}</span></div><div><strong>{entrevistas.length}</strong><span>{copy.summary.interviews}</span></div></div><div className="panel-card"><h3>{copy.summary.quick}</h3><div className="action-grid"><button className="btn-secondary" onClick={() => setSeccion('horario')}>{copy.summary.schedule}</button><button className="btn-secondary" onClick={() => setSeccion('solicitudes')}>{copy.summary.viewRequests}</button><button className="btn-secondary" onClick={() => setSeccion('tramites')}>{copy.summary.downloadDocs}</button></div></div></div>;
-    if (seccion === 'materias') { const inscritas = new Set(inscripciones.map(i => Number(i.materia))); const periodoActivo = Boolean(periodoInscripcion?.activo); const periodoActualInscripciones = inscripciones.filter(i => i.periodo_nombre === periodoInscripcion?.nombre).length; const faltan = Math.max(0, 4 - periodoActualInscripciones); const seleccionadas = new Set(materiasSeleccionadas); const fecha = valor => valor ? new Date(valor).toLocaleDateString(copy.locale) : '-'; const alternarMateria = id => setMateriasSeleccionadas(actual => actual.includes(id) ? actual.filter(item => item !== id) : actual.length < faltan ? [...actual, id] : actual); return <div className="alumno-materias-view"><div className="panel-card"><h3>{copy.summary.courses}</h3><p>{copy.enrollment.exact}</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `${copy.enrollment.open}: ${periodoInscripcion.nombre}` : copy.enrollment.closed}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} - ${fecha(periodoInscripcion.cierre)}` : copy.enrollment.notEnabled}</span></div>{periodoActivo && <p className="form-hint">{copy.enrollment.load}: {periodoActualInscripciones} / 4 · {copy.enrollment.selected}: {materiasSeleccionadas.length} / {faltan}</p>}{materias.length > 0 && periodoActivo ? <><div className="materias-grid">{materias.map(m => { const yaInscrita = inscritas.has(Number(m.id)); const seleccionada = seleccionadas.has(m.id); return <article className={`materia-card ${yaInscrita || seleccionada ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong><small>{copy.common.period}: {m.periodo_sugerido}<br/>{copy.common.teacher}: {m.profesor || copy.common.notAssigned}<br/>{copy.docs.schedule}: {m.horario || copy.common.toDefine}<br/>{copy.common.roomPending}: {m.salon_label || copy.common.roomPending}<br/>{copy.common.enrolled}: {m.inscritos || 0} / {m.capacidad || 42}</small>{yaInscrita ? <Badge tone="success">{copy.enrollment.already}</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || (!seleccionada && materiasSeleccionadas.length >= faltan)} onClick={() => alternarMateria(m.id)}>{seleccionada ? copy.enrollment.selectedLabel : copy.enrollment.select}</button>}</article>; })}</div><button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || materiasSeleccionadas.length !== faltan} onClick={inscribirMateriasSeleccionadas}>{inscribiendo ? copy.enrollment.submitting : faltan === 0 ? `${copy.enrollment.load} (4/4)` : `${copy.enrollment.submit}: ${faltan}`}</button></> : <p>{periodoActivo ? copy.enrollment.noAvailableCourses : copy.enrollment.activeClosed}</p>}</div><div className="panel-card"><h3>{copy.summary.registered}</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>{copy.common.noCourses}</p>}</div></div>; }
+    if (seccion === 'materias') { const inscritas = new Set(inscripciones.filter(i => i.periodo_nombre === periodoInscripcion?.nombre).map(i => Number(i.materia))); const periodoActivo = Boolean(periodoInscripcion?.activo); const periodoActualInscripciones = inscripciones.filter(i => i.periodo_nombre === periodoInscripcion?.nombre).length; const faltan = Math.max(0, 4 - periodoActualInscripciones); const seleccionadas = new Set(materiasSeleccionadas); const fecha = valor => valor ? new Date(valor).toLocaleDateString(copy.locale) : '-'; const alternarMateria = id => setMateriasSeleccionadas(actual => actual.includes(id) ? actual.filter(item => item !== id) : actual.length < faltan ? [...actual, id] : actual); return <div className="alumno-materias-view"><div className="panel-card"><h3>{copy.summary.courses}</h3><p>{copy.enrollment.exact}</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `${copy.enrollment.open}: ${periodoInscripcion.nombre}` : copy.enrollment.closed}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} - ${fecha(periodoInscripcion.cierre)}` : copy.enrollment.notEnabled}</span></div>{periodoActivo && <p className="form-hint">{copy.enrollment.load}: {periodoActualInscripciones} / 4 · {copy.enrollment.selected}: {materiasSeleccionadas.length} / {faltan}</p>}{materias.length > 0 && periodoActivo ? <><div className="materias-grid">{materias.map(m => { const yaInscrita = inscritas.has(Number(m.id)); const seleccionada = seleccionadas.has(m.id); return <article className={`materia-card ${yaInscrita || seleccionada ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong><small>{copy.common.period}: {m.periodo_sugerido}<br/>{copy.common.teacher}: {m.profesor || copy.common.notAssigned}<br/>{copy.docs.schedule}: {m.horario || copy.common.toDefine}<br/>{copy.common.roomPending}: {m.salon_label || copy.common.roomPending}<br/>{copy.common.enrolled}: {m.inscritos || 0} / {m.capacidad || 42}</small>{yaInscrita ? <Badge tone="success">{copy.enrollment.already}</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || (!seleccionada && materiasSeleccionadas.length >= faltan)} onClick={() => alternarMateria(m.id)}>{seleccionada ? copy.enrollment.selectedLabel : copy.enrollment.select}</button>}</article>; })}</div><button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || materiasSeleccionadas.length !== faltan} onClick={prepararInscripcion}>{inscribiendo ? copy.enrollment.submitting : faltan === 0 ? `${copy.enrollment.load} (4/4)` : `${copy.enrollment.submit}: ${faltan}`}</button></> : <p>{periodoActivo ? copy.enrollment.noAvailableCourses : copy.enrollment.activeClosed}</p>}</div><div className="panel-card"><h3>{copy.summary.registered}</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>{copy.common.noCourses}</p>}</div></div>; }
     if (seccion === 'calificaciones') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.grade.kicker}</p><h3>{copy.grade.title}</h3></div></div><AvanceCurricular inscripciones={inscripciones} plan={flujoTesis?.elegibilidad?.configuracion?.materias_plan || []}/><div className="subject-list">{inscripciones.length ? inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>{copy.common.noCourses}</p>}</div></div>;
     if (seccion === 'horario' || seccion === 'tramites') {
       const cicloEscolar = inscripciones.find(materia => materia.periodo_nombre)?.periodo_nombre || periodoInscripcion?.nombre || '—';
       const documentos = [
-        {tipo: 'constancia', titulo: copy.docs.schoolCertificate, descripcion: copy.docs.schoolCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/constancia/` : null},
-        {tipo: 'calificaciones', titulo: copy.docs.gradesCertificate, descripcion: copy.docs.gradesCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/calificaciones/` : null},
-        {tipo: 'historial', titulo: copy.docs.transcript, descripcion: copy.docs.transcriptDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/historial/` : null},
-        {tipo: 'inscripcion', titulo: copy.docs.enrollmentCertificate, descripcion: copy.docs.enrollmentCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/inscripcion/` : null},
-        {tipo: 'egreso', titulo: copy.docs.graduation, descripcion: copy.docs.graduationDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/egreso/` : null},
-        {tipo: 'horario', titulo: copy.docs.schedule, descripcion: copy.docs.scheduleDesc, ruta: '/api/preregistro/horario/download/'},
-        {tipo: 'boleta', titulo: copy.docs.enrollmentSlip, descripcion: copy.docs.enrollmentSlipDesc, ruta: '/api/preregistro/boleta-inscripcion/download/'},
-        {tipo: 'reinscripcion', titulo: copy.docs.reenrollmentSlip, descripcion: copy.docs.reenrollmentSlipDesc, ruta: '/api/preregistro/reinscripcion/download/'},
+        {tipo: 'constancia', grupo: 'oficiales', titulo: copy.docs.schoolCertificate, descripcion: copy.docs.schoolCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/constancia/` : null},
+        {tipo: 'calificaciones', grupo: 'oficiales', titulo: copy.docs.gradesCertificate, descripcion: copy.docs.gradesCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/calificaciones/` : null},
+        {tipo: 'historial', grupo: 'oficiales', titulo: copy.docs.transcript, descripcion: copy.docs.transcriptDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/historial/` : null},
+        {tipo: 'inscripcion', grupo: 'oficiales', titulo: copy.docs.enrollmentCertificate, descripcion: copy.docs.enrollmentCertificateDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/inscripcion/` : null},
+        {tipo: 'egreso', grupo: 'oficiales', titulo: copy.docs.graduation, descripcion: copy.docs.graduationDesc, ruta: perfil ? `/api/servicios-escolares/alumnos/${perfil.id}/documentos/egreso/` : null},
+        {tipo: 'horario', grupo: 'inscripcion', titulo: copy.docs.schedule, descripcion: copy.docs.scheduleDesc, ruta: '/api/preregistro/horario/download/'},
+        {tipo: 'boleta', grupo: 'inscripcion', titulo: copy.docs.enrollmentSlip, descripcion: copy.docs.enrollmentSlipDesc, ruta: '/api/preregistro/boleta-inscripcion/download/'},
+        {tipo: 'reinscripcion', grupo: 'inscripcion', titulo: copy.docs.reenrollmentSlip, descripcion: copy.docs.reenrollmentSlipDesc, ruta: '/api/preregistro/reinscripcion/download/'},
       ];
-      return <div className="panel-card"><h3>{seccion === 'horario' ? copy.docs.scheduleAndReenroll : copy.docs.documentsAndProcedures}</h3><p>{copy.docs.intro}</p>{seccion === 'horario' && <div className="inscripcion-periodo"><strong>{copy.docs.schoolYear}: {cicloEscolar}</strong></div>}{seccion === 'horario' ? <div className="action-grid"><button className="btn-secondary" onClick={() => descargar('/api/preregistro/horario/download/', 'horario.pdf')}>{copy.docs.schedulePdf}</button><button className="btn-secondary" onClick={() => descargar('/api/preregistro/boleta-inscripcion/download/', 'boleta_inscripcion.pdf')}>{copy.docs.enrollmentPdf}</button><button className="btn-secondary" onClick={() => descargar('/api/preregistro/reinscripcion/download/', 'reinscripcion.pdf')}>{copy.docs.reenrollmentPdf}</button></div> : <div className="action-grid">{documentos.filter(doc => doc.ruta).map(doc => <button key={doc.tipo} className="btn-secondary" onClick={() => descargar(doc.ruta, `${doc.tipo}.pdf`)}>{doc.titulo}</button>)}</div>}{seccion === 'horario' && <div className="subject-list">{inscripciones.map(m => <div className="subject-row" key={m.id}><strong>{m.materia_clave}</strong> {m.materia_nombre}<span>{m.materia_profesor || copy.grade.professorMissing} · {m.materia_horario || m.horario || copy.common.toDefine} · {m.materia_salon || copy.common.roomPending}</span></div>)}</div>}</div>;
+      if (seccion === 'horario') {
+        const inscripcionesHorario = cicloEscolar !== '—'
+          ? inscripciones.filter(materia => materia.periodo_nombre === cicloEscolar)
+          : inscripciones;
+        const descargasHorario = [
+          {id: 'horario', titulo: copy.docs.schedulePdf, nombre: 'horario.pdf', ruta: '/api/preregistro/horario/download/', icono: '▦'},
+          {id: 'boleta', titulo: copy.docs.enrollmentPdf, nombre: 'boleta_inscripcion.pdf', ruta: '/api/preregistro/boleta-inscripcion/download/', icono: '▤'},
+          {id: 'reinscripcion', titulo: copy.docs.reenrollmentPdf, nombre: 'reinscripcion.pdf', ruta: '/api/preregistro/reinscripcion/download/', icono: '↻'},
+        ];
+        return <div className="alumno-schedule-view">
+          <section className="alumno-schedule-summary panel-card">
+            <div className="alumno-schedule-summary-copy">
+              <p className="panel-kicker">{copy.docs.scheduleAndReenroll}</p>
+              <h3>{copy.docs.schoolYear}: {cicloEscolar}</h3>
+              <p>{copy.docs.intro}</p>
+            </div>
+            <div className="alumno-schedule-count"><strong>{inscripcionesHorario.length}</strong><span>{copy.docs.courseCount}</span></div>
+          </section>
+          <section className="panel-card alumno-schedule-downloads">
+            <div className="alumno-schedule-section-head"><div><p className="panel-kicker">{copy.docs.downloads}</p><h3>{copy.docs.documentsAndProcedures}</h3></div></div>
+            <div className="alumno-schedule-download-grid">{descargasHorario.map(documento => <article className="alumno-schedule-download" key={documento.id}>
+              <span aria-hidden="true">{documento.icono}</span>
+              <div><strong>{documento.titulo}</strong><small>{copy.docs.schoolYear}: {cicloEscolar}</small></div>
+              <button type="button" className="btn-secondary" onClick={() => descargar(documento.ruta, documento.nombre)}>{copy.docs.pdf}</button>
+            </article>)}</div>
+          </section>
+          <section className="panel-card alumno-schedule-courses">
+            <div className="alumno-schedule-section-head"><div><p className="panel-kicker">{copy.docs.scheduleDetails}</p><h3>{copy.docs.courseList}</h3></div><Badge tone="info">{inscripcionesHorario.length} {copy.docs.courseCount}</Badge></div>
+            {inscripcionesHorario.length ? <div className="alumno-schedule-course-list">{inscripcionesHorario.map(materia => <article className="alumno-schedule-course" key={materia.id}>
+              <div className="alumno-schedule-course-title"><span>{materia.materia_clave || '—'}</span><strong>{materia.materia_nombre || copy.common.course}</strong></div>
+              <div className="alumno-schedule-course-detail"><span>{copy.common.teacher}<strong>{materia.materia_profesor || copy.grade.professorMissing}</strong></span><span>{copy.docs.timeLabel}<strong>{materia.materia_horario || materia.horario || copy.common.toDefine}</strong></span><span>{copy.docs.roomLabel}<strong>{materia.materia_salon || materia.salon || copy.common.roomPending}</strong></span></div>
+            </article>)}</div> : <div className="alumno-schedule-empty"><span aria-hidden="true">▦</span><strong>{copy.docs.noScheduleCourses}</strong><p>{copy.common.noCourses}</p></div>}
+          </section>
+        </div>;
+      }
+      const documentosDisponibles = documentos.filter(doc => doc.ruta);
+      const gruposDocumentos = [
+        {id: 'oficiales', titulo: copy.docs.officialDocuments, icono: '▤'},
+        {id: 'inscripcion', titulo: copy.docs.enrollmentDocuments, icono: '▦'},
+      ];
+      return <div className="alumno-procedures-view">
+        <section className="alumno-schedule-summary panel-card">
+          <div className="alumno-schedule-summary-copy">
+            <p className="panel-kicker">{copy.docs.documentsAndProcedures}</p>
+            <h3>{copy.docs.documentsAndProcedures}</h3>
+            <p>{copy.docs.intro}</p>
+          </div>
+          <div className="alumno-schedule-count"><strong>{documentosDisponibles.length}</strong><span>{copy.docs.documentCount}</span></div>
+        </section>
+        {gruposDocumentos.map(grupo => {
+          const items = documentosDisponibles.filter(documento => documento.grupo === grupo.id);
+          if (!items.length) return null;
+          return <section className="panel-card alumno-procedure-group" key={grupo.id}>
+            <div className="alumno-schedule-section-head">
+              <div><p className="panel-kicker">{copy.docs.downloads}</p><h3>{grupo.titulo}</h3></div>
+              <Badge tone="info">{items.length}</Badge>
+            </div>
+            <div className="alumno-procedure-grid">{items.map(documento => <article className="alumno-procedure-card" key={documento.tipo}>
+              <span className="alumno-procedure-icon" aria-hidden="true">{grupo.icono}</span>
+              <div className="alumno-procedure-copy"><strong>{documento.titulo}</strong><p>{documento.descripcion}</p></div>
+              <button type="button" className="btn-secondary" onClick={() => descargar(documento.ruta, `${documento.tipo}.pdf`)}>{copy.docs.documentOpen}</button>
+            </article>)}</div>
+          </section>;
+        })}
+      </div>;
     }
     if (seccion === 'solicitudes') return <div className="panel-card"><h3>{copy.requests.title}</h3>{solicitudes.length ? <ul className="request-list">{solicitudes.map(i => <li key={i.id}><strong>{i.tipo_label}</strong><p>{i.comentario || '—'}</p><span>{etiquetaEstado(i.estado, copy)}</span></li>)}</ul> : <p>{copy.requests.noRequests}</p>}</div>;
     if (seccion === 'entrevistas') return <div className="panel-card entrevistas-alumno-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.communication.kicker}</p><h3>{copy.communication.title}</h3></div><Badge tone="info">{entrevistas.length} {entrevistas.length === 1 ? copy.communication.countOne : copy.communication.countMany}</Badge></div>{entrevistas.length ? <div className="entrevistas-alumno-list">{entrevistas.map(i => <article className="entrevista-alumno-item" key={i.id}><div className="entrevista-alumno-main"><div className="entrevista-alumno-heading"><strong>{i.titulo || copy.communication.virtualInterview}</strong><Badge tone={i.color || 'neutral'}>{etiquetaEstado(i.estado, copy)}</Badge></div><p>{i.proposito_label || i.proposito}</p>{i.descripcion && <small>{i.descripcion}</small>}<div className="interview-meta"><span><strong>{copy.common.date}:</strong> {formatoFecha(i.fecha_programada, copy.locale, copy.communication.datePending)}</span><span><strong>{copy.common.duration}:</strong> {i.duracion_minutos || 30} {copy.common.minutes}</span></div>{i.retroalimentacion && <div className="entrevista-feedback"><strong>{copy.communication.teacherFeedback}</strong><p>{i.retroalimentacion}</p></div>}</div><div className="entrevista-alumno-actions">{i.estado === 'iniciada' && i.jitsi_room_link ? <a className="btn-primary" href={i.jitsi_room_link} target="_blank" rel="noopener noreferrer">{copy.communication.join}</a> : i.estado === 'programada' ? <span className="form-hint">{copy.communication.availableWhenStarted}</span> : i.estado === 'completada' ? <span className="form-hint">{copy.communication.completed}</span> : <span className="form-hint">{copy.communication.cancelled}</span>}</div></article>)}</div> : <div className="empty-state"><strong>{copy.communication.noScheduled}</strong><p>{copy.communication.emptyText}</p></div>}</div>;
@@ -302,7 +391,28 @@ export default function PanelAlumno({session, onLogout}) {
     return <div><PerfilAspirante perfil={perfil} session={session} onActualizado={data => { setPerfil(actual => ({...actual, ...data})); setMessage(copy.extra.profileSaved); }}/><div className="panel-card alumno-profile-summary"><h3>{copy.grade.title}</h3><div className="info-grid"><InfoRow label={copy.summary.program} value={perfil.programa}/><InfoRow label={copy.summary.unit} value={perfil.unidad}/><InfoRow label={copy.common.grade} value={perfil.promedio ? Number(perfil.promedio).toFixed(2) : '-'}/><InfoRow label={copy.summary.average} value={promedio || '—'}/></div></div></div>;
   };
   const titulo = copy.menu[seccion];
-  return <section className="panel-section" aria-label={copy.panel}>
+  return <>
+  {modalInscripcion && <div className="modal-backdrop alumno-inscripcion-backdrop" role="presentation" onClick={() => { if (!inscribiendo) setModalInscripcion(null); }}>
+    <div className="modal-card alumno-inscripcion-modal" role="dialog" aria-modal="true" aria-labelledby="alumno-inscripcion-title" onClick={event => event.stopPropagation()}>
+      <span className={`alumno-inscripcion-icon alumno-inscripcion-icon--${modalInscripcion.kind}`} aria-hidden="true">
+        {modalInscripcion.kind === 'success' ? '✓' : modalInscripcion.kind === 'error' ? '!' : modalInscripcion.kind === 'processing' ? '…' : '▣'}
+      </span>
+      <h3 id="alumno-inscripcion-title">{copy.enrollment[`${modalInscripcion.kind}Title`] || copy.enrollment.confirmTitle}</h3>
+      {modalInscripcion.kind === 'processing'
+        ? <p>{copy.enrollment.submitting}</p>
+        : <p>{modalInscripcion.message}</p>}
+      {modalInscripcion.kind === 'confirm' && <ul className="alumno-inscripcion-selected">
+        {materias.filter(item => materiasSeleccionadas.includes(item.id)).map(item => <li key={item.id}><strong>{item.clave}</strong> · {item.nombre}</li>)}
+      </ul>}
+      <div className="modal-actions">
+        {modalInscripcion.kind === 'confirm' && <button type="button" className="btn-secondary" onClick={() => setModalInscripcion(null)}>{copy.enrollment.cancel}</button>}
+        {modalInscripcion.kind !== 'processing' && <button type="button" className="btn-primary" autoFocus onClick={modalInscripcion.kind === 'confirm' ? inscribirMateriasSeleccionadas : () => setModalInscripcion(null)}>
+          {modalInscripcion.kind === 'confirm' ? copy.enrollment.confirmAction : copy.enrollment.close}
+        </button>}
+      </div>
+    </div>
+  </div>}
+  <section className="panel-section" aria-label={copy.panel}>
     <div className="panel-hero"><div><p className="panel-kicker">{copy.summary.student}</p><h1>{copy.panel}</h1><p className="panel-sub">{copy.extra.intro}</p></div><button className="btn-secondary" onClick={() => cargarDatos(new AbortController().signal)}>{copy.refresh}</button></div>
     {message && <div className="api-success">{message}</div>}
     {error && <div className="api-error">{error}<button className="link-btn" onClick={() => cargarDatos(new AbortController().signal)}>{copy.common.retry}</button></div>}
@@ -314,6 +424,6 @@ export default function PanelAlumno({session, onLogout}) {
       </aside>
       <div className="alumno-content"><div className="alumno-section-header"><div><p className="panel-kicker">{copy.panel}</p><h2>{titulo}</h2></div>{loading && <span className="panel-sub">{copy.loading}</span>}</div>{contenido()}</div>
     </div>}
-  </section>;
+  </section>
+  </>;
 }
-

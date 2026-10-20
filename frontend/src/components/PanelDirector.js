@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react';
 import JuradoDefensaPanel from './JuradoDefensaPanel';
 import DashboardAnalitico from './DashboardAnalitico';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
+import MiPerfilAcademico from './MiPerfilAcademico';
 import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
 import {useDirectorCopy} from './directorPanelTranslations';
 
@@ -166,6 +167,7 @@ export default function PanelDirector({session, onLogout}) {
 
         {!cargando && active === 'evaluaciones' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.dashboard.evaluationTitle}</span><h2>{copy.dashboard.academicTrajectory}</h2></div><span className="director-count">{evaluaciones.length} {copy.tables.matters}</span></div>{evaluaciones.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>{copy.tables.student}</th><th>{copy.tables.subjects}</th><th>{copy.tables.partials}</th><th>{copy.common.grade}</th><th>{copy.tables.state}</th></tr></thead><tbody>{evaluaciones.map((materia) => <tr key={`${materia.id}-${materia.tesista}`}><td>{materia.tesista}</td><td><strong>{materia.materia_clave}</strong><small>{materia.materia_nombre}</small></td><td>{[materia.parcial_1, materia.parcial_2, materia.parcial_3].map((value) => value ?? '—').join(' / ')}</td><td>{materia.calificacion ?? '—'}</td><td><span className={`director-status-badge ${materia.color || 'neutral'}`}>{estadoMateria(materia)}</span></td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>{copy.records.noEvaluationsTitle}</h3><p>{copy.records.noEvaluationsText}</p></div>}</div>}
 
+        {!cargando && active === 'perfil' && <MiPerfilAcademico session={session} docenteId={director.id} onLogout={onLogout} />}
         {!cargando && active === 'perfil' && <PerfilAspirante perfil={{...director, telefono: director.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, director: {...actual.director, ...actualizado}}))} />}
       </main>
     </section>

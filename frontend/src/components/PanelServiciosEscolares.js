@@ -2,11 +2,14 @@
 import ExpedienteCentralizadoCard from "./ExpedienteCentralizadoCard";
 import EgresadosPanel from "./EgresadosPanel";
 import HistoricoPanel from "./HistoricoPanel";
+import DocentesDirectorioPanel from "./DocentesDirectorioPanel";
+import ExamenesGestionPanel from "./ExamenesGestionPanel";
+import SchoolAcademicConfiguration from "./SchoolAcademicConfiguration";
 import {useSchoolServicesCopy} from "./schoolServicesPanelTranslations";
 
 const buildMenu = (copy) => [
-  {label: copy.groups.panorama, items: [["resumen", copy.menu.resumen, "▦"], ["alumnos", copy.menu.alumnos, "♙"]]},
-  {label: copy.groups.academicControl, items: [["inscripciones", copy.menu.inscripciones, "◫"], ["historial", copy.menu.historial, "▤"], ["calificaciones", copy.menu.calificaciones, "✓"]]},
+  {label: copy.groups.panorama, items: [["resumen", copy.menu.resumen, "▦"], ["alumnos", copy.menu.alumnos, "♙"], ["docentes", copy.menu.docentes, "♜"]]},
+  {label: copy.groups.academicControl, items: [["planes", copy.menu.planes, "▧"], ["periodos", copy.menu.periodos, "◫"], ["inscripciones", copy.menu.inscripciones, "▣"], ["historial", copy.menu.historial, "▤"], ["calificaciones", copy.menu.calificaciones, "✓"], ["examenes", copy.menu.examenes || "Exámenes en línea", "✎"]]},
   {label: copy.groups.documentation, items: [["constancias", copy.menu.constancias, "▣"], ["egreso", copy.menu.egreso, "◆"], ["egresados", copy.menu.egresados, "♛"], ["historico", copy.menu.historico, "⟲"]]},
   {label: copy.groups.institutional, items: [["reportes", copy.menu.reportes, "▥"]]},
 ];
@@ -248,6 +251,10 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   }
 
   function contenido() {
+    if (active === "planes" || active === "periodos") {
+      return <SchoolAcademicConfiguration key={active} section={active} session={session} onLogout={onLogout}/>;
+    }
+
     if (active === "resumen") {
       return (
         <>
@@ -316,6 +323,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                     <th>{copy.table.key}</th>
                     <th>{copy.table.subject}</th>
                     <th>{copy.table.credits}</th>
+                    <th>{copy.enrollment.enrollmentType}</th>
                     <th>{copy.table.professor}</th>
                     <th>{copy.table.final}</th>
                     <th>{copy.table.status}</th>
@@ -328,6 +336,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                       <td>{item.materia_clave}</td>
                       <td>{item.materia_nombre}</td>
                       <td>{item.materia_creditos ?? "—"}</td>
+                      <td>{item.extemporanea ? <><strong>{copy.enrollment.extemporaneous}</strong><small>{item.motivo_extemporanea}</small></> : copy.enrollment.regular}</td>
                       <td>{item.materia_profesor || copy.common.registered}</td>
                       <td>{item.calificacion ?? copy.status.pending}</td>
                       <td><Estado copy={copy} value={item.estado}/></td>
@@ -341,7 +350,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                         </div>
                       </td>
                     </tr>
-                  )) : <tr><td colSpan="7" className="servicios-empty">{copy.enrollment.noInscriptions}</td></tr>}
+                  )) : <tr><td colSpan="8" className="servicios-empty">{copy.enrollment.noInscriptions}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -512,6 +521,8 @@ export default function PanelServiciosEscolares({session, onLogout}) {
     }
 
     if (active === "egresados") return <EgresadosPanel session={session} onLogout={onLogout}/>;
+    if (active === "docentes") return <DocentesDirectorioPanel session={session} onLogout={onLogout}/>;
+    if (active === "examenes") return <ExamenesGestionPanel session={session}/>;
     if (active === "historico") return <HistoricoPanel session={session} onLogout={onLogout}/>;
 
     return null;

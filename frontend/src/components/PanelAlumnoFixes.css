@@ -3,3 +3,54 @@
 .inscripcion-requerida{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:12px 0;padding:11px 13px;border:1px solid rgba(0,137,123,.2);border-radius:9px;background:rgba(0,137,123,.07);color:var(--text);font-size:.82rem}.inscripcion-requerida span{color:var(--muted);text-align:right}@media(max-width:620px){.inscripcion-requerida{align-items:flex-start;flex-direction:column}.inscripcion-requerida span{text-align:left}}
 .alumno-sidebar{padding:0!important;overflow:hidden;border-radius:12px;border-color:rgba(0,105,92,.2);box-shadow:0 14px 34px rgba(15,39,57,.09)}.alumno-sidebar-user{padding:18px!important;border-bottom:1px solid rgba(0,105,92,.16);background:linear-gradient(135deg,#075b61,#008f82);color:#fff}.alumno-sidebar-user strong,.alumno-sidebar-user small{color:#fff}.alumno-sidebar-user small{opacity:.8}.alumno-nav{gap:0!important;padding:10px 9px 14px}.alumno-nav-group{display:grid;gap:3px;margin:8px 0 12px}.alumno-nav-group>p{margin:0;padding:0 9px 5px;color:var(--muted);font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.alumno-nav-item{border:0!important;border-radius:7px!important;padding:9px 10px!important;min-height:38px;font-size:.82rem;font-weight:650!important}.alumno-nav-item span:nth-child(2){flex:1}.alumno-nav-item:hover{background:rgba(0,137,123,.07)!important}.alumno-nav-item.is-active{background:#e1f3ef!important;color:#075b61!important;box-shadow:inset 3px 0 0 #008f82}.alumno-nav-item b{min-width:21px;padding:2px 5px;border-radius:99px;background:rgba(0,137,123,.12);color:#087d74;font-size:.68rem;text-align:center}.alumno-sidebar .sidebar-logout{margin:0 10px 12px;width:calc(100% - 20px)}[data-theme="dark"] .alumno-sidebar{background:#152732;border-color:rgba(122,221,207,.18)}[data-theme="dark"] .alumno-nav-item.is-active{background:rgba(71,190,174,.19)!important;color:#c8fff5!important}
 @media(max-width:850px){.alumno-nav{display:flex!important;gap:10px!important;overflow-x:auto;padding:10px!important}.alumno-nav-group{min-width:max-content;margin:0}.alumno-nav-group>p{display:none}.alumno-nav-item{display:inline-flex;width:auto;margin-right:3px}}
+.alumno-inscripcion-backdrop{z-index:120}
+.alumno-inscripcion-modal{width:min(480px,100%);gap:12px;text-align:center;animation:modalFloatIn .24s ease both}
+.alumno-inscripcion-modal h3,.alumno-inscripcion-modal p{margin:0}
+.alumno-inscripcion-modal p{color:var(--muted);line-height:1.55}
+.alumno-inscripcion-icon{display:grid;place-items:center;width:52px;height:52px;margin:0 auto 4px;border-radius:50%;background:rgba(0,137,123,.12);color:var(--primary);font-size:1.55rem;font-weight:900}
+.alumno-inscripcion-icon--success{background:rgba(22,163,74,.12);color:#15803d}
+.alumno-inscripcion-icon--error{background:rgba(220,38,38,.1);color:#b91c1c}
+.alumno-inscripcion-selected{display:grid;gap:6px;max-height:180px;overflow:auto;margin:4px 0;padding:12px 12px 12px 30px;border-radius:12px;background:var(--content-bg);text-align:left;color:var(--muted);font-size:.88rem}
+.alumno-inscripcion-selected strong{color:var(--primary)}
+.alumno-inscripcion-modal .modal-actions{justify-content:center;margin-top:4px}
+.alumno-schedule-view{display:grid;gap:18px}
+.alumno-schedule-summary{display:flex;align-items:center;justify-content:space-between;gap:22px;background:linear-gradient(125deg,rgba(0,137,123,.1),var(--surface) 68%)}
+.alumno-schedule-summary-copy{min-width:0}
+.alumno-schedule-summary h3,.alumno-schedule-section-head h3{margin:3px 0 7px}
+.alumno-schedule-summary-copy>p:last-child{margin:0;color:var(--muted);line-height:1.55}
+.alumno-schedule-count{flex:0 0 auto;display:grid;place-items:center;min-width:118px;padding:14px;border:1px solid rgba(0,137,123,.18);border-radius:15px;background:var(--surface);text-align:center}
+.alumno-schedule-count strong{color:var(--primary);font-size:1.8rem;line-height:1.1}
+.alumno-schedule-count span{margin-top:5px;color:var(--muted);font-size:.72rem}
+.alumno-schedule-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.alumno-schedule-section-head h3{margin-bottom:0}
+.alumno-schedule-download-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.alumno-schedule-download{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:11px;padding:14px;border:1px solid rgba(0,137,123,.14);border-radius:13px;background:var(--content-bg)}
+.alumno-schedule-download>span{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:rgba(0,137,123,.1);color:var(--primary);font-size:1.1rem}
+.alumno-schedule-download>div{display:grid;gap:4px;min-width:0}
+.alumno-schedule-download strong{font-size:.82rem;line-height:1.35}
+.alumno-schedule-download small{color:var(--muted);font-size:.72rem}
+.alumno-schedule-download button{grid-column:1/-1;width:100%}
+.alumno-schedule-course-list{display:grid;gap:10px}
+.alumno-schedule-course{display:grid;grid-template-columns:minmax(150px,.8fr) minmax(0,2fr);align-items:center;gap:18px;padding:15px;border:1px solid rgba(0,137,123,.14);border-radius:13px;background:var(--content-bg)}
+.alumno-schedule-course-title{display:grid;gap:4px}
+.alumno-schedule-course-title>span{color:var(--primary);font-size:.72rem;font-weight:800;letter-spacing:.07em}
+.alumno-schedule-course-title>strong{font-size:.9rem}
+.alumno-schedule-course-detail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.alumno-schedule-course-detail>span{display:grid;gap:4px;color:var(--muted);font-size:.7rem}
+.alumno-schedule-course-detail strong{color:var(--text);font-size:.78rem;line-height:1.4;overflow-wrap:anywhere}
+.alumno-schedule-empty{display:grid;justify-items:center;gap:8px;padding:28px 16px;border:1px dashed rgba(0,137,123,.25);border-radius:13px;text-align:center}
+.alumno-schedule-empty>span{color:var(--primary);font-size:1.7rem}
+.alumno-schedule-empty>strong{font-size:.9rem}
+.alumno-schedule-empty p{margin:0;color:var(--muted);font-size:.82rem}
+@media(max-width:800px){.alumno-schedule-download-grid{grid-template-columns:1fr}.alumno-schedule-download{grid-template-columns:auto minmax(0,1fr) auto}.alumno-schedule-download button{grid-column:auto;width:auto}.alumno-schedule-course{grid-template-columns:1fr;gap:12px}}
+@media(max-width:560px){.alumno-schedule-summary{align-items:flex-start;flex-direction:column}.alumno-schedule-count{width:100%;box-sizing:border-box}.alumno-schedule-section-head{align-items:flex-start;flex-direction:column}.alumno-schedule-download{grid-template-columns:auto minmax(0,1fr)}.alumno-schedule-download button{grid-column:1/-1;width:100%}.alumno-schedule-course-detail{grid-template-columns:1fr}}
+.alumno-procedures-view{display:grid;gap:18px}
+.alumno-procedure-group .alumno-schedule-section-head{margin-bottom:14px}
+.alumno-procedure-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.alumno-procedure-card{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:12px;padding:16px;border:1px solid rgba(0,137,123,.14);border-radius:13px;background:var(--content-bg)}
+.alumno-procedure-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:rgba(0,137,123,.1);color:var(--primary);font-size:1.1rem}
+.alumno-procedure-copy{min-width:0}
+.alumno-procedure-copy strong{display:block;font-size:.88rem;line-height:1.4}
+.alumno-procedure-copy p{margin:5px 0 0;color:var(--muted);font-size:.8rem;line-height:1.5}
+.alumno-procedure-card button{grid-column:1/-1;width:100%;white-space:normal}
+@media(max-width:740px){.alumno-procedure-grid{grid-template-columns:1fr}}

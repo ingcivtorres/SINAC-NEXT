@@ -3,7 +3,7 @@ import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import EgresadosPanel from './EgresadosPanel';
 import HistoricoPanel from './HistoricoPanel';
-import {PROGRAMAS, gradoDePrograma} from './programasCatalogo';
+import ExamenesGestionPanel from './ExamenesGestionPanel';
 import {useCoordinationCopy} from './coordinationPanelTranslations';
 import './PanelCoordinacion.css';
 
@@ -16,7 +16,7 @@ const FILTROS = [
 
 const COORDINATION_NAV = [
   {label: 'overview', items: [['resumen', 'Resumen', '▦'], ['bandeja', 'Bandeja de solicitudes', '◷'], ['detalle', 'Detalle de expediente', '◉']]},
-  {label: 'academic', items: [['periodos', 'Periodos de inscripción', '◫'], ['planes', 'Planes de estudio', '▧'], ['materias', 'Materias y cursos', '▤'], ['cargas', 'Aprobación de carga', '↗']]},
+  {label: 'academic', items: [['materias', 'Materias y cursos', '▤'], ['cargas', 'Aprobación de carga', '↗'], ['extemporanea', 'Inscripción extemporánea', '＋'], ['examenes', 'Exámenes en línea', '✎']]},
   {label: 'research', items: [['tesis', 'Proyectos de tesis', '◆'], ['asignaciones', 'Asignación de directores', '↔'], ['predoctoral', 'Examen predoctoral', '✦'], ['colegio', 'Colegio de Profesores', '◈']]},
   {label: 'community', items: [['alumnos', 'Alumnos', '♙'], ['aspirantes', 'Aspirantes', '◎'], ['egresados', 'Egresados', '♛'], ['historico', 'Histórico', '⟲'], ['personal', 'Docentes y Directores', '◇'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
@@ -43,29 +43,29 @@ function formatoDateTimeLocal(valor) {
   return new Date(date - offset).toISOString().slice(0, 16);
 }
 
-function periodosPredeterminados(grado, periodicidad) {
-  const duracionAnios = grado === 'doctorado' ? 4 : 2;
-  return duracionAnios * (periodicidad === 'cuatrimestral' ? 3 : 2);
-}
+const CARGA_FORM_TEXT = {
+  es: {add: 'Agregar materia', remove: 'Quitar', room: 'Salón', capacity: 'Cupo', save: 'Guardar borrador', update: 'Actualizar borrador', edit: 'Editar', cancel: 'Cancelar edición', submit: 'Enviar a revisión', subject: 'Selecciona una materia', teacher: 'Selecciona un docente', count: 'Materias', detail: 'Ver detalle', hide: 'Ocultar detalle', reviewComment: 'Comentario de revisión (obligatorio)', reviewCommentHint: 'Explica el motivo de la decisión.', approveComment: 'Aprobar con comentario', rejectComment: 'Rechazar con comentario', noCourses: 'La carga no contiene materias.'},
+  en: {add: 'Add subject', remove: 'Remove', room: 'Room', capacity: 'Capacity', save: 'Save draft', update: 'Update draft', edit: 'Edit', cancel: 'Cancel editing', submit: 'Submit for review', subject: 'Select a subject', teacher: 'Select an instructor', count: 'Subjects', detail: 'View details', hide: 'Hide details', reviewComment: 'Review comment (required)', reviewCommentHint: 'Explain the reason for your decision.', approveComment: 'Approve with comment', rejectComment: 'Reject with comment', noCourses: 'This course load has no subjects.'},
+  de: {add: 'Fach hinzufügen', remove: 'Entfernen', room: 'Raum', capacity: 'Kapazität', save: 'Entwurf speichern', update: 'Entwurf aktualisieren', edit: 'Bearbeiten', cancel: 'Bearbeitung abbrechen', submit: 'Zur Prüfung senden', subject: 'Fach auswählen', teacher: 'Lehrkraft auswählen', count: 'Fächer', detail: 'Details anzeigen', hide: 'Details ausblenden', reviewComment: 'Prüfungskommentar (erforderlich)', reviewCommentHint: 'Begründen Sie Ihre Entscheidung.', approveComment: 'Mit Kommentar genehmigen', rejectComment: 'Mit Kommentar ablehnen', noCourses: 'Dieses Lehrangebot enthält keine Fächer.'},
+  zh: {add: '添加课程', remove: '移除', room: '教室', capacity: '容量', save: '保存草稿', update: '更新草稿', edit: '编辑', cancel: '取消编辑', submit: '提交审核', subject: '选择课程', teacher: '选择教师', count: '门课程', detail: '查看详情', hide: '隐藏详情', reviewComment: '审核意见（必填）', reviewCommentHint: '请说明决定理由。', approveComment: '附意见批准', rejectComment: '附意见拒绝', noCourses: '此课程安排没有课程。'},
+  pt: {add: 'Adicionar disciplina', remove: 'Remover', room: 'Sala', capacity: 'Vagas', save: 'Salvar rascunho', update: 'Atualizar rascunho', edit: 'Editar', cancel: 'Cancelar edição', submit: 'Enviar para revisão', subject: 'Selecione uma disciplina', teacher: 'Selecione um docente', count: 'Disciplinas', detail: 'Ver detalhes', hide: 'Ocultar detalhes', reviewComment: 'Comentário da revisão (obrigatório)', reviewCommentHint: 'Explique o motivo da decisão.', approveComment: 'Aprovar com comentário', rejectComment: 'Rejeitar com comentário', noCourses: 'A carga não contém disciplinas.'},
+};
 
-function nuevoPlanEstudio() {
-  return {
-    id: null,
-    programa: '',
-    grado: 'maestria',
-    periodicidad: 'semestral',
-    periodos_requeridos: periodosPredeterminados('maestria', 'semestral'),
-    creditos_requeridos: 0,
-    activo: true,
-    materias_plan: [],
-  };
-}
+const EXTEMPORANEO_TEXT = {
+  es: {student:'Alumno', chooseStudent:'Selecciona un alumno', period:'Periodo de inscripción', choosePeriod:'Selecciona un periodo', subjects:'Materias disponibles', reason:'Motivo obligatorio', reasonHint:'Explica por qué se realiza fuera del periodo regular.', submit:'Registrar inscripción', saving:'Registrando...', saved:'Inscripción extemporánea registrada.', loadError:'No se pudieron cargar los datos para la inscripción.', saveError:'No se pudo registrar la inscripción.', noStudents:'No hay alumnos disponibles.', noSubjects:'No hay materias disponibles en una carga publicada para ese periodo.', capacity:'Cupo', full:'Sin cupo', loading:'Cargando materias...'},
+  en: {student:'Student', chooseStudent:'Select a student', period:'Enrollment period', choosePeriod:'Select a period', subjects:'Available subjects', reason:'Required reason', reasonHint:'Explain why this is outside the regular enrollment period.', submit:'Register enrollment', saving:'Registering...', saved:'Late enrollment registered.', loadError:'Could not load enrollment data.', saveError:'Could not register the enrollment.', noStudents:'There are no students available.', noSubjects:'No subjects are available in a published course load for this period.', capacity:'Seats', full:'Full', loading:'Loading subjects...'},
+  de: {student:'Studierende', chooseStudent:'Studierende auswählen', period:'Einschreibungszeitraum', choosePeriod:'Zeitraum auswählen', subjects:'Verfügbare Fächer', reason:'Begründung erforderlich', reasonHint:'Erläutern Sie die Einschreibung außerhalb des regulären Zeitraums.', submit:'Einschreibung registrieren', saving:'Wird registriert...', saved:'Nachträgliche Einschreibung registriert.', loadError:'Einschreibungsdaten konnten nicht geladen werden.', saveError:'Einschreibung konnte nicht registriert werden.', noStudents:'Keine Studierenden verfügbar.', noSubjects:'Keine Fächer in einem veröffentlichten Angebot verfügbar.', capacity:'Plätze', full:'Voll', loading:'Fächer werden geladen...'},
+  zh: {student:'学生', chooseStudent:'选择学生', period:'注册学期', choosePeriod:'选择学期', subjects:'可选课程', reason:'必须填写原因', reasonHint:'说明为何在常规注册期外办理。', submit:'登记注册', saving:'正在登记...', saved:'已登记逾期注册。', loadError:'无法加载注册数据。', saveError:'无法登记注册。', noStudents:'没有可用学生。', noSubjects:'该学期没有已发布课程。', capacity:'名额', full:'已满', loading:'正在加载课程...'},
+  pt: {student:'Aluno', chooseStudent:'Selecione um aluno', period:'Período de inscrição', choosePeriod:'Selecione um período', subjects:'Disciplinas disponíveis', reason:'Motivo obrigatório', reasonHint:'Explique por que a inscrição ocorre fora do prazo regular.', submit:'Registrar inscrição', saving:'Registrando...', saved:'Inscrição fora do prazo registrada.', loadError:'Não foi possível carregar os dados da inscrição.', saveError:'Não foi possível registrar a inscrição.', noStudents:'Não há alunos disponíveis.', noSubjects:'Não há disciplinas em uma oferta publicada para esse período.', capacity:'Vagas', full:'Sem vagas', loading:'Carregando disciplinas...'},
+};
 
 export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const onLogoutRef = useRef(onLogoutProp);
   onLogoutRef.current = onLogoutProp;
   const onLogout = useCallback((...args) => onLogoutRef.current?.(...args), []);
   const copy = useCoordinationCopy();
+  const extText = EXTEMPORANEO_TEXT[copy.locale.slice(0, 2)] || EXTEMPORANEO_TEXT.es;
+  const cargaText = CARGA_FORM_TEXT[(document.documentElement.lang || 'es').slice(0, 2)] || CARGA_FORM_TEXT.es;
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -88,14 +88,23 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const [busqueda, setBusqueda] = useState('');
   const [cargas, setCargas] = useState([]);
   const [periodoCarga, setPeriodoCarga] = useState('');
-  const [periodoActual, setPeriodoActual] = useState(null);
+  const [catalogoCarga, setCatalogoCarga] = useState({materias: [], docentes: [], salones: [], modalidades: []});
+  const [cargaEditando, setCargaEditando] = useState(null);
+  const [materiasCarga, setMateriasCarga] = useState([]);
+  const [guardandoCarga, setGuardandoCarga] = useState(false);
+  const [cargaDetalleId, setCargaDetalleId] = useState(null);
+  const [comentarioRevision, setComentarioRevision] = useState('');
+  const [cargaRevisionGuardando, setCargaRevisionGuardando] = useState(false);
+  const [periodosPublicacionCarga, setPeriodosPublicacionCarga] = useState({});
   const [periodosInscripcion, setPeriodosInscripcion] = useState([]);
-  const [periodoForm, setPeriodoForm] = useState({id:null,nombre:'',apertura:'',cierre:'',activo:true});
-  const [guardandoPeriodo, setGuardandoPeriodo] = useState(false);
-  const [configuracionesPlan, setConfiguracionesPlan] = useState([]);
-  const [materiasPlan, setMateriasPlan] = useState([]);
-  const [planForm, setPlanForm] = useState(nuevoPlanEstudio);
-  const [guardandoPlan, setGuardandoPlan] = useState(false);
+  const [alumnoExtemporaneoId, setAlumnoExtemporaneoId] = useState('');
+  const [periodoExtemporaneoId, setPeriodoExtemporaneoId] = useState('');
+  const [periodosExtemporaneos, setPeriodosExtemporaneos] = useState([]);
+  const [materiasExtemporaneas, setMateriasExtemporaneas] = useState([]);
+  const [materiasExtemporaneasSeleccionadas, setMateriasExtemporaneasSeleccionadas] = useState([]);
+  const [motivoExtemporaneo, setMotivoExtemporaneo] = useState('');
+  const [guardandoExtemporanea, setGuardandoExtemporanea] = useState(false);
+  const [cargandoExtemporanea, setCargandoExtemporanea] = useState(false);
   const [ciclosAlumno, setCiclosAlumno] = useState({});
   const [alumnoGuardandoCiclo, setAlumnoGuardandoCiclo] = useState(null);
   const [confirmacionCiclo, setConfirmacionCiclo] = useState('');
@@ -109,9 +118,75 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`}});
       if (r.status === 401) return onLogout(copy.messages.expired);
       if (!r.ok) throw new Error(copy.messages.loadCharges);
-      setCargas(await r.json());
+      const data = await r.json();
+      setCargas(data.cargas || []);
+      setCatalogoCarga({
+        materias: data.materias_catalogo || [],
+        docentes: data.docentes_catalogo || [],
+        salones: data.salones || [],
+        modalidades: data.modalidades || [],
+      });
     } catch (e) { setError(e.message || copy.messages.loadCharges); }
   }, [copy, onLogout, session.access]);
+
+  function agregarMateriaCarga() {
+    setMateriasCarga(items => [...items, {materia: '', docente: '', horario: '', salon: '', capacidad: 42, modalidad: 'presencial'}]);
+  }
+
+  function editarCarga(carga) {
+    setCargaEditando(carga.id);
+    setPeriodoCarga(carga.periodo);
+    setMateriasCarga(carga.materias.map(item => ({
+      materia: String(item.materia),
+      docente: item.docente ? String(item.docente) : '',
+      horario: item.horario,
+      salon: item.salon,
+      capacidad: item.capacidad,
+      modalidad: item.modalidad,
+    })));
+    setError('');
+    setSaveSuccess('');
+  }
+
+  function cancelarEdicionCarga() {
+    setCargaEditando(null);
+    setPeriodoCarga('');
+    setMateriasCarga([]);
+  }
+
+  async function guardarCargaBorrador(event) {
+    event.preventDefault();
+    setError('');
+    setSaveSuccess('');
+    setGuardandoCarga(true);
+    try {
+      const method = cargaEditando ? 'PATCH' : 'POST';
+      const url = cargaEditando ? `/api/cargas-academicas/${cargaEditando}/` : '/api/cargas-academicas/';
+      const payload = {
+        periodo: periodoCarga.trim(),
+        materias: materiasCarga.map(item => ({
+          ...item,
+          materia: item.materia ? Number(item.materia) : null,
+          docente: item.docente ? Number(item.docente) : null,
+          capacidad: Number(item.capacidad),
+        })),
+      };
+      const r = await fetch(url, {
+        method,
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || copy.loads.saveError);
+      setSaveSuccess(cargaEditando ? copy.loads.draftUpdated : copy.loads.draftSaved);
+      cancelarEdicionCarga();
+      await cargarFlujoCargas();
+    } catch (e) {
+      setError(e.message || copy.loads.saveError);
+    } finally {
+      setGuardandoCarga(false);
+    }
+  }
 
   async function crearCargaRevision() {
     try {
@@ -122,13 +197,20 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     } catch (e) { setError(e.message || copy.loads.sendError); }
   }
 
-  async function actualizarEstadoCarga(id, estado) {
+  async function actualizarEstadoCarga(id, estado, comentario = '', periodoInscripcion = null) {
+    setError('');
+    setSaveSuccess('');
+    setCargaRevisionGuardando(true);
     try {
-      const r = await fetch(`/api/cargas-academicas/${id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({estado})});
+      const r = await fetch(`/api/cargas-academicas/${id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({estado, comentario, ...(estado === 'publicada' ? {periodo_inscripcion: Number(periodoInscripcion)} : {})})});
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || copy.loads.updateError);
-      setSaveSuccess(`${copy.loads.updated} ${etiquetaEstado(estado, copy)}.`); cargarFlujoCargas();
+      setSaveSuccess(`${copy.loads.updated} ${etiquetaEstado(estado, copy)}.`);
+      setComentarioRevision('');
+      setCargaDetalleId(null);
+      await cargarFlujoCargas();
     } catch (e) { setError(e.message || copy.loads.updateError); }
+    finally { setCargaRevisionGuardando(false); }
   }
   const cargarProyectosTesis = useCallback(async () => {
     try {
@@ -210,7 +292,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     fetch('/api/preregistro/evaluaciones-colegio/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : Promise.reject(new Error(copy.messages.loadEvaluations))).then(setEvaluacionesColegio).catch(err => setError(err.message));
   }, [copy, datos, session.access]);
 
-  useEffect(() => { if (['periodos', 'cargas', 'materias'].includes(activeSection)) cargarFlujoCargas(); }, [activeSection, cargarFlujoCargas]);
+  useEffect(() => { if (['cargas', 'materias'].includes(activeSection)) cargarFlujoCargas(); }, [activeSection, cargarFlujoCargas]);
   useEffect(() => { if (activeSection === 'tesis') cargarProyectosTesis(); }, [activeSection, cargarProyectosTesis]);
   useEffect(() => {
     if (activeSection !== 'asignaciones') return;
@@ -229,7 +311,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     setSaveSuccess(`${solicitud.alumno?.nombre || copy.thesis.student}: ${copy.loads.updated}`);
   }
   useEffect(() => {
-    if (!['periodos', 'cargas', 'materias'].includes(activeSection)) return;
+    if (!['cargas', 'materias'].includes(activeSection)) return;
     const controller = new AbortController();
     fetch('/api/periodos-inscripcion/?todos=1', {headers:{Authorization:`Bearer ${session.access}`}, signal:controller.signal})
       .then(response => {
@@ -242,194 +324,86 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       .then(data => {
         const periodos = Array.isArray(data) ? data : [];
         setPeriodosInscripcion(periodos);
-        const periodoInicial = periodos.find(periodo => periodo.activo) || periodos[0] || null;
-        if (periodoInicial) seleccionarPeriodo(periodoInicial);
-        else {
-          setPeriodoActual(null);
-          setPeriodoForm({id:null,nombre:'',apertura:'',cierre:'',activo:true});
-        }
       })
       .catch(error => { if (error.name !== 'AbortError') setError(error.message); });
     return () => controller.abort();
   }, [activeSection, copy.messages.expired, copy.periods.createError, onLogout, session.access]);
 
-  function seleccionarPeriodo(periodo) {
-    setPeriodoActual(periodo);
-    setPeriodoForm({
-      id: periodo.id,
-      nombre: periodo.nombre || '',
-      apertura: formatoDateTimeLocal(periodo.apertura),
-      cierre: formatoDateTimeLocal(periodo.cierre),
-      activo: periodo.habilitado ?? periodo.activo,
-    });
-    setError('');
-    setSaveSuccess('');
-  }
-
-  function prepararNuevoPeriodo() {
-    setPeriodoForm({id:null,nombre:'',apertura:'',cierre:'',activo:true});
-    setError('');
-    setSaveSuccess('');
-  }
-
-  async function guardarPeriodoInscripcion(event) {
-    event.preventDefault();
-    if (guardandoPeriodo) return;
-    const nombre = periodoForm.nombre.trim();
-    if (!nombre) {
-      setError(copy.periods.nameRequired);
-      setSaveSuccess('');
-      return;
-    }
-    if (!periodoForm.apertura || !periodoForm.cierre || periodoForm.apertura >= periodoForm.cierre) {
-      setError(copy.periods.invalidRange);
-      setSaveSuccess('');
-      return;
-    }
-    const editando = Boolean(periodoForm.id);
-    setGuardandoPeriodo(true);
-    setError('');
-    setSaveSuccess('');
-    try {
-      const response = await fetch('/api/periodos-inscripcion/', {
-        method: editando ? 'PUT' : 'POST',
-        headers: {'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'},
-        body: JSON.stringify({...periodoForm, nombre}),
-      });
-      if (response.status === 401) return onLogout(copy.messages.expired);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = data.detail || data.error || Object.values(data)
-          .flat()
-          .find(value => typeof value === 'string');
-        throw new Error(detail || copy.periods.createError);
-      }
-      setPeriodoActual(data);
-      setPeriodosInscripcion(previous => previous.some(periodo => periodo.id === data.id)
-        ? previous.map(periodo => periodo.id === data.id ? data : periodo)
-        : [data, ...previous]);
-      setPeriodoForm({id:data.id,nombre:data.nombre,apertura:formatoDateTimeLocal(data.apertura),cierre:formatoDateTimeLocal(data.cierre),activo:data.habilitado ?? data.activo});
-      setSaveSuccess(editando ? copy.periods.updated : copy.periods.saved);
-      setError('');
-    } catch (error) {
-      setError(error.message || copy.periods.createError);
-    } finally {
-      setGuardandoPeriodo(false);
-    }
-  }
-
   useEffect(() => {
-    if (activeSection !== 'planes') return;
+    if (activeSection !== 'extemporanea' || !alumnoExtemporaneoId) {
+      setMateriasExtemporaneas([]);
+      setPeriodosExtemporaneos([]);
+      return undefined;
+    }
     const controller = new AbortController();
-    fetch('/api/tesis/flujo/', {headers:{Authorization:`Bearer ${session.access}`}, signal:controller.signal})
-      .then(response => {
+    const query = periodoExtemporaneoId ? `?periodo=${periodoExtemporaneoId}` : '';
+    setCargandoExtemporanea(true);
+    setError('');
+    fetch(`/api/coordinacion/alumnos/${alumnoExtemporaneoId}/inscripciones-extemporaneas/${query}`, {
+      headers: {Authorization: `Bearer ${session.access}`},
+      signal: controller.signal,
+    })
+      .then(async response => {
+        const body = await response.json().catch(() => ({}));
         if (response.status === 401) {
           onLogout(copy.messages.expired);
-          return Promise.reject(Object.assign(new Error(), {name:'AbortError'}));
+          throw Object.assign(new Error(), {name: 'AbortError'});
         }
-        return response.ok ? response.json() : Promise.reject(new Error(copy.plans.loadError));
+        if (!response.ok) throw new Error(body.detail || extText.loadError);
+        return body;
       })
-      .then(data => {
-        const configuraciones = data.configuraciones || [];
-        setConfiguracionesPlan(configuraciones);
-        setMateriasPlan(data.materias || []);
-        if (configuraciones.length) seleccionarPlan(configuraciones[0]);
-        else setPlanForm(nuevoPlanEstudio());
+      .then(body => {
+        const listaPeriodos = body.periodos || [];
+        setPeriodosExtemporaneos(listaPeriodos);
+        if (!periodoExtemporaneoId && listaPeriodos.length) {
+          const periodoPreferido = listaPeriodos.find(periodo => periodo.activo || periodo.habilitado) || listaPeriodos[0];
+          setPeriodoExtemporaneoId(String(periodoPreferido.id));
+        }
+        setMateriasExtemporaneas(body.materias || []);
+        setMateriasExtemporaneasSeleccionadas([]);
       })
-      .catch(error => {if (error.name !== 'AbortError') setError(error.message || copy.plans.loadError);});
+      .catch(err => { if (err.name !== 'AbortError') setError(err.message || extText.loadError); })
+      .finally(() => { if (!controller.signal.aborted) setCargandoExtemporanea(false); });
     return () => controller.abort();
-  }, [activeSection, copy.messages.expired, copy.plans.loadError, onLogout, session.access]);
+  }, [activeSection, alumnoExtemporaneoId, periodoExtemporaneoId, session.access, onLogout, copy.messages.expired, extText.loadError]);
 
-  function seleccionarPlan(configuracion) {
-    setPlanForm({
-      id: configuracion.id,
-      programa: configuracion.programa || '',
-      grado: configuracion.grado || 'maestria',
-      periodicidad: configuracion.periodicidad || 'semestral',
-      periodos_requeridos: configuracion.periodos_requeridos || 1,
-      creditos_requeridos: configuracion.creditos_requeridos || 0,
-      activo: Boolean(configuracion.activo),
-      materias_plan: (configuracion.materias_plan || []).map(item => ({...item, slotId:`existing-${item.id}`})),
-    });
-    setError('');
-    setSaveSuccess('');
-  }
-
-  function prepararNuevoPlan() {
-    setPlanForm(nuevoPlanEstudio());
-    setError('');
-    setSaveSuccess('');
-  }
-
-  function actualizarDuracionPlan(cambios) {
-    setPlanForm(current => {
-      const nuevoGrado = cambios.grado || current.grado;
-      const nuevaPeriodicidad = cambios.periodicidad || current.periodicidad;
-      const periodoPredeterminadoActual = periodosPredeterminados(current.grado, current.periodicidad);
-      const periodoPredeterminadoNuevo = periodosPredeterminados(nuevoGrado, nuevaPeriodicidad);
-      const periodosRequeridos = Number(current.periodos_requeridos) === periodoPredeterminadoActual
-        ? periodoPredeterminadoNuevo
-        : Number(current.periodos_requeridos);
-      return {
-        ...current,
-        ...cambios,
-        periodos_requeridos: periodosRequeridos,
-        materias_plan: current.materias_plan.filter(item => Number(item.periodo_sugerido) <= periodosRequeridos),
-      };
-    });
-  }
-
-  function generarMateriasMinimasPlan() {
-    setPlanForm(current => {
-      const rows = [...current.materias_plan];
-      const periodos = Math.max(1, Number(current.periodos_requeridos) || 1);
-      for (let period = 1; period <= periodos; period += 1) {
-        const rowsInPeriod = rows.filter(item => Number(item.periodo_sugerido) === period).length;
-        for (let index = rowsInPeriod; index < 4; index += 1) {
-          rows.push({slotId:`new-${period}-${index}-${Date.now()}-${Math.random()}`,materia:'',periodo_sugerido:period,obligatoria:true});
-        }
-      }
-      return {...current,materias_plan:rows};
-    });
-  }
-
-  function actualizarMateriaPlan(slotId, cambios) {
-    setPlanForm(current => ({...current,materias_plan:current.materias_plan.map(item => item.slotId === slotId ? {...item,...cambios} : item)}));
-  }
-
-  async function guardarPlanEstudio(event) {
+  async function registrarInscripcionExtemporanea(event) {
     event.preventDefault();
-    if (guardandoPlan) return;
+    if (!alumnoExtemporaneoId || !periodoExtemporaneoId || materiasExtemporaneasSeleccionadas.length === 0 || !motivoExtemporaneo.trim()) {
+      setError(extText.saveError);
+      return;
+    }
+    setGuardandoExtemporanea(true);
     setError('');
     setSaveSuccess('');
-    const periodos = Number(planForm.periodos_requeridos);
-    const filas = planForm.materias_plan.filter(item => item.materia !== '' && item.materia != null);
-    if (!planForm.programa.trim()) return setError(copy.plans.programRequired);
-    if (!periodos || periodos < 1) return setError(copy.plans.periodsRequired);
-    if (new Set(filas.map(item => Number(item.materia))).size !== filas.length) return setError(copy.plans.duplicateCourse);
-    const counts = Array.from({length:periodos}, (_, index) => filas.filter(item => Number(item.periodo_sugerido) === index + 1).length);
-    if (counts.some(count => count < 4)) return setError(copy.plans.minimumFour);
-    setGuardandoPlan(true);
     try {
-      const response = await fetch('/api/tesis/flujo/', {
-        method:'POST',
-        headers:{Authorization:`Bearer ${session.access}`,'Content-Type':'application/json'},
-        body:JSON.stringify({...planForm,periodos_requeridos:periodos,creditos_requeridos:Number(planForm.creditos_requeridos)||0,materias_plan:filas.map(({materia,periodo_sugerido,obligatoria})=>({materia:Number(materia),periodo_sugerido:Number(periodo_sugerido),obligatoria:Boolean(obligatoria)}))}),
+      const response = await fetch(`/api/coordinacion/alumnos/${alumnoExtemporaneoId}/inscripciones-extemporaneas/`, {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          periodo_inscripcion: Number(periodoExtemporaneoId),
+          materias: materiasExtemporaneasSeleccionadas,
+          motivo: motivoExtemporaneo.trim(),
+        }),
       });
+      const body = await response.json().catch(() => ({}));
       if (response.status === 401) return onLogout(copy.messages.expired);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || copy.plans.saveError);
-      setConfiguracionesPlan(current => current.some(item => item.id === data.id)
-        ? current.map(item => item.id === data.id ? data : item)
-        : [...current,data].sort((a,b)=>a.programa.localeCompare(b.programa)));
-      seleccionarPlan(data);
-      setSaveSuccess(copy.plans.saved);
-    } catch (error) {
-      setError(error.message || copy.plans.saveError);
+      if (!response.ok) throw new Error(body.detail || body.motivo || body.materias || extText.saveError);
+      setMateriasExtemporaneasSeleccionadas([]);
+      setMotivoExtemporaneo('');
+      setSaveSuccess(extText.saved);
+      setMateriasExtemporaneas(current => current.map(materia => (
+        materiasExtemporaneasSeleccionadas.includes(materia.id)
+          ? {...materia, inscritos: materia.inscritos + 1}
+          : materia
+      )));
+    } catch (err) {
+      setError(err.message || extText.saveError);
     } finally {
-      setGuardandoPlan(false);
+      setGuardandoExtemporanea(false);
     }
   }
+
   async function guardarCicloAlumno(alumno) {
     if (alumnoGuardandoCiclo === alumno.id) return;
     const value = Number(ciclosAlumno[alumno.id] ?? alumno.numero_periodo_actual);
@@ -739,123 +713,141 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   </div>
                   </>)}
 
-            {activeSection === 'periodos' && (
-              <section className="periodo-config" aria-labelledby="periodo-title">
-                <header className="periodo-config-heading">
-                  <div>
-                    <p className="panel-kicker">{copy.periods.kicker}</p>
-                    <h3 id="periodo-title">{copy.periods.title}</h3>
-                    <p>{copy.periods.intro}</p>
-                  </div>
-                  {periodoForm.id && <button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoPeriodo} onClick={prepararNuevoPeriodo}>{copy.periods.createNew}</button>}
-                </header>
-                {periodosInscripcion.length > 0 && (
-                  <label className="periodo-existing-select">
-                    <span>{copy.periods.selectExisting}</span>
-                    <select value={periodoForm.id || ''} disabled={guardandoPeriodo} onChange={event => {
-                      const selectedPeriod = periodosInscripcion.find(periodo => String(periodo.id) === event.target.value);
-                      if (selectedPeriod) seleccionarPeriodo(selectedPeriod);
-                      else prepararNuevoPeriodo();
-                    }}>
-                      <option value="">{copy.periods.createNew}</option>
-                      {periodosInscripcion.map(periodo => <option key={periodo.id} value={periodo.id}>{periodo.nombre || copy.periods.noName} · {formatearFecha(periodo.apertura, copy.locale)}</option>)}
-                    </select>
-                  </label>
-                )}
-                {periodoActual?.id && (
-                  <div className={`periodo-actual ${periodoActual.activo ? 'is-open' : 'is-closed'}`}>
-                    <strong>{periodoActual.activo ? copy.periods.current : periodoActual.habilitado ? copy.periods.scheduled : copy.periods.closed}</strong>
-                    <span>{periodoActual.nombre || copy.periods.noName} · {periodoActual.apertura ? formatearFecha(periodoActual.apertura, copy.locale) : copy.periods.noOpen} — {periodoActual.cierre ? formatearFecha(periodoActual.cierre, copy.locale) : copy.periods.noClose}</span>
-                  </div>
-                )}
-                <form className="periodo-form-grid" onSubmit={guardarPeriodoInscripcion}>
-                  <label><span>{copy.periods.name}</span><input value={periodoForm.nombre} disabled={guardandoPeriodo} onChange={event => setPeriodoForm({...periodoForm,nombre:event.target.value})} required maxLength="40" /></label>
-                  <label><span>{copy.periods.opening}</span><input type="datetime-local" value={periodoForm.apertura} disabled={guardandoPeriodo} onChange={event => setPeriodoForm({...periodoForm,apertura:event.target.value})} required /></label>
-                  <label><span>{copy.periods.closing}</span><input type="datetime-local" value={periodoForm.cierre} disabled={guardandoPeriodo} onChange={event => setPeriodoForm({...periodoForm,cierre:event.target.value})} required /></label>
-                  <label><span>{copy.periods.enabled}</span><select value={periodoForm.activo ? 'true' : 'false'} disabled={guardandoPeriodo} onChange={event => setPeriodoForm({...periodoForm,activo:event.target.value === 'true'})}><option value="true">{copy.periods.yes}</option><option value="false">{copy.periods.no}</option></select></label>
-                  <div className="periodo-form-actions"><button type="submit" className="qa-btn" disabled={guardandoPeriodo}>{guardandoPeriodo ? copy.periods.saving : periodoForm.id ? copy.periods.update : copy.periods.save}</button>{periodoForm.id && <button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoPeriodo} onClick={() => seleccionarPeriodo(periodoActual)}>{copy.periods.reset}</button>}</div>
-                </form>
-                {saveSuccess && <div className="api-success periodo-save-success" role="status" aria-live="polite">{saveSuccess}</div>}
-              </section>
-            )}
-            {activeSection === 'planes' && (
-              <section className="panel-card coord-directory coord-plan-panel">
+            {activeSection === 'extemporanea' && (
+              <section className="panel-card coord-plan-panel">
                 <header className="admin-card-head">
-                  <div>
-                    <p className="panel-kicker">{copy.plans.title}</p>
-                    <h3>{copy.plans.intro}</h3>
-                  </div>
-                  <button type="button" className="qa-btn" onClick={prepararNuevoPlan}>{copy.plans.new}</button>
+                  <div><p className="panel-kicker">{copy.groups.academic}</p><h3>{copy.nav.extemporanea}</h3><p>{extText.intro}</p></div>
                 </header>
-                {configuracionesPlan.length > 0 && (
-                  <label className="coord-plan-existing">
-                    <span>{copy.plans.choose}</span>
-                    <select value={planForm.id || ''} onChange={event => {
-                      const plan = configuracionesPlan.find(item => String(item.id) === event.target.value);
-                      if (plan) seleccionarPlan(plan);
-                      else prepararNuevoPlan();
-                    }}>
-                      <option value="">{copy.plans.new}</option>
-                      {configuracionesPlan.map(plan => <option value={plan.id} key={plan.id}>{plan.programa} · {plan.grado_label} ({plan.materias_plan?.length || 0})</option>)}
-                    </select>
-                  </label>
-                )}
-                {materiasPlan.length === 0 && <p className="coord-plan-notice">{copy.plans.catalogEmpty}</p>}
-                {configuracionesPlan.length === 0 && <p className="coord-plan-notice">{copy.plans.noPlans}</p>}
-                <form className="coord-plan-form" onSubmit={guardarPlanEstudio}>
+                <form className="coord-plan-form" onSubmit={registrarInscripcionExtemporanea}>
                   <div className="coord-plan-fields">
-                    <label><span>{copy.plans.program}</span><select value={planForm.programa} disabled={guardandoPlan} required onChange={event => {
-                      const programa = event.target.value;
-                      setPlanForm(current => ({...current,programa}));
-                      if (programa) actualizarDuracionPlan({grado:gradoDePrograma(programa)});
-                    }}>
-                      <option value="">—</option>
-                      {planForm.programa && !PROGRAMAS.includes(planForm.programa) && <option value={planForm.programa}>{planForm.programa}</option>}
-                      {PROGRAMAS.map(programa => <option key={programa} value={programa}>{programa}</option>)}
-                    </select></label>
-                    <label><span>{copy.plans.degree}</span><select value={planForm.grado} disabled={guardandoPlan} onChange={event => actualizarDuracionPlan({grado:event.target.value})}><option value="maestria">{copy.plans.masters}</option><option value="doctorado">{copy.plans.doctorate}</option></select></label>
-                    <label><span>{copy.plans.periodicity}</span><select value={planForm.periodicidad} disabled={guardandoPlan} onChange={event => actualizarDuracionPlan({periodicidad:event.target.value})}><option value="semestral">{copy.plans.semesters}</option><option value="cuatrimestral">{copy.plans.quarters}</option></select></label>
-                    <label><span>{copy.plans.periods}</span><input type="number" min="1" max="24" value={planForm.periodos_requeridos} disabled={guardandoPlan} required onChange={event => {
-                      const periodos = Number(event.target.value);
-                      setPlanForm(current => ({...current,periodos_requeridos:periodos,materias_plan:current.materias_plan.filter(item => Number(item.periodo_sugerido) <= periodos)}));
-                    }}/></label>
-                    <label><span>{copy.plans.credits}</span><input type="number" min="0" value={planForm.creditos_requeridos} disabled={guardandoPlan} onChange={event => setPlanForm({...planForm,creditos_requeridos:Number(event.target.value)})}/></label>
-                    <label><span>{copy.plans.active}</span><select value={planForm.activo ? 'true' : 'false'} disabled={guardandoPlan} onChange={event => setPlanForm({...planForm,activo:event.target.value === 'true'})}><option value="true">{copy.periods.yes}</option><option value="false">{copy.periods.no}</option></select></label>
+                    <label><span>{extText.student}</span>
+                      <select value={alumnoExtemporaneoId} onChange={event => {
+                        setAlumnoExtemporaneoId(event.target.value);
+                        setPeriodoExtemporaneoId('');
+                        setMateriasExtemporaneasSeleccionadas([]);
+                        setMotivoExtemporaneo('');
+                        setSaveSuccess('');
+                      }} required>
+                        <option value="">{extText.chooseStudent}</option>
+                        {(datos.personas || []).filter(persona => persona.rol === 'alumno').map(persona => (
+                          <option key={persona.id} value={persona.id}>{persona.nombre} · {persona.matricula || persona.programa || ''}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label><span>{extText.period}</span>
+                      <select value={periodoExtemporaneoId} disabled={!alumnoExtemporaneoId || !periodosExtemporaneos.length} onChange={event => {
+                        setPeriodoExtemporaneoId(event.target.value);
+                        setMateriasExtemporaneasSeleccionadas([]);
+                        setSaveSuccess('');
+                      }} required>
+                        <option value="">{extText.choosePeriod}</option>
+                        {periodosExtemporaneos.map(periodo => <option key={periodo.id} value={periodo.id}>{periodo.nombre} · {formatearFecha(periodo.apertura, copy.locale)}</option>)}
+                      </select>
+                    </label>
                   </div>
-                  <div className="coord-plan-course-heading">
-                    <div><h4>{copy.plans.courses}</h4><p>{copy.plans.minimumFour}</p></div>
-                    <button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoPlan || materiasPlan.length === 0} onClick={generarMateriasMinimasPlan}>{copy.plans.generateSlots}</button>
-                  </div>
-                  {planForm.materias_plan.length > 0 && (
+                  <div className="coord-plan-course-heading"><div><h4>{extText.subjects}</h4></div></div>
+                  {cargandoExtemporanea ? <p className="coord-plan-notice">{extText.loading}</p> : materiasExtemporaneas.length ? (
                     <div className="coord-plan-course-list">
-                      {planForm.materias_plan.map((item,index) => (
-                        <div className="coord-plan-course-row" key={item.slotId || item.id || index}>
-                          <label><span>{copy.plans.course}</span><select value={item.materia || ''} disabled={guardandoPlan} onChange={event => actualizarMateriaPlan(item.slotId, {materia:event.target.value})}>
-                            <option value="">{copy.subjects.subject}</option>
-                            {materiasPlan.map(materia => {
-                              const usada = planForm.materias_plan.some((other,otherIndex) => otherIndex !== index && Number(other.materia) === materia.id);
-                              return <option key={materia.id} value={materia.id} disabled={usada}>{materia.clave} · {materia.nombre}</option>;
-                            })}
-                          </select></label>
-                          <label><span>{copy.plans.suggestedPeriod}</span><select value={item.periodo_sugerido || 1} disabled={guardandoPlan} onChange={event => actualizarMateriaPlan(item.slotId, {periodo_sugerido:Number(event.target.value)})}>
-                            {Array.from({length:Math.max(1,Number(planForm.periodos_requeridos)||1)},(_,periodIndex)=><option key={periodIndex+1} value={periodIndex+1}>{periodIndex+1}</option>)}
-                          </select></label>
-                          <label className="coord-plan-required"><input type="checkbox" checked={Boolean(item.obligatoria)} disabled={guardandoPlan} onChange={event => actualizarMateriaPlan(item.slotId, {obligatoria:event.target.checked})}/><span>{copy.plans.mandatory}</span></label>
-                          <button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoPlan} onClick={() => setPlanForm(current => ({...current,materias_plan:current.materias_plan.filter((_,rowIndex)=>rowIndex!==index)}))}>{copy.plans.remove}</button>
-                        </div>
-                      ))}
+                      {materiasExtemporaneas.map(materia => {
+                        const sinCupo = materia.inscritos >= materia.capacidad;
+                        const marcada = materiasExtemporaneasSeleccionadas.includes(materia.id);
+                        return (
+                          <label className="coord-plan-course-row" key={materia.id}>
+                            <input type="checkbox" checked={marcada} disabled={sinCupo} onChange={event => setMateriasExtemporaneasSeleccionadas(current => (
+                              event.target.checked
+                                ? [...current, materia.id]
+                                : current.filter(id => id !== materia.id)
+                            ))}/>
+                            <span><strong>{materia.clave} · {materia.nombre}</strong><small>{materia.creditos} {copy.plans.credits} · {materia.horario || copy.subjects.define}</small></span>
+                            <span>{extText.capacity}: {Math.max(0, materia.capacidad - materia.inscritos)} / {materia.capacidad}{sinCupo ? ` · ${extText.full}` : ''}</span>
+                          </label>
+                        );
+                      })}
                     </div>
-                  )}
-                  <footer className="coord-plan-footer">
-                    <button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoPlan || materiasPlan.length === 0} onClick={() => setPlanForm(current => ({...current,materias_plan:[...current.materias_plan,{slotId:`manual-${Date.now()}-${Math.random()}`,materia:'',periodo_sugerido:1,obligatoria:true}]}))}>{copy.plans.addCourse}</button>
-                    <button type="submit" className="qa-btn" disabled={guardandoPlan || materiasPlan.length === 0}>{guardandoPlan ? copy.plans.saving : copy.plans.save}</button>
-                  </footer>
+                  ) : <p className="coord-plan-notice">{alumnoExtemporaneoId && periodoExtemporaneoId ? extText.noSubjects : extText.chooseStudent}</p>}
+                  <label className="coord-plan-reason"><span>{extText.reason}</span>
+                    <textarea rows="4" value={motivoExtemporaneo} onChange={event => setMotivoExtemporaneo(event.target.value)} placeholder={extText.reasonHint} required maxLength="2000"/>
+                  </label>
+                  <div className="periodo-form-actions">
+                    <button type="submit" className="qa-btn" disabled={guardandoExtemporanea || !alumnoExtemporaneoId || !periodoExtemporaneoId || !materiasExtemporaneasSeleccionadas.length || !motivoExtemporaneo.trim()}>{guardandoExtemporanea ? extText.saving : extText.submit}</button>
+                  </div>
+                  {error && <div className="api-error" role="alert">{error}</div>}
+                  {saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}
+                  {!alumnoExtemporaneoId && !(datos.personas || []).some(persona => persona.rol === 'alumno') && <p className="coord-plan-notice">{extText.noStudents}</p>}
                 </form>
-                {saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}
               </section>
             )}
+
             {activeSection === 'materias' && <div className="panel-card coord-directory coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.subjects.kicker}</p><h3>{copy.subjects.title}</h3><p>{copy.subjects.intro}</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={handleCargarCursosClick}>{copy.subjects.upload}</button><input ref={fileInputRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleCargarCursosFile}/><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : copy.subjects.query}</button></div></div>{materias ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead><tbody>{materias.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || copy.subjects.assign}</td><td>{m.horario || copy.subjects.define}</td></tr>)}</tbody></table></div> : <p className="empty-state">{copy.subjects.noCatalog}</p>}</div>}
-            {activeSection === 'cargas' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.loads.kicker}</p><h3>{copy.loads.title}</h3><p>{copy.loads.intro}</p></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>{copy.refresh}</button></div><div className="coord-action-row"><input className="coord-search" placeholder={copy.loads.example} value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /><button type="button" className="qa-btn" disabled={!periodoCarga.trim()} onClick={crearCargaRevision}>{copy.loads.send}</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{copy.loads.created}</th><th>{copy.loads.camunda}</th><th>{copy.loads.actions}</th></tr></thead><tbody>{cargas.length ? cargas.map(c => <tr key={c.id}><td>{c.periodo || '—'}</td><td><span className={`estado-badge estado-${c.estado}`}>{etiquetaEstado(c.estado, copy)}</span></td><td>{formatearFecha(c.created_at, copy.locale)}</td><td>{c.camunda_instance_id ? copy.loads.connected : copy.loads.pending}</td><td><div className="coord-action-row">{c.estado === 'en_revision' && <><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'aprobada')}>{copy.loads.approve}</button><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'rechazada')}>{copy.loads.reject}</button></>}{c.estado === 'aprobada' && <button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'publicada')}>{copy.loads.publish}</button>}</div></td></tr>) : <tr><td colSpan="5">{copy.loads.noLoads}</td></tr>}</tbody></table></div></div>}
+            {activeSection === 'cargas' && <div className="panel-card coord-directory">
+              <div className="admin-card-head"><div><p className="panel-kicker">{copy.loads.kicker}</p><h3>{copy.loads.title}</h3><p>{copy.loads.intro}</p></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>{copy.refresh}</button></div>
+              <form className="coord-carga-form" onSubmit={guardarCargaBorrador}>
+                <label><span>{copy.loads.period}</span><input className="coord-search" required placeholder={copy.loads.example} value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /></label>
+                <div className="coord-carga-rows">
+                  {materiasCarga.map((item, index) => {
+                    const usada = materiasCarga.some((otra, otroIndex) => otroIndex !== index && String(otra.materia) === String(item.materia));
+                    return <div className="coord-carga-row" key={`carga-${index}`}>
+                      <label><span>{copy.subjects.subject}</span><select required value={item.materia} onChange={e => {
+                        const materia = catalogoCarga.materias.find(m => String(m.id) === e.target.value);
+                        const docente = materia?.profesor ? catalogoCarga.docentes.find(d => d.nombre.toLowerCase() === materia.profesor.toLowerCase()) : null;
+                        setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, materia: e.target.value, docente: docente ? String(docente.id) : '', horario: materia?.horario || '', salon: materia?.salon || catalogoCarga.salones[0]?.id || '', capacidad: materia?.capacidad || 42} : row));
+                      }}>
+                        <option value="">{cargaText.subject}</option>
+                        {catalogoCarga.materias.map(m => <option key={m.id} value={m.id} disabled={usada && String(item.materia) !== String(m.id)}>{m.clave} · {m.nombre} ({m.creditos} {copy.plans.credits})</option>)}
+                      </select></label>
+                      <label><span>{copy.subjects.teacher}</span><select required value={item.docente} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, docente: e.target.value} : row))}>
+                        <option value="">{cargaText.teacher}</option>{catalogoCarga.docentes.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                      </select></label>
+                      <label><span>{copy.subjects.schedule}</span><input required maxLength="120" value={item.horario} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, horario: e.target.value} : row))}/></label>
+                      <label><span>{cargaText.room}</span><select required value={item.salon} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, salon: e.target.value} : row))}>
+                        <option value="">{copy.detail.unassigned}</option>{catalogoCarga.salones.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                      </select></label>
+                      <label><span>{cargaText.capacity}</span><input type="number" min="1" max="32767" required value={item.capacidad} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, capacidad: e.target.value} : row))}/></label>
+                      <label><span>{copy.detail.modality}</span><select required value={item.modalidad} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, modalidad: e.target.value} : row))}>
+                        {catalogoCarga.modalidades.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                      </select></label>
+                      <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setMateriasCarga(items => items.filter((_, rowIndex) => rowIndex !== index))}>{cargaText.remove}</button>
+                    </div>;
+                  })}
+                </div>
+                <div className="coord-action-row">
+                  <button type="button" className="qa-btn qa-btn-secondary" disabled={!catalogoCarga.materias.length} onClick={agregarMateriaCarga}>{cargaText.add}</button>
+                  <button type="submit" className="qa-btn" disabled={guardandoCarga || !periodoCarga.trim() || !materiasCarga.length}>{guardandoCarga ? copy.plans.saving : cargaEditando ? cargaText.update : cargaText.save}</button>
+                  {cargaEditando && <button type="button" className="qa-btn qa-btn-secondary" onClick={cancelarEdicionCarga}>{cargaText.cancel}</button>}
+                </div>
+              </form>
+              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{cargaText.count}</th><th>{copy.loads.created}</th><th>{copy.loads.camunda}</th><th>{copy.loads.actions}</th></tr></thead><tbody>
+                {cargas.length ? cargas.map(c => <React.Fragment key={c.id}>
+                  <tr><td>{c.periodo || '—'}<small>{c.creador_nombre}</small></td><td><span className={`estado-badge estado-${c.estado}`}>{etiquetaEstado(c.estado, copy)}</span></td><td>{c.materias.length}</td><td>{formatearFecha(c.created_at, copy.locale)}</td><td>{c.camunda_instance_id ? copy.loads.connected : copy.loads.pending}</td><td><div className="coord-action-row">
+                    <button type="button" className="qa-btn qa-btn-secondary" onClick={() => {setCargaDetalleId(cargaDetalleId === c.id ? null : c.id); setComentarioRevision('');}}>{cargaDetalleId === c.id ? cargaText.hide : cargaText.detail}</button>
+                    {c.estado === 'borrador' && <><button type="button" className="qa-btn qa-btn-secondary" onClick={() => editarCarga(c)}>{cargaText.edit}</button><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id, 'en_revision')}>{cargaText.submit}</button></>}
+                    {c.estado === 'aprobada' && <div className="coord-carga-publicacion">
+                      <label><span>{copy.periods.title}</span><select value={periodosPublicacionCarga[c.id] || ''} onChange={event => setPeriodosPublicacionCarga(current => ({...current, [c.id]: event.target.value}))}>
+                        <option value="">—</option>{periodosInscripcion.filter(periodo => periodo.habilitado).map(periodo => <option key={periodo.id} value={periodo.id}>{periodo.nombre} · {formatearFecha(periodo.apertura, copy.locale)}</option>)}
+                      </select></label>
+                      <button type="button" className="qa-btn" disabled={!periodosPublicacionCarga[c.id] || cargaRevisionGuardando} onClick={() => actualizarEstadoCarga(c.id, 'publicada', '', periodosPublicacionCarga[c.id])}>{copy.loads.publish}</button>
+                    </div>}
+                    {c.estado === 'publicada' && <small>{c.periodo_inscripcion_nombre || c.periodo}</small>}
+                  </div></td></tr>
+                  {cargaDetalleId === c.id && <tr><td colSpan="6">
+                    <div className="coord-carga-review">
+                      <h4>{copy.loads.period}: {c.periodo} · {cargaText.count}: {c.materias.length}</h4>
+                      {c.materias.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.plans.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th><th>{cargaText.room}</th><th>{cargaText.capacity}</th><th>{copy.detail.modality}</th></tr></thead><tbody>
+                        {c.materias.map(m => <tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos}</td><td>{m.docente_nombre || '—'}</td><td>{m.horario || '—'}</td><td>{m.salon_label}</td><td>{m.capacidad}</td><td>{m.modalidad_label}</td></tr>)}
+                      </tbody></table></div> : <p className="form-hint">{cargaText.noCourses}</p>}
+                      {c.comentario && c.estado !== 'en_revision' && <p className="api-success"><strong>{cargaText.reviewComment}:</strong> {c.comentario}</p>}
+                      {c.estado === 'en_revision' && <>
+                        <label className="coord-carga-comment"><span>{cargaText.reviewComment}</span><textarea rows="3" maxLength="2000" value={comentarioRevision} placeholder={cargaText.reviewCommentHint} onChange={e => setComentarioRevision(e.target.value)}/></label>
+                        <div className="coord-action-row">
+                          <button type="button" className="qa-btn" disabled={cargaRevisionGuardando || !comentarioRevision.trim()} onClick={() => actualizarEstadoCarga(c.id, 'aprobada', comentarioRevision)}>{cargaText.approveComment}</button>
+                          <button type="button" className="qa-btn qa-btn-secondary" disabled={cargaRevisionGuardando || !comentarioRevision.trim()} onClick={() => actualizarEstadoCarga(c.id, 'rechazada', comentarioRevision)}>{cargaText.rejectComment}</button>
+                        </div>
+                      </>}
+                    </div>
+                  </td></tr>}
+                </React.Fragment>) : <tr><td colSpan="6">{copy.loads.noLoads}</td></tr>}
+              </tbody></table></div>
+            </div>}
             {false && (
               <div className="panel-card coord-directory">
                 <div className="admin-card-head"><div><p className="panel-kicker">Flujo multietapa</p><h3>Aprobación de carga académica</h3></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>Actualizar</button></div>
@@ -927,6 +919,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
 
             {activeSection === 'egresados' && <EgresadosPanel session={session} onLogout={onLogout}/>}
             {activeSection === 'historico' && <HistoricoPanel session={session} onLogout={onLogout}/>}
+            {activeSection === 'examenes' && <ExamenesGestionPanel session={session}/>}
 
             {activeSection === 'colegio' && (
               <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.college.title}</h3><p>{copy.college.intro}</p><form className="colegio-evaluacion-form" onSubmit={guardarEvaluacionColegio}><label>{copy.college.applicant}<select value={evaluacionForm.aspirante} onChange={e => setEvaluacionForm({...evaluacionForm, aspirante: e.target.value})}><option value="">{copy.college.selectApplicant}</option>{(datos.aspirantes || []).filter(a => a.rol === 'aspirante').map(a => <option key={a.id} value={a.id}>{a.nombre} — {a.programa || copy.college.noProgram}</option>)}</select></label><label>{copy.college.decision}<select value={evaluacionForm.estado} onChange={e => setEvaluacionForm({...evaluacionForm, estado: e.target.value})}><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.status.favorable}</option><option value="no_favorable">{copy.status.no_favorable}</option></select></label><label>{copy.college.comments}<textarea rows="4" value={evaluacionForm.dictamen} onChange={e => setEvaluacionForm({...evaluacionForm, dictamen: e.target.value})} placeholder={copy.college.placeholder} required /></label><button type="submit" className="qa-btn">{evaluacionForm.id ? copy.college.update : copy.college.save}</button>{evaluacionForm.id && <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setEvaluacionForm({aspirante: '', estado: 'en_revision', dictamen: ''})}>{copy.college.cancel}</button>}</form></div><div className="panel-card"><div className="admin-card-head"><div><h3>{copy.college.registered}</h3><p>{copy.college.history}</p></div><select className="coord-filter-select" value={evaluacionFiltro} onChange={e => setEvaluacionFiltro(e.target.value)}><option value="todas">{copy.college.all}</option><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.college.favorable}</option><option value="no_favorable">{copy.college.noFavorable}</option></select></div>{evaluacionesVisibles.length ? <div className="colegio-evaluaciones-list">{evaluacionesVisibles.map(e => <article key={e.id}><div><strong>{e.aspirante_nombre || `Aspirante #${e.aspirante}`}</strong><small>{e.evaluador_nombre || copy.predoctoral.unavailable} · {formatearFecha(e.fecha_evaluacion, copy.locale)}</small><p>{e.dictamen || '—'}</p></div><div className="coord-action-row"><span className={`estado-badge estado-${e.estado}`}>{etiquetaEstado(e.estado, copy)}</span><button type="button" className="qa-btn" onClick={() => setEvaluacionForm({id:e.id, aspirante:e.aspirante, estado:e.estado, dictamen:e.dictamen || ''})}>{copy.college.update}</button></div></article>)}</div> : <p className="empty-state">{copy.college.selectDecision}</p>}</div></div></div>

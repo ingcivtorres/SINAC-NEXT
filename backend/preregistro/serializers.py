@@ -84,8 +84,8 @@ class InscripcionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Inscripcion
-        fields = ['id', 'materia', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'horario', 'created_at', 'updated_at', 'color']
-        read_only_fields = ['id', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'created_at', 'updated_at', 'color']
+        fields = ['id', 'materia', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'horario', 'extemporanea', 'motivo_extemporanea', 'registrada_por', 'created_at', 'updated_at', 'color']
+        read_only_fields = ['id', 'materia_clave', 'materia_nombre', 'materia_creditos', 'materia_profesor', 'materia_horario', 'materia_salon', 'materia_capacidad', 'materia_inscritos', 'periodo_inscripcion', 'periodo_nombre', 'aspirante', 'estado', 'validacion_servicios', 'estado_label', 'calificacion', 'parcial_1', 'parcial_2', 'parcial_3', 'extemporanea', 'motivo_extemporanea', 'registrada_por', 'created_at', 'updated_at', 'color']
 
     def get_estado_label(self, obj):
         if obj.calificacion is None:

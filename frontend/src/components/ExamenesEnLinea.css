@@ -1,0 +1,18 @@
+.exam-panel{display:grid;gap:14px}
+.exam-notice{margin:0;padding:10px 14px;border-radius:10px;font-weight:600}
+.exam-notice--success{background:rgba(46,125,50,.12);color:#1b5e20}
+.exam-notice--error{background:rgba(198,40,40,.12);color:#b71c1c}
+.exam-taker{display:grid;gap:14px;padding:16px;border:2px solid rgba(0,137,123,.35);border-radius:14px;background:var(--content-bg)}
+.exam-taker-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.exam-taker-header p{margin:4px 0 0;color:var(--muted)}
+.exam-timer{display:grid;text-align:right;font-variant-numeric:tabular-nums}
+.exam-timer span{font-size:.78rem;color:var(--muted)}
+.exam-timer strong{font-size:1.5rem}
+.exam-timer.is-low strong{color:#c62828}
+.exam-questions{display:grid;gap:14px;margin:0;padding-left:0;list-style:none}
+.exam-question{display:grid;gap:8px;padding:12px 14px;border:1px solid rgba(0,137,123,.16);border-radius:12px}
+.exam-question p{margin:0}
+.exam-options{display:grid;gap:6px}
+.exam-option{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid rgba(0,137,123,.14)}
+.exam-option:hover{background:rgba(0,137,123,.07)}
+.exam-text{padding:10px 12px;border:1px solid rgba(0,137,123,.3);border-radius:8px;font:inherit}

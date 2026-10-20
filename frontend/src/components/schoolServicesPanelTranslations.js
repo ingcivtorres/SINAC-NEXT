@@ -22,6 +22,8 @@ const catalog = {
     menu: {
       resumen: 'Resumen',
       alumnos: 'Alumnos',
+      docentes: 'Directorio de docentes',
+      examenes: 'Exámenes en línea',
       inscripciones: 'Inscripciones',
       historial: 'Historial académico',
       calificaciones: 'Calificaciones',
@@ -30,6 +32,8 @@ const catalog = {
       egresados: 'Egresados',
       historico: 'Histórico',
       reportes: 'Reportes',
+      planes: 'Planes de estudio',
+      periodos: 'Periodos de inscripción',
     },
     status: {
       activo: 'Activo',
@@ -175,6 +179,9 @@ const catalog = {
       noInscriptions: 'No hay materias inscritas.',
       pending: 'Pendiente',
       assign: 'Por asignar',
+      enrollmentType: 'Tipo / motivo',
+      regular: 'Regular',
+      extemporaneous: 'Extemporánea',
     },
     documents: {
       title: 'Documentos oficiales',
@@ -205,13 +212,13 @@ const catalog = {
     role: 'Administrative role',
     roleText: 'Review, validate, and generate documents.',
     groups: { panorama: 'Overview', academicControl: 'Academic control', documentation: 'Documentation and closure', institutional: 'Institutional intelligence' },
-    menu: { resumen: 'Overview', alumnos: 'Students', inscripciones: 'Enrollments', historial: 'Academic history', calificaciones: 'Grades', constancias: 'Certificates and documents', egreso: 'Graduation', egresados: 'Graduates', historico: 'History', reportes: 'Reports' },
+    menu: { resumen: 'Overview', alumnos: 'Students', docentes: 'Faculty directory', examenes: 'Online exams', inscripciones: 'Enrollments', historial: 'Academic history', calificaciones: 'Grades', constancias: 'Certificates and documents', egreso: 'Graduation', egresados: 'Graduates', historico: 'History', reportes: 'Reports', planes: 'Study plans', periodos: 'Enrollment periods' },
     status: { activo: 'Active', baja: 'Inactive', inactivo: 'Inactive', egresado: 'Graduated', cursando: 'In progress', aprobada: 'Passed', reprobada: 'Failed', pendiente: 'Pending', validada: 'Validated', observada: 'Observed', pending: 'Pending' },
     common: { noEnrollment: 'No enrollment', noProgram: 'No program', noDepartment: '—', noStudent: 'Select a student', noResults: 'There are no students matching the filters.', noSubjects: 'No enrolled subjects.', noGrades: 'No grades registered.', noComments: 'No comment.', byInstitution: 'Official record', activeStudents: 'Active students', totalStudents: 'Total students', institutionalAverage: 'Institutional average', academicPrevalidations: 'Academic prevalidations', activeAccount: 'With active account', officialRecord: 'Official record', quickConsult: 'QUICK SEARCH', registeredStudents: 'Registered students', viewAllStudents: 'View student management', institutionalManagement: 'Official management of students, enrollments, history, and documents.', close: 'Close', save: 'Save', cancel: 'Cancel', selectFirst: 'Select a student first.', generatePdf: 'Generate PDF', update: 'Update', allPrograms: 'All programs', allDepartments: 'All departments', allStatuses: 'All statuses', registered: 'Registered', pendingDocuments: 'Pending generation', graduate: 'Graduate', online: 'Online', newStudent: 'New student', noThreshold: 'No threshold' },
     table: { student: 'Student', enrollment: 'Enrollment', program: 'Program', department: 'Department', status: 'Status', actions: 'Actions', key: 'Code', subject: 'Subject', credits: 'Credits', professor: 'Professor', final: 'Final', validation: 'Validation', consult: 'View record', searchPlaceholder: 'Search by name, enrollment, username, or email', validate: 'Validate', observe: 'Observe', viewAll: 'View all', viewStudentData: 'Subjects for', enrolledStudents: 'Enrolled students', approvedSubjects: 'Approved subjects', creditsEarned: 'Earned credits', finalAverage: 'Final average', subjectHistory: 'Academic history', academicTrajectory: 'Complete trajectory', institutionalGrades: 'Institutional grades', documents: 'Certificates and documents', allDocuments: 'Official documents', byAcademicProgram: 'Enrollment by program', byDepartment: 'Enrollment by department', reportes: 'Reports', partial1: 'Partial 1', partial2: 'Partial 2', partial3: 'Partial 3' },
     academic: { alert: 'Review the student record, history, status, and administrative movements here.', administrativeData: 'Administrative data', management: 'MANAGEMENT', selectStudent: 'Select a student', email: 'Email', phone: 'Phone', unit: 'Unit', average: 'Average', record: 'Record', name: 'Name', studentName: 'Full name', institutionUser: 'Institutional username', institutionalEmail: 'Institutional email', curp: 'CURP', studentProfile: 'Student profile', matricula: 'Enrollment', department: 'Department', program: 'Program', title: 'Academic prevalidation', graduateControl: 'GRADUATION CONTROL', graduateSubtitle: 'Indicative measure based on the configured academic plan. It does not replace documental review, administrative checks, or the official graduation ruling.', mandatoryPlan: 'Plan with mandatory subjects configured', mandatoryApproved: 'Mandatory subjects approved', creditsApproved: 'Credits approved', completedPeriods: 'Completed periods', enrollmentAssigned: 'Enrollment assigned', documentsLoaded: 'Documents uploaded (official list pending)', pendingAcademic: 'Academic pending items', studentRegistration: 'Student registration', noteAcademicValidation: 'School Services reviews and validates records; academic capture or modification belongs to the authorized instructor.' },
     messages: { sessionExpired: 'Your session has expired. Please sign in again.', loadPanel: 'Could not load School Services.', loadReports: 'Could not load the reports.', dataSaveError: 'Could not save the administrative data.', studentCreated: 'Student registered successfully.', movementError: 'Could not register the movement.', movementSaved: 'Administrative movement registered.', invalidInscription: 'Could not validate the enrollment.', validInscription: 'Enrollment validated administratively.', invalidForReview: 'Enrollment marked for review.', documentError: 'Could not generate the document.', noStudentSelected: 'Select a student first.', logout: 'The session was closed successfully.', describeMovement: 'Describe the administrative movement.', loadingReports: 'Loading reports...', noAcademicData: 'Select a student to review their academic progress.', noDocumentSelection: 'Select a student to generate official documents.', fullAgenda: 'Official management of students, enrollments, history, and documents.', newStudent: 'New student' },
-    enrollment: { title: 'Enrollments and re-enrollments', selectStudent: 'Select a student from the table to validate enrollments and administrative requirements.', review: 'View all', noInscriptions: 'No enrolled subjects.', pending: 'Pending', assign: 'To be assigned' },
+    enrollment: { title: 'Enrollments and re-enrollments', selectStudent: 'Select a student from the table to validate enrollments and administrative requirements.', review: 'View all', noInscriptions: 'No enrolled subjects.', pending: 'Pending', assign: 'To be assigned', enrollmentType: 'Type / reason', regular: 'Regular', extemporaneous: 'Late enrollment' },
     documents: { title: 'Official documents', studentName: 'Certificate of studies', grades: 'Transcript certificate', academicHistory: 'Academic history', inscription: 'Enrollment certificate', graduation: 'Graduation prevalidation', descriptions: { studies: 'Confirms the student is enrolled.', grades: 'Official summary of grades.', history: 'Subjects, partials, finals, and statuses.', inscription: 'Official enrollment document.', graduation: 'Preliminary review of requirements.' } }
   }
 };

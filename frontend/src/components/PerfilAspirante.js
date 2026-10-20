@@ -23,6 +23,7 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [modal, setModal] = useState('');
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -42,8 +43,8 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
     setPreview(URL.createObjectURL(archivo));
   }
 
-  async function guardar(event) {
-    event.preventDefault();
+  async function guardar() {
+    setModal('');
     setGuardando(true); setError(''); setMensaje('');
     const form = new FormData();
     form.append('nombre', nombre);
@@ -57,7 +58,7 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
       if (!response.ok) throw new Error(`${text.saveError} (HTTP ${response.status}).`);
       if (!contentType.includes('application/json')) throw new Error(text.unexpected);
       if (fileRef.current) fileRef.current.value = '';
-      setFoto(null); setMensaje(text.saved);
+      setFoto(null); setMensaje(text.saved); setModal('ok');
       onActualizado(data);
     } catch (err) { setError(err.message || text.saveError); }
     finally { setGuardando(false); }
@@ -65,6 +66,14 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
 
   return <div className="profile-editor panel-card">
     <div className="profile-editor-head"><div className="profile-avatar">{preview ? <img src={preview} alt={text.photo} onError={() => setPreview('')}/> : <span>{(nombre || 'A').charAt(0).toUpperCase()}</span>}</div><div><h3>{text.name}</h3><p>{text.update}</p></div></div>
-    <form className="profile-form" onSubmit={guardar}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
+    <form className="profile-form" onSubmit={(event) => { event.preventDefault(); setModal('confirm'); }}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
+    {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal('')}><div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <h3>{modal === 'confirm' ? text.confirmTitle : text.savedTitle}</h3>
+      <p>{modal === 'confirm' ? text.confirmText : text.saved}</p>
+      <div className="modal-actions">
+        {modal === 'confirm' && <button type="button" className="btn-secondary" onClick={() => setModal('')}>{text.cancel}</button>}
+        <button type="button" className="qa-btn" autoFocus onClick={modal === 'confirm' ? guardar : () => setModal('')}>{modal === 'confirm' ? text.confirm : text.close}</button>
+      </div>
+    </div></div>}
   </div>;
 }

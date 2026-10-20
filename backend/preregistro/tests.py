@@ -13,9 +13,268 @@ from PIL import Image
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
-from preregistro.models import Aspirante, ConfiguracionPrograma, ExpedienteDigital, Materia, PeriodoInscripcion, SeguimientoSolicitud, ProyectoTesis, JuradoProyecto, DefensaTesis, Inscripcion, PlanEstudioMateria, DocumentoAspirante, EgresoAlumno
+from preregistro.models import Aspirante, ConfiguracionPrograma, ExpedienteDigital, Materia, CargaAcademica, CargaAcademicaMateria, PeriodoInscripcion, SeguimientoSolicitud, ProyectoTesis, JuradoProyecto, DefensaTesis, Inscripcion, PlanEstudioMateria, DocumentoAspirante, EgresoAlumno
 from preregistro.alertas import generar_alertas_automatizadas
 from preregistro.serializers import AspiranteRegistroSerializer
+
+
+def crear_carga_publicada(creador, periodo, materias, capacidades=None):
+    carga = CargaAcademica.objects.create(
+        creador=creador,
+        estado='publicada',
+        periodo=periodo.nombre,
+        periodo_inscripcion=periodo,
+    )
+    capacidades = capacidades or {}
+    CargaAcademicaMateria.objects.bulk_create([
+        CargaAcademicaMateria(
+            carga=carga,
+            materia=materia,
+            horario=f'Lunes {10 + indice}:00-12:00',
+            capacidad=capacidades.get(materia.pk, materia.capacidad),
+        )
+        for indice, materia in enumerate(materias)
+    ])
+    return carga
+
+
+class CargaAcademicaPreparationTests(TestCase):
+    def setUp(self):
+        datos_base = {
+            'password': 'password123',
+            'telefono': '5512345678',
+            'estado_actual': 'Ciudad de México',
+            'municipio_actual': 'Coyoacán',
+            'direccion_actual': 'Calle 1',
+            'estado_permanente': 'Ciudad de México',
+            'municipio_permanente': 'Coyoacán',
+            'direccion_permanente': 'Calle 1',
+            'nombre_familiar': 'Contacto de prueba',
+            'parentesco': 'Familiar',
+            'telefono_familiar': '5511111111',
+            'ultimo_grado': 'Maestría',
+            'institucion': 'Cinvestav',
+            'unidad': 'Cinvestav',
+            'departamento': 'Pruebas',
+            'seccion': 'Posgrado',
+            'programa': 'Programa de prueba',
+        }
+        self.docente = Aspirante.objects.create_user(
+            usuario='docente-carga-test',
+            correo='docente-carga-test@example.com',
+            nombre='Docente de prueba',
+            curp='QUGX850101HDFRNN02',
+            business_key='DOCENTE-CARGA-TEST',
+            rol='docente',
+            **datos_base,
+        )
+        self.coordinacion = Aspirante.objects.create_user(
+            usuario='coord-carga-test',
+            correo='coordinacion-carga-test@example.com',
+            nombre='Coordinación de prueba',
+            curp='QUGX850101HDFRNN03',
+            business_key='COORD-CARGA-TEST',
+            rol='coordinacion',
+            **datos_base,
+        )
+        self.materia = Materia.objects.create(
+            clave='CARGA-TEST-01',
+            nombre='Materia para carga de prueba',
+            profesor=self.docente.nombre,
+            horario='Lunes 10:00-12:00',
+        )
+        self.client = APIClient()
+
+    def test_docente_can_save_and_submit_detailed_draft(self):
+        self.client.force_authenticate(user=self.docente)
+        response = self.client.post('/api/cargas-academicas/', {
+            'periodo': '2026-2',
+            'materias': [{
+                'materia': self.materia.id,
+                'docente': self.docente.id,
+                'horario': 'Martes 10:00-12:00',
+                'salon': 'salon_1',
+                'capacidad': 30,
+                'modalidad': 'presencial',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['estado'], 'borrador')
+        self.assertEqual(response.data['materias'][0]['docente'], self.docente.id)
+        self.assertEqual(response.data['materias'][0]['capacidad'], 30)
+
+        with patch('preregistro.views._iniciar_carga_en_camunda', return_value='camunda-test-id'):
+            submitted = self.client.patch(
+                f"/api/cargas-academicas/{response.data['id']}/",
+                {'estado': 'en_revision'},
+                format='json',
+            )
+
+        self.assertEqual(submitted.status_code, 200)
+        self.assertEqual(submitted.data['estado'], 'en_revision')
+        self.assertTrue(CargaAcademicaMateria.objects.filter(carga_id=response.data['id']).exists())
+
+    def test_coordination_can_view_catalog_and_edit_drafts(self):
+        carga = CargaAcademica.objects.create(creador=self.docente, periodo='2026-2', estado='borrador')
+        CargaAcademicaMateria.objects.create(
+            carga=carga,
+            materia=self.materia,
+            horario='Lunes 10:00-12:00',
+            salon='salon_1',
+            capacidad=30,
+            modalidad='presencial',
+        )
+        self.client.force_authenticate(user=self.coordinacion)
+
+        response = self.client.get('/api/cargas-academicas/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['cargas']), 1)
+        self.assertEqual(response.data['materias_catalogo'][0]['id'], self.materia.id)
+        updated = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'periodo': '2027-1', 'materias': [{
+                'materia': self.materia.id,
+                'docente': self.docente.id,
+                'horario': 'Miércoles 10:00-12:00',
+                'salon': 'salon_1',
+                'capacidad': 24,
+                'modalidad': 'hibrida',
+            }]},
+            format='json',
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data['periodo'], '2027-1')
+        self.assertEqual(updated.data['materias'][0]['modalidad'], 'hibrida')
+
+    def test_submission_requires_assigned_teacher_and_schedule(self):
+        self.client.force_authenticate(user=self.coordinacion)
+        draft = self.client.post('/api/cargas-academicas/', {
+            'periodo': '2026-2',
+            'materias': [{'materia': self.materia.id, 'docente': None, 'horario': ''}],
+        }, format='json')
+        self.assertEqual(draft.status_code, 201)
+
+        submitted = self.client.patch(
+            f"/api/cargas-academicas/{draft.data['id']}/",
+            {'estado': 'en_revision'},
+            format='json',
+        )
+        self.assertEqual(submitted.status_code, 400)
+        self.assertIn('docente', submitted.data['detail'])
+
+    def test_coordination_can_review_with_required_comment(self):
+        carga = CargaAcademica.objects.create(
+            creador=self.docente,
+            periodo='2026-2',
+            estado='en_revision',
+        )
+        CargaAcademicaMateria.objects.create(
+            carga=carga,
+            materia=self.materia,
+            docente=self.docente,
+            horario='Lunes 10:00-12:00',
+            salon='salon_1',
+            capacidad=30,
+            modalidad='presencial',
+        )
+        self.client.force_authenticate(user=self.coordinacion)
+
+        missing_comment = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'aprobada'},
+            format='json',
+        )
+        self.assertEqual(missing_comment.status_code, 400)
+
+        approved = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'aprobada', 'comentario': 'Oferta revisada y completa.'},
+            format='json',
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.data['estado'], 'aprobada')
+        self.assertEqual(approved.data['comentario'], 'Oferta revisada y completa.')
+
+        sin_periodo = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'publicada'},
+            format='json',
+        )
+        self.assertEqual(sin_periodo.status_code, 400)
+
+        periodo_cerrado = PeriodoInscripcion.objects.create(
+            nombre='2026-1-cerrado',
+            apertura=timezone.now() - timedelta(days=30),
+            cierre=timezone.now() - timedelta(days=1),
+            activo=False,
+        )
+        no_habilitado = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'publicada', 'periodo_inscripcion': periodo_cerrado.id},
+            format='json',
+        )
+        self.assertEqual(no_habilitado.status_code, 400)
+
+        periodo = PeriodoInscripcion.objects.create(
+            nombre='2026-2',
+            apertura=timezone.now() - timedelta(days=1),
+            cierre=timezone.now() + timedelta(days=30),
+            activo=True,
+        )
+        published = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'publicada', 'periodo_inscripcion': periodo.id},
+            format='json',
+        )
+        self.assertEqual(published.status_code, 200)
+        self.assertEqual(published.data['periodo_inscripcion_id'], periodo.id)
+        self.assertEqual(published.data['periodo'], periodo.nombre)
+
+    def test_cannot_publish_duplicate_subjects_for_same_period(self):
+        periodo = PeriodoInscripcion.objects.create(
+            nombre='2026-2-duplicado',
+            apertura=timezone.now() - timedelta(days=1),
+            cierre=timezone.now() + timedelta(days=30),
+            activo=True,
+        )
+        carga = CargaAcademica.objects.create(
+            creador=self.docente,
+            periodo='2026-2-duplicado',
+            estado='aprobada',
+        )
+        CargaAcademicaMateria.objects.create(
+            carga=carga,
+            materia=self.materia,
+            docente=self.docente,
+            horario='Lunes 10:00-12:00',
+        )
+        crear_carga_publicada(self.docente, periodo, [self.materia])
+        self.client.force_authenticate(user=self.coordinacion)
+
+        response = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'publicada', 'periodo_inscripcion': periodo.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        carga.refresh_from_db()
+        self.assertEqual(carga.estado, 'aprobada')
+
+    def test_teacher_cannot_review_submission(self):
+        carga = CargaAcademica.objects.create(
+            creador=self.docente,
+            periodo='2026-2',
+            estado='en_revision',
+        )
+        self.client.force_authenticate(user=self.docente)
+        response = self.client.patch(
+            f'/api/cargas-academicas/{carga.id}/',
+            {'estado': 'rechazada', 'comentario': 'No procede.'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class DocumentoAspiranteViewTests(TestCase):
@@ -286,8 +545,15 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         materia_plan = Materia.objects.create(clave='PLAN-101', nombre='Materia del plan')
         materia_fuera_plan = Materia.objects.create(clave='EXTRA-101', nombre='Materia ajena al plan')
         materia_otro_periodo = Materia.objects.create(clave='PLAN-201', nombre='Materia del siguiente periodo')
+        materia_no_publicada = Materia.objects.create(clave='PLAN-102', nombre='Materia aún no publicada')
         PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia_plan)
         PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia_otro_periodo, periodo_sugerido=2)
+        PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia_no_publicada)
+        crear_carga_publicada(
+            self.alumno,
+            periodo,
+            [materia_plan, materia_fuera_plan, materia_otro_periodo],
+        )
         self.client.force_authenticate(user=self.alumno)
 
         response = self.client.get('/api/preregistro/materias/')
@@ -295,6 +561,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item['id'] for item in response.data], [materia_plan.id])
         self.assertNotIn(materia_fuera_plan.id, [item['id'] for item in response.data])
+        self.assertNotIn(materia_no_publicada.id, [item['id'] for item in response.data])
 
     def test_enrollment_requires_exactly_four_courses_per_period(self):
         self.alumno.numero_periodo_actual = 1
@@ -309,6 +576,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         materias = [Materia.objects.create(clave=f'CUAT-{index:03d}', nombre=f'Materia del cuatrimestre {index}') for index in range(1, 6)]
         for materia in materias:
             PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia, periodo_sugerido=1)
+        crear_carga_publicada(self.alumno, periodo, materias[:4])
         self.client.force_authenticate(user=self.alumno)
 
         incompleta = self.client.post(
@@ -319,6 +587,14 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         self.assertEqual(incompleta.status_code, 400)
         self.assertEqual(Inscripcion.objects.filter(aspirante=self.alumno, periodo_inscripcion=periodo).count(), 0)
 
+        no_publicada = self.client.post(
+            '/api/preregistro/inscripciones/',
+            {'materias': [materias[0].id, materias[1].id, materias[2].id, materias[4].id]},
+            format='json',
+        )
+        self.assertEqual(no_publicada.status_code, 400)
+        self.assertEqual(Inscripcion.objects.filter(aspirante=self.alumno, periodo_inscripcion=periodo).count(), 0)
+
         completa = self.client.post(
             '/api/preregistro/inscripciones/',
             {'materias': [materia.id for materia in materias[:4]]},
@@ -326,6 +602,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         )
         self.assertEqual(completa.status_code, 201)
         self.assertEqual(len(completa.data), 4)
+        self.assertEqual(completa.data[0]['horario'], 'Lunes 10:00-12:00')
         self.assertEqual(Inscripcion.objects.filter(aspirante=self.alumno, periodo_inscripcion=periodo).count(), 4)
 
         quinta = self.client.post(
@@ -354,6 +631,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materias[0], periodo_sugerido=1)
         for materia in materias[1:]:
             PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia, periodo_sugerido=2)
+        crear_carga_publicada(self.alumno, periodo_actual, materias)
         Inscripcion.objects.create(
             aspirante=self.alumno, materia=materias[0], periodo_inscripcion=periodo_anterior, calificacion=6,
         )
@@ -488,7 +766,7 @@ class PeriodoInscripcionCoordinacionTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.coordinacion = Aspirante.objects.create_superuser(
-            usuario='COORD_PERIODO', correo='coord.periodo@example.com', password='password123', rol='coordinacion',
+            usuario='SERV_PERIODO', correo='serv.periodo@example.com', password='password123', rol='servicios',
         )
         self.client.force_authenticate(user=self.coordinacion)
 
@@ -610,6 +888,126 @@ class PeriodoInscripcionCoordinacionTests(TestCase):
         self.assertEqual(response.status_code, 403)
         periodo.refresh_from_db()
         self.assertEqual(periodo.nombre, 'Periodo protegido')
+
+    def test_coordinacion_can_read_but_cannot_manage_enrollment_periods(self):
+        periodo = PeriodoInscripcion.objects.create(
+            nombre='Periodo coordinación', apertura=timezone.now() + timedelta(days=10),
+            cierre=timezone.now() + timedelta(days=25), activo=True,
+        )
+        coordinacion = Aspirante.objects.create_superuser(
+            usuario='COORD_PERIODO_DENY', correo='coord.periodo.deny@example.com', password='password123',
+            rol='coordinacion', curp='COOR000000HDF00002', business_key='COORD-PERIODO-DENY',
+        )
+        self.client.force_authenticate(user=coordinacion)
+        listed = self.client.get('/api/periodos-inscripcion/?todos=1')
+        created = self.client.post('/api/periodos-inscripcion/', {
+            'nombre': 'Periodo no autorizado', **self.fechas_futuras(), 'activo': True,
+        }, format='json')
+        updated = self.client.put('/api/periodos-inscripcion/', {
+            'id': periodo.id, 'nombre': 'Cambio no autorizado', **self.fechas_futuras(40, 60), 'activo': True,
+        }, format='json')
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(created.status_code, 403)
+        self.assertEqual(updated.status_code, 403)
+        periodo.refresh_from_db()
+        self.assertEqual(periodo.nombre, 'Periodo coordinación')
+
+
+class InscripcionExtemporaneaTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.coordinacion = Aspirante.objects.create_superuser(
+            usuario='COORD_EXT', correo='coord.ext@example.com', password='password123', rol='coordinacion',
+        )
+        self.alumno = Aspirante.objects.create_user(
+            usuario='ALUMNO_EXT', correo='alumno.ext@example.com', password='password123',
+            nombre='Alumno Extemporáneo', curp='EXT850101HDFRNN01', telefono='5512345678',
+            estado_actual='Ciudad de México', municipio_actual='Coyoacán', direccion_actual='Calle 1',
+            estado_permanente='Ciudad de México', municipio_permanente='Coyoacán', direccion_permanente='Calle 1',
+            nombre_familiar='Familiar', parentesco='Padre', telefono_familiar='5511111111',
+            ultimo_grado='Licenciatura', institucion='Cinvestav', unidad='Cinvestav',
+            departamento='Academia', seccion='Posgrado', programa='Programa Ext', business_key='ALUMNO-EXT',
+            rol='alumno', numero_periodo_actual=1,
+        )
+        self.periodo = PeriodoInscripcion.objects.create(
+            nombre='Periodo cerrado ext', apertura=timezone.now() - timedelta(days=30),
+            cierre=timezone.now() - timedelta(days=1), activo=True,
+        )
+        self.configuracion = ConfiguracionPrograma.objects.create(
+            programa='Programa Ext', grado='maestria', periodos_requeridos=1, creditos_requeridos=16,
+        )
+        self.materias = [
+            Materia.objects.create(clave=f'EXT-{index}', nombre=f'Materia ext {index}')
+            for index in range(1, 5)
+        ]
+        PlanEstudioMateria.objects.bulk_create([
+            PlanEstudioMateria(configuracion=self.configuracion, materia=materia, periodo_sugerido=1)
+            for materia in self.materias
+        ])
+        crear_carga_publicada(self.coordinacion, self.periodo, self.materias)
+        self.client.force_authenticate(user=self.coordinacion)
+        self.url = f'/api/coordinacion/alumnos/{self.alumno.id}/inscripciones-extemporaneas/'
+
+    def test_staff_admin_with_default_role_can_load_enrollment_periods(self):
+        self.coordinacion.rol = 'aspirante'
+        self.coordinacion.save(update_fields=['rol'])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([periodo['id'] for periodo in response.data['periodos']], [self.periodo.id])
+
+    def test_enrolls_one_or_more_plan_subjects_after_regular_period_closed_and_records_reason(self):
+        available = self.client.get(f'{self.url}?periodo={self.periodo.id}')
+        self.assertEqual(available.status_code, 200)
+        self.assertEqual(len(available.data['materias']), 4)
+
+        response = self.client.post(self.url, {
+            'periodo_inscripcion': self.periodo.id,
+            'materias': [self.materias[0].id, self.materias[2].id],
+            'motivo': 'El alumno se incorporó a mitad del periodo.',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.data), 2)
+        self.assertTrue(all(item['extemporanea'] for item in response.data))
+        self.assertTrue(all(item['motivo_extemporanea'] == 'El alumno se incorporó a mitad del periodo.' for item in response.data))
+        self.assertTrue(all(item['registrada_por'] == self.coordinacion.id for item in response.data))
+        duplicada = self.client.post(self.url, {
+            'periodo_inscripcion': self.periodo.id,
+            'materias': [self.materias[0].id],
+            'motivo': 'Intento duplicado.',
+        }, format='json')
+        self.assertEqual(duplicada.status_code, 400)
+
+    def test_extemporaneous_enrollment_requires_reason_and_available_seat(self):
+        without_reason = self.client.post(self.url, {
+            'periodo_inscripcion': self.periodo.id,
+            'materias': [self.materias[0].id],
+        }, format='json')
+        self.assertEqual(without_reason.status_code, 400)
+
+        sin_cupo = Materia.objects.create(clave='EXT-LLENA', nombre='Materia sin cupo')
+        PlanEstudioMateria.objects.create(configuracion=self.configuracion, materia=sin_cupo, periodo_sugerido=1)
+        crear_carga_publicada(self.coordinacion, self.periodo, [sin_cupo], {sin_cupo.id: 0})
+        full = self.client.post(self.url, {
+            'periodo_inscripcion': self.periodo.id,
+            'materias': [sin_cupo.id],
+            'motivo': 'Ingreso fuera de fecha.',
+        }, format='json')
+        self.assertEqual(full.status_code, 409)
+        self.assertFalse(Inscripcion.objects.filter(aspirante=self.alumno).exists())
+
+    def test_extemporaneous_enrollment_still_requires_a_subject_in_the_student_plan(self):
+        fuera_plan = Materia.objects.create(clave='EXT-FUERA', nombre='Materia fuera del plan')
+        crear_carga_publicada(self.coordinacion, self.periodo, [fuera_plan])
+        response = self.client.post(self.url, {
+            'periodo_inscripcion': self.periodo.id,
+            'materias': [fuera_plan.id],
+            'motivo': 'Solicitud especial.',
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Inscripcion.objects.filter(aspirante=self.alumno).exists())
 
 
 class AdminUsuariosCRUDTests(TestCase):
@@ -772,10 +1170,10 @@ class AdminConfiguracionCRUDTests(TestCase):
 class PlanEstudioCoordinacionTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        coordinacion = Aspirante.objects.create_superuser(
-            usuario='COORD_PLAN', correo='coord.plan@example.com', password='password123', rol='coordinacion',
+        servicios = Aspirante.objects.create_superuser(
+            usuario='SERV_PLAN', correo='serv.plan@example.com', password='password123', rol='servicios',
         )
-        self.client.force_authenticate(user=coordinacion)
+        self.client.force_authenticate(user=servicios)
 
     def test_new_plans_default_period_count_from_degree_and_periodicity(self):
         configuraciones = [
@@ -874,6 +1272,20 @@ class PlanEstudioCoordinacionTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(ConfiguracionPrograma.objects.filter(programa='Programa duplicado').exists())
+
+    def test_coordinacion_cannot_create_or_edit_plans(self):
+        coordinacion = Aspirante.objects.create_superuser(
+            usuario='COORD_PLAN_DENY', correo='coord.plan.deny@example.com', password='password123',
+            rol='coordinacion', curp='COOR000000HDF00001', business_key='COORD-PLAN-DENY',
+        )
+        self.client.force_authenticate(user=coordinacion)
+        response = self.client.post('/api/tesis/flujo/', {
+            'programa': 'Plan no autorizado',
+            'grado': 'maestria',
+            'periodicidad': 'semestral',
+        }, format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ConfiguracionPrograma.objects.filter(programa='Plan no autorizado').exists())
 
 
 class AlertasAutomatizadasTests(TestCase):
@@ -1245,14 +1657,32 @@ class InscripcionCupoYSalonTests(TestCase):
             seccion='Posgrado', programa='Ingeniería', business_key='CUPO-PRUEBA', rol='alumno',
         )
         self.materia = Materia.objects.create(clave='CUP-01', nombre='Materia con cupo', profesor='Docente', salon='salon_1', capacidad=42)
-        PeriodoInscripcion.objects.create(nombre='Periodo cupo', apertura=timezone.now() - timedelta(days=1), cierre=timezone.now() + timedelta(days=5), activo=True)
+        self.periodo = PeriodoInscripcion.objects.create(nombre='Periodo cupo', apertura=timezone.now() - timedelta(days=1), cierre=timezone.now() + timedelta(days=5), activo=True)
 
     def test_materia_expone_salon_y_rechaza_cupo_lleno(self):
+        self.alumno.numero_periodo_actual = 1
+        self.alumno.save(update_fields=['numero_periodo_actual'])
+        configuracion = ConfiguracionPrograma.objects.create(
+            programa='Ingeniería', grado='maestria', periodos_requeridos=4,
+        )
+        materias = [self.materia] + [
+            Materia.objects.create(clave=f'CUP-{index:02d}', nombre=f'Materia disponible {index}')
+            for index in range(2, 5)
+        ]
+        for materia in materias:
+            PlanEstudioMateria.objects.create(configuracion=configuracion, materia=materia)
+        crear_carga_publicada(
+            self.alumno,
+            self.periodo,
+            materias,
+            capacidades={self.materia.pk: 42},
+        )
         self.client.force_authenticate(user=self.alumno)
         response = self.client.get('/api/preregistro/materias/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data[0]['salon_label'], 'Salón 1')
         self.assertEqual(response.data[0]['capacidad'], 42)
+        self.assertEqual(response.data[0]['inscritos'], 0)
         for index in range(42):
             Aspirante.objects.create_user(
                 usuario=f'LLENO{index}', correo=f'lleno{index}@example.com', password='password123',
@@ -1260,8 +1690,17 @@ class InscripcionCupoYSalonTests(TestCase):
                 estado_actual='Ciudad de México', municipio_actual='Coyoacán', direccion_actual='Calle 1', estado_permanente='Ciudad de México', municipio_permanente='Coyoacán', direccion_permanente='Calle 1', nombre_familiar='Familiar', parentesco='Madre', telefono_familiar='5511111111', ultimo_grado='Licenciatura', institucion='Cinvestav', unidad='Cinvestav', departamento='Academia', seccion='Posgrado', programa='Ingeniería', business_key=f'LLENO-{index}', rol='alumno',
             )
         inscritos = list(Aspirante.objects.filter(usuario__startswith='LLENO'))
-        Inscripcion.objects.bulk_create([Inscripcion(aspirante=alumno, materia=self.materia) for alumno in inscritos])
-        response = self.client.post('/api/preregistro/inscripciones/', {'materia': self.materia.id}, format='json')
+        Inscripcion.objects.bulk_create([
+            Inscripcion(aspirante=alumno, materia=self.materia, periodo_inscripcion=self.periodo)
+            for alumno in inscritos
+        ])
+        disponibles = self.client.get('/api/preregistro/materias/')
+        self.assertEqual(disponibles.data[0]['inscritos'], 42)
+        response = self.client.post(
+            '/api/preregistro/inscripciones/',
+            {'materias': [materia.id for materia in materias]},
+            format='json',
+        )
         self.assertEqual(response.status_code, 409)
 
 
@@ -1566,6 +2005,49 @@ class EgresadosTests(TestCase):
         self.assertEqual(data['candidatos'], [])
         self.assertEqual(len(self.client.get('/api/egresados/?q=zzz').data['egresados']), 0)
 
+    def test_candidato_incluye_prevalidacion_y_motivos_antes_de_registro(self):
+        data = self.client.get('/api/egresados/').data
+
+        self.assertEqual(len(data['candidatos']), 1)
+        prevalidacion = data['candidatos'][0]['prevalidacion_egreso']
+        self.assertFalse(prevalidacion['completa'])
+        self.assertIn(
+            'El programa no tiene una configuración académica activa.',
+            prevalidacion['motivos'],
+        )
+
+    def test_candidato_muestra_prevalidacion_completa_con_requisitos_cumplidos(self):
+        configuracion = ConfiguracionPrograma.objects.create(
+            programa='Ingeniería',
+            grado='maestria',
+            periodos_requeridos=1,
+            creditos_requeridos=4,
+        )
+        materia = Materia.objects.create(clave='EGRESO-101', nombre='Materia obligatoria', creditos=4)
+        PlanEstudioMateria.objects.create(
+            configuracion=configuracion,
+            materia=materia,
+            obligatoria=True,
+        )
+        periodo = PeriodoInscripcion.objects.create(
+            nombre='2025-1',
+            apertura=timezone.now() - timedelta(days=180),
+            cierre=timezone.now() - timedelta(days=90),
+            activo=False,
+        )
+        Inscripcion.objects.create(
+            aspirante=self.alumno,
+            materia=materia,
+            periodo_inscripcion=periodo,
+            calificacion=8,
+        )
+
+        candidato = self.client.get('/api/egresados/').data['candidatos'][0]
+
+        self.assertTrue(candidato['prevalidacion_egreso']['completa'])
+        self.assertEqual(candidato['prevalidacion_egreso']['resumen']['creditos_aprobados'], 4)
+        self.assertEqual(candidato['prevalidacion_egreso']['resumen']['periodos_cursados'], 1)
+
     def test_alumno_no_puede_consultar(self):
         self.client.force_authenticate(user=self.alumno)
 
@@ -1615,3 +2097,220 @@ class HistoricoPersonasTests(TestCase):
         self.client.force_authenticate(user=self.alumno)
 
         self.assertEqual(self.client.get('/api/historico/').status_code, 403)
+
+
+class DirectorioDocentesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.servicios = Aspirante.objects.create_user(
+            usuario='SERVDOC', correo='serv.doc@example.com', password='password123', nombre='Servicios Docentes',
+            rol='servicios', business_key='SERVDOC-01', curp='SEDO850101HDFRNN01',
+        )
+        self.coord = Aspirante.objects.create_user(
+            usuario='COORDDOC', correo='coord.doc@example.com', password='password123', nombre='Coord Docentes',
+            rol='coordinacion', business_key='COORDDOC-01', curp='CODO850101HDFRNN01',
+        )
+        self.director = Aspirante.objects.create_user(
+            usuario='DIRDOC', correo='dir.doc@example.com', password='password123', nombre='Dr. Directorio',
+            rol='director', business_key='DIRDOC-01', curp='DIDO850101HDFRNN01', departamento='Computación',
+        )
+        self.alumno = Aspirante.objects.create_user(
+            usuario='ALUDOC', correo='alu.doc@example.com', password='password123', nombre='Alumno Tesista',
+            rol='alumno', business_key='ALUDOC-01', curp='ALDO850101HDFRNN01', director_tesis=self.director,
+        )
+
+    def test_servicios_y_coordinacion_consultan_directorio(self):
+        for usuario in (self.servicios, self.coord):
+            self.client.force_authenticate(user=usuario)
+            data = self.client.get('/api/servicios-escolares/docentes/?q=Directorio').data
+            self.assertEqual(data['total'], 1)
+            self.assertEqual(data['docentes'][0]['tesistas_activos'], 1)
+        self.assertTrue(self.client.get('/api/servicios-escolares/docentes/').data['puede_gestionar'] is False)
+
+    def test_detalle_incluye_tesistas_y_graduados(self):
+        egresado = Aspirante.objects.create_user(
+            usuario='EGRDOC', correo='egr.doc@example.com', password='password123', nombre='Egresado Doc',
+            rol='alumno', business_key='EGRDOC-01', curp='EGDO850101HDFRNN01', director_tesis=self.director,
+        )
+        EgresoAlumno.objects.create(alumno=egresado, fecha_egreso='2025-06-30', titulo_tesis='Tesis final')
+        self.client.force_authenticate(user=self.servicios)
+        data = self.client.get(f'/api/servicios-escolares/docentes/{self.director.pk}/').data
+        self.assertEqual([t['nombre'] for t in data['tesistas']], ['Alumno Tesista'])
+        self.assertEqual(data['graduados'][0]['titulo_tesis'], 'Tesis final')
+
+    def test_no_desactiva_con_tesistas_activos(self):
+        self.client.force_authenticate(user=self.servicios)
+        url = f'/api/servicios-escolares/docentes/{self.director.pk}/'
+        self.assertEqual(self.client.patch(url, {'is_active': False}, format='json').status_code, 409)
+        self.alumno.director_tesis = None
+        self.alumno.save()
+        self.assertEqual(self.client.patch(url, {'is_active': False}, format='json').status_code, 200)
+        self.director.refresh_from_db()
+        self.assertFalse(self.director.is_active)
+
+    def test_coordinacion_y_alumno_no_modifican_ni_consultan(self):
+        self.client.force_authenticate(user=self.coord)
+        self.assertEqual(self.client.patch(f'/api/servicios-escolares/docentes/{self.director.pk}/', {'is_active': False}, format='json').status_code, 403)
+        self.client.force_authenticate(user=self.alumno)
+        self.assertEqual(self.client.get('/api/servicios-escolares/docentes/').status_code, 403)
+
+    def test_valida_documento_del_docente(self):
+        doc = DocumentoAspirante.objects.create(
+            aspirante=self.director, tipo='cv', archivo=SimpleUploadedFile('cv.pdf', b'x'), nombre_original='cv.pdf', tamano=1,
+        )
+        self.client.force_authenticate(user=self.servicios)
+        data = self.client.patch(f'/api/servicios-escolares/docentes/{self.director.pk}/', {'documento_id': doc.pk, 'revisado': True}, format='json').data
+        self.assertTrue(data['documentos'][0]['revisado'])
+
+    def test_servicios_y_el_propio_docente_editan_perfil_academico(self):
+        url = f'/api/servicios-escolares/docentes/{self.director.pk}/'
+        self.client.force_authenticate(user=self.servicios)
+        data = self.client.patch(url, {'sni_nivel': 'II', 'lineas_declaradas': 'IA, Robótica'}, format='json').data
+        self.assertEqual(data['sni_nivel'], 'II')
+        self.assertIn('Robótica', data['lineas_investigacion'])
+        self.client.force_authenticate(user=self.director)
+        data = self.client.patch(url, {'orcid': '0000-0001', 'is_active': False}, format='json').data
+        self.assertEqual(data['orcid'], '0000-0001')
+        self.director.refresh_from_db()
+        self.assertTrue(self.director.is_active)
+        self.assertEqual(self.client.patch(url, {'sni_nivel': 'x' * 31}, format='json').status_code, 400)
+
+    def test_docente_no_edita_a_otro(self):
+        otro = Aspirante.objects.create_user(
+            usuario='DOCOTRO', correo='otro.doc@example.com', password='password123', nombre='Otro Docente',
+            rol='docente', business_key='DOCOTRO-01', curp='OTDO850101HDFRNN01',
+        )
+        self.client.force_authenticate(user=otro)
+        self.assertEqual(self.client.patch(f'/api/servicios-escolares/docentes/{self.director.pk}/', {'orcid': 'x'}, format='json').status_code, 403)
+
+
+class ExamenesAspiranteTests(TestCase):
+    def setUp(self):
+        from preregistro.models import ExamenEnLinea, PreguntaExamen
+        self.client = APIClient()
+        self.asp = Aspirante.objects.create_user(
+            usuario='ASPEXAM', correo='asp.exam@example.com', password='password123', nombre='Aspirante Examen',
+            rol='aspirante', business_key='ASPEXAM-01', curp='AXEX850101HDFRNN01',
+        )
+        self.client.force_authenticate(user=self.asp)
+        self.examen = ExamenEnLinea.objects.create(
+            aspirante=self.asp, tipo='admision', titulo='Admisión', business_key='EXAM-T1',
+            fecha_programada=timezone.now() - timedelta(hours=1), duracion_minutos=30,
+        )
+        self.p1 = PreguntaExamen.objects.create(examen=self.examen, texto='2+2', opciones=['3', '4'], respuesta_correcta='4', orden=1)
+        self.p2 = PreguntaExamen.objects.create(examen=self.examen, texto='1+1', opciones=['2', '5'], respuesta_correcta='2', orden=2)
+
+    def test_preguntas_ocultas_hasta_iniciar(self):
+        item = self.client.get('/api/preregistro/examenes/').data['examenes'][0]
+        self.assertEqual(item['preguntas'], [])
+        self.assertEqual(item['total_preguntas'], 2)
+
+    def test_iniciar_y_enviar_califica(self):
+        r = self.client.post('/api/preregistro/examenes/', {'id': self.examen.pk}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data['preguntas']), 2)
+        self.assertNotIn('respuesta_correcta', r.data['preguntas'][0])
+        r = self.client.put('/api/preregistro/examenes/', {'id': self.examen.pk, 'respuestas': {str(self.p1.pk): '4', str(self.p2.pk): '2'}}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['estado'], 'aprobado')
+
+    def test_no_inicia_antes_de_fecha_ni_sin_preguntas(self):
+        self.examen.fecha_programada = timezone.now() + timedelta(days=1)
+        self.examen.save()
+        self.assertEqual(self.client.post('/api/preregistro/examenes/', {'id': self.examen.pk}, format='json').status_code, 400)
+        self.examen.fecha_programada = timezone.now() - timedelta(hours=1)
+        self.examen.save()
+        self.examen.preguntas.all().delete()
+        self.assertEqual(self.client.post('/api/preregistro/examenes/', {'id': self.examen.pk}, format='json').status_code, 400)
+
+    def test_envio_fuera_de_tiempo_se_califica_en_cero(self):
+        self.client.post('/api/preregistro/examenes/', {'id': self.examen.pk}, format='json')
+        self.examen.refresh_from_db()
+        self.examen.fecha_inicio = timezone.now() - timedelta(minutes=40)
+        self.examen.save()
+        r = self.client.put('/api/preregistro/examenes/', {'id': self.examen.pk, 'respuestas': {str(self.p1.pk): '4', str(self.p2.pk): '2'}}, format='json')
+        self.assertEqual(r.data['estado'], 'reprobado')
+
+
+class GestionExamenesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.coord = Aspirante.objects.create_user(
+            usuario='COORDEX', correo='coord.ex@example.com', password='password123', nombre='Coord Examen',
+            rol='coordinacion', business_key='COORDEX-01', curp='COEX850101HDFRNN01',
+        )
+        self.serv = Aspirante.objects.create_user(
+            usuario='SERVEX', correo='serv.ex@example.com', password='password123', nombre='Serv Examen',
+            rol='servicios', business_key='SERVEX-01', curp='SEEX850101HDFRNN01',
+        )
+        self.asp1 = Aspirante.objects.create_user(
+            usuario='ASPEX1', correo='asp.ex1@example.com', password='password123', nombre='Aspirante Uno',
+            rol='aspirante', business_key='ASPEX1-01', curp='A1EX850101HDFRNN01',
+        )
+        self.asp2 = Aspirante.objects.create_user(
+            usuario='ASPEX2', correo='asp.ex2@example.com', password='password123', nombre='Aspirante Dos',
+            rol='aspirante', business_key='ASPEX2-01', curp='A2EX850101HDFRNN01',
+        )
+        self.payload = {
+            'tipo': 'admision', 'titulo': 'Admisión 2026', 'descripcion': 'Examen', 'duracion_minutos': 60, 'max_intentos': 1,
+            'fecha_programada': (timezone.now() + timedelta(days=1)).isoformat(),
+            'aspirantes': [self.asp1.pk, self.asp2.pk],
+            'preguntas': [
+                {'texto': '2+2', 'opciones': ['3', '4'], 'respuesta_correcta': '4'},
+                {'texto': 'Capital de México', 'opciones': [], 'respuesta_correcta': 'CDMX'},
+            ],
+        }
+
+    def test_coordinacion_crea_un_examen_por_aspirante(self):
+        self.client.force_authenticate(user=self.coord)
+        r = self.client.post('/api/examenes-gestion/', self.payload, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['creados'], 2)
+        self.assertEqual(self.asp1.examenes_en_linea.get().preguntas.count(), 2)
+
+    def test_servicios_solo_consulta_y_no_ve_respuestas_correctas(self):
+        self.client.force_authenticate(user=self.coord)
+        self.client.post('/api/examenes-gestion/', self.payload, format='json')
+        self.client.force_authenticate(user=self.serv)
+        self.assertEqual(self.client.post('/api/examenes-gestion/', self.payload, format='json').status_code, 403)
+        listado = self.client.get('/api/examenes-gestion/').data
+        self.assertEqual(listado['total'], 2)
+        self.assertFalse(listado['puede_crear'])
+        detalle = self.client.get(f"/api/examenes-gestion/{listado['examenes'][0]['id']}/").data
+        self.assertNotIn('respuesta_correcta', detalle['preguntas'][0])
+
+    def test_validaciones(self):
+        self.client.force_authenticate(user=self.coord)
+        malo = {**self.payload, 'preguntas': [{'texto': 'x', 'opciones': ['a', 'b'], 'respuesta_correcta': 'c'}]}
+        self.assertEqual(self.client.post('/api/examenes-gestion/', malo, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/examenes-gestion/', {**self.payload, 'aspirantes': []}, format='json').status_code, 400)
+        self.assertEqual(self.client.post('/api/examenes-gestion/', {**self.payload, 'tipo': 'predoctoral'}, format='json').status_code, 400)
+
+    def test_examen_iniciado_no_se_edita_ni_elimina(self):
+        self.client.force_authenticate(user=self.coord)
+        eid = self.client.post('/api/examenes-gestion/', {**self.payload, 'aspirantes': [self.asp1.pk], 'fecha_programada': (timezone.now() - timedelta(hours=1)).isoformat()}, format='json').data['examenes'][0]['id']
+        self.assertEqual(self.client.patch(f'/api/examenes-gestion/{eid}/', {'titulo': 'Nuevo'}, format='json').status_code, 200)
+        self.client.force_authenticate(user=self.asp1)
+        self.assertEqual(self.client.post('/api/preregistro/examenes/', {'id': eid}, format='json').status_code, 200)
+        self.client.force_authenticate(user=self.coord)
+        self.assertEqual(self.client.patch(f'/api/examenes-gestion/{eid}/', {'titulo': 'Otro'}, format='json').status_code, 409)
+        self.assertEqual(self.client.delete(f'/api/examenes-gestion/{eid}/').status_code, 409)
+
+    def test_otro_intento_y_eliminar_sin_iniciar(self):
+        self.client.force_authenticate(user=self.coord)
+        eid = self.client.post('/api/examenes-gestion/', {**self.payload, 'aspirantes': [self.asp1.pk], 'fecha_programada': (timezone.now() - timedelta(hours=1)).isoformat()}, format='json').data['examenes'][0]['id']
+        self.client.force_authenticate(user=self.asp1)
+        self.client.post('/api/preregistro/examenes/', {'id': eid}, format='json')
+        self.client.put('/api/preregistro/examenes/', {'id': eid, 'respuestas': {}}, format='json')
+        self.client.force_authenticate(user=self.coord)
+        r = self.client.patch(f'/api/examenes-gestion/{eid}/', {'accion': 'otro_intento'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.data['estado'], r.data['max_intentos']), ('programado', 2))
+        nuevo = self.client.post('/api/examenes-gestion/', {**self.payload, 'aspirantes': [self.asp2.pk]}, format='json').data['examenes'][0]['id']
+        self.assertEqual(self.client.delete(f'/api/examenes-gestion/{nuevo}/').status_code, 204)
+
+    def test_candidatos_solo_coordinacion(self):
+        self.client.force_authenticate(user=self.coord)
+        self.assertEqual(len(self.client.get('/api/examenes-gestion/candidatos/?q=Uno').data['aspirantes']), 1)
+        self.client.force_authenticate(user=self.serv)
+        self.assertEqual(self.client.get('/api/examenes-gestion/candidatos/').status_code, 403)

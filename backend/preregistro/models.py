@@ -74,6 +74,10 @@ class Aspirante(AbstractBaseUser, PermissionsMixin):
     publicaciones = models.TextField(blank=True)
     apoyos       = models.TextField(blank=True)
     experiencia  = models.TextField(blank=True)
+    sni_nivel = models.CharField(max_length=30, blank=True)
+    orcid = models.CharField(max_length=40, blank=True)
+    especialidad = models.CharField(max_length=180, blank=True)
+    lineas_declaradas = models.TextField(blank=True)
 
     # Sección 10 – Cinvestav
     unidad      = models.CharField(max_length=120)
@@ -346,10 +350,45 @@ class CargaAcademica(models.Model):
     creador = models.ForeignKey(Aspirante, on_delete=models.PROTECT, related_name='cargas_creadas')
     estado = models.CharField(max_length=20, choices=ESTADOS, default='borrador')
     periodo = models.CharField(max_length=30, blank=True)
+    periodo_inscripcion = models.ForeignKey(
+        'PeriodoInscripcion',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='cargas_academicas',
+    )
     camunda_instance_id = models.CharField(max_length=80, blank=True)
     comentario = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class CargaAcademicaMateria(models.Model):
+    MODALIDADES = [('presencial', 'Presencial'), ('hibrida', 'Híbrida'), ('virtual', 'Virtual')]
+
+    carga = models.ForeignKey(CargaAcademica, on_delete=models.CASCADE, related_name='materias')
+    materia = models.ForeignKey('Materia', on_delete=models.PROTECT, related_name='cargas_academicas')
+    docente = models.ForeignKey(
+        Aspirante, on_delete=models.PROTECT, related_name='materias_carga_academica',
+        null=True, blank=True,
+    )
+    horario = models.CharField(max_length=120, blank=True)
+    salon = models.CharField(
+        max_length=40,
+        choices=[
+            ('salon_1', 'Salón 1'),
+            ('laboratorio_harold', 'Laboratorio Harold V. McIntosh'),
+            ('sala_juntas', 'Sala de Juntas'),
+        ],
+        default='salon_1',
+    )
+    capacidad = models.PositiveSmallIntegerField(default=42)
+    modalidad = models.CharField(max_length=20, choices=MODALIDADES, default='presencial')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['carga', 'materia'], name='uniq_materia_por_carga_academica'),
+        ]
 
 
 class SeguimientoSolicitud(models.Model):
@@ -572,6 +611,15 @@ class Inscripcion(models.Model):
     parcial_2 = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     parcial_3 = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     horario = models.CharField(max_length=120, blank=True)
+    extemporanea = models.BooleanField(default=False)
+    motivo_extemporanea = models.TextField(blank=True)
+    registrada_por = models.ForeignKey(
+        Aspirante,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inscripciones_extemporaneas_registradas',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -771,5 +819,3 @@ class EvaluacionColegio(models.Model):
 
     class Meta:
         ordering = ['-created_at']
-
-

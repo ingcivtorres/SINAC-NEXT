@@ -1,10 +1,14 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import cinvestavLogo from '../assets/logo2civ-removebg-preview.png';
 import sinacLogo from '../assets/SINAC5-removebg-preview.png';
 import {supportedLanguages, useLanguage} from '../translations';
+import Flag from './Flag';
 
 export default function Navbar({onNavigate, activeView, session, onLogout}){
   const {t, language, setLanguage} = useLanguage();
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const languageMenuRef = useRef(null);
+  const selectedLanguage = supportedLanguages.find(item => item.code === language) || supportedLanguages[0];
   const [theme, setTheme] = useState(() => {
     try {
       return localStorage.getItem('sinac_theme') || 'light'
@@ -18,12 +22,29 @@ export default function Navbar({onNavigate, activeView, session, onLogout}){
     } catch (e) {}
   }, [theme])
 
+  useEffect(() => {
+    if (!languageMenuOpen) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!languageMenuRef.current?.contains(event.target)) setLanguageMenuOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setLanguageMenuOpen(false);
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [languageMenuOpen]);
+
   function toggleTheme(){
     setTheme(t => t === 'light' ? 'dark' : 'light')
   }
 
   function changeLanguage(lang){
     setLanguage(lang)
+    setLanguageMenuOpen(false)
   }
 
   function navigateTo(view){
@@ -48,12 +69,39 @@ export default function Navbar({onNavigate, activeView, session, onLogout}){
         >
           <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
         </button>
-        <label className="language-selector" aria-label="Selector de idioma">
-          <span className="language-selector-icon" aria-hidden="true">文</span>
-          <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
-            {supportedLanguages.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
-          </select>
-        </label>
+        <div className="language-picker" ref={languageMenuRef}>
+          <button
+            type="button"
+            className="language-picker-trigger"
+            aria-label={`${t('navbar.language')}: ${selectedLanguage.label}`}
+            aria-expanded={languageMenuOpen}
+            aria-haspopup="menu"
+            onClick={() => setLanguageMenuOpen(open => !open)}
+          >
+            <span className="language-picker-flag"><Flag code={selectedLanguage.code}/></span>
+            <span className="language-picker-label">{selectedLanguage.label}</span>
+            <span className="language-picker-short">{selectedLanguage.short}</span>
+            <span className="language-picker-chevron" aria-hidden="true">▾</span>
+          </button>
+          {languageMenuOpen && (
+            <div className="language-picker-menu" role="group" aria-label={t('navbar.language')}>
+              {supportedLanguages.map(item => (
+                <button
+                  type="button"
+                  aria-pressed={language === item.code}
+                  className={`language-picker-option ${language === item.code ? 'active' : ''}`}
+                  key={item.code}
+                  onClick={() => changeLanguage(item.code)}
+                >
+                  <span className="language-picker-flag"><Flag code={item.code}/></span>
+                  <span>{item.label}</span>
+                  <span className="language-picker-code">{item.short}</span>
+                  {language === item.code && <span className="language-picker-check" aria-hidden="true">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="menu-dropdown">
           <button className="menu" aria-expanded="false" aria-haspopup="true">☰</button>
           <div className="dropdown-menu">
@@ -68,7 +116,7 @@ export default function Navbar({onNavigate, activeView, session, onLogout}){
                 </>
               : <button type="button" className={`dropdown-item ${activeView === 'login' ? 'active' : ''}`} onClick={()=>navigateTo('login')}>{t('login.signIn')}</button>
             }
-            <button type="button" className="dropdown-item dropdown-full">{t('navbar.contact')}</button>
+            <button type="button" className={`dropdown-item dropdown-full ${activeView === 'contact' ? 'active' : ''}`} onClick={() => navigateTo('contact')}>{t('navbar.contact')}</button>
           </div>
         </div>
       </div>

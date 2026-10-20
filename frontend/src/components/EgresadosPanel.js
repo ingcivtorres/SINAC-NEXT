@@ -11,6 +11,14 @@ const COPY = {
   pt: {title: 'Egressos', subtitle: 'Registro oficial de egressos com seu prontuário.', search: 'Buscar por nome, matrícula ou tese', allPrograms: 'Todos os programas', allGenerations: 'Todas as turmas', register: '+ Registrar egresso', cancel: 'Cancelar', save: 'Salvar egresso', student: 'Aluno', select: 'Selecione um aluno', date: 'Data de egresso', generation: 'Turma', average: 'Média final', thesis: 'Título da tese', notes: 'Observações', exception: 'Motivo da exceção', exceptionHint: 'O aluno não cumpre a pré-validação. Informe um motivo de exceção para registrar:', empty: 'Nenhum egresso registrado.', loading: 'Carregando egressos...', back: '← Voltar à lista', matricula: 'Matrícula', program: 'Programa', department: 'Departamento', email: 'E-mail', phone: 'Telefone', folio: 'Número do prontuário', registeredBy: 'Registrado por', noPhoto: 'Sem foto', saved: 'Egresso registrado.', updated: 'Dados atualizados.', edit: 'Salvar alterações', error: 'Não foi possível carregar as informações.', expired: 'Sua sessão expirou.', record: 'Prontuário', details: 'Dados do egresso', exceptionLabel: 'Registrado por exceção'},
 };
 
+const PREVALIDATION_COPY = {
+  es: {title: 'Prevalidación académica', complete: 'Cumple los requisitos académicos.', incomplete: 'No cumple todos los requisitos académicos.', mandatory: 'Materias obligatorias aprobadas', credits: 'Créditos aprobados', periods: 'Periodos concluidos'},
+  en: {title: 'Academic pre-validation', complete: 'Academic requirements are met.', incomplete: 'Some academic requirements are not met.', mandatory: 'Required courses passed', credits: 'Credits earned', periods: 'Periods completed'},
+  de: {title: 'Akademische Vorprüfung', complete: 'Akademische Anforderungen erfüllt.', incomplete: 'Einige akademische Anforderungen sind nicht erfüllt.', mandatory: 'Erforderliche Kurse bestanden', credits: 'Erworbene Credits', periods: 'Abgeschlossene Zeiträume'},
+  zh: {title: '学业预审', complete: '符合学业要求。', incomplete: '尚未满足部分学业要求。', mandatory: '已通过必修课程', credits: '已获得学分', periods: '已完成学期'},
+  pt: {title: 'Pré-validação acadêmica', complete: 'Requisitos acadêmicos atendidos.', incomplete: 'Alguns requisitos acadêmicos não foram atendidos.', mandatory: 'Disciplinas obrigatórias aprovadas', credits: 'Créditos obtidos', periods: 'Períodos concluídos'},
+};
+
 const EMPTY_FORM = {alumno_id: '', fecha_egreso: '', generacion: '', promedio_final: '', titulo_tesis: '', observaciones: '', excepcion_motivo: ''};
 
 function Foto({item, size = 72}) {
@@ -23,6 +31,7 @@ function Foto({item, size = 72}) {
 export default function EgresadosPanel({session, onLogout}) {
   const {language} = useLanguage();
   const t = COPY[language] || COPY.es;
+  const prevalidationCopy = PREVALIDATION_COPY[language] || PREVALIDATION_COPY.es;
   const headers = useMemo(() => ({Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'}), [session.access]);
   const [datos, setDatos] = useState({egresados: [], filtros: {programas: [], generaciones: []}, candidatos: []});
   const [filters, setFilters] = useState({q: '', programa: '', generacion: ''});
@@ -54,6 +63,7 @@ export default function EgresadosPanel({session, onLogout}) {
   }, [filters, headers, t]);
 
   useEffect(() => { const c = new AbortController(); cargar(c.signal); return () => c.abort(); }, [cargar]);
+  const candidatoSeleccionado = datos.candidatos.find(item => String(item.id) === String(form.alumno_id));
 
   async function guardar(event) {
     event.preventDefault();
@@ -121,17 +131,30 @@ export default function EgresadosPanel({session, onLogout}) {
       {formAbierto && (
         <form onSubmit={guardar} className="servicios-form-grid" style={{marginBottom: 16}}>
           <label>{t.student}
-            <select required value={form.alumno_id} onChange={e => { setForm({...form, alumno_id: e.target.value}); setMotivos([]); }}>
+            <select required value={form.alumno_id} onChange={e => { setForm({...form, alumno_id: e.target.value, excepcion_motivo: ''}); setMotivos([]); setError(''); }}>
               <option value="">{t.select}</option>
               {datos.candidatos.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.matricula ? `(${c.matricula})` : ''}</option>)}
             </select>
           </label>
+          {candidatoSeleccionado?.prevalidacion_egreso && (() => {
+            const prevalidacion = candidatoSeleccionado.prevalidacion_egreso;
+            const resumen = prevalidacion.resumen;
+            return <section className={prevalidacion.completa ? 'api-success' : 'api-error'} role={prevalidacion.completa ? 'status' : 'alert'} style={{gridColumn: '1 / -1'}}>
+              <strong>{prevalidationCopy.title}: {prevalidacion.completa ? prevalidationCopy.complete : prevalidationCopy.incomplete}</strong>
+              <p style={{margin: '8px 0'}}>
+                {prevalidationCopy.mandatory}: {resumen.materias_obligatorias_aprobadas}/{resumen.materias_obligatorias} ·
+                {' '}{prevalidationCopy.credits}: {resumen.creditos_aprobados}/{resumen.creditos_requeridos} ·
+                {' '}{prevalidationCopy.periods}: {resumen.periodos_cursados}/{resumen.periodos_requeridos}
+              </p>
+              {!prevalidacion.completa && <ul>{prevalidacion.motivos.map(motivo => <li key={motivo}>{motivo}</li>)}</ul>}
+            </section>;
+          })()}
           {campo(t.date, 'fecha_egreso', 'date', {required: true})}
           {campo(t.generation, 'generacion')}
           {campo(t.average, 'promedio_final', 'number', {step: '0.01', min: '0', max: '10'})}
           {campo(t.thesis, 'titulo_tesis')}
           <label>{t.notes}<textarea value={form.observaciones} onChange={e => setForm({...form, observaciones: e.target.value})}/></label>
-          {motivos.length > 0 && <label>{t.exceptionHint}<textarea required value={form.excepcion_motivo} onChange={e => setForm({...form, excepcion_motivo: e.target.value})} placeholder={t.exception}/></label>}
+          {candidatoSeleccionado && (!candidatoSeleccionado.prevalidacion_egreso?.completa || motivos.length > 0) && <label style={{gridColumn: '1 / -1'}}>{t.exceptionHint}<textarea required value={form.excepcion_motivo} onChange={e => setForm({...form, excepcion_motivo: e.target.value})} placeholder={t.exception}/></label>}
           <button type="submit" className="btn-primary">{t.save}</button>
         </form>
       )}

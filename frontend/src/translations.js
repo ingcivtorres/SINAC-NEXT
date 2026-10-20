@@ -6,6 +6,7 @@ export const translations = {
     'navbar.toggleTheme': 'Alternar tema claro/oscuro',
     'navbar.toggleThemeDark': 'Cambiar a tema claro',
     'navbar.toggleThemeLight': 'Cambiar a tema oscuro',
+    'navbar.language': 'Cambiar idioma',
     'navbar.home': 'Inicio',
     'navbar.logout': 'Cerrar sesión',
     'navbar.register': 'Registro',
@@ -17,6 +18,18 @@ export const translations = {
     'navbar.alumnoPanel': 'Panel del alumno',
     'navbar.contact': 'Contacto',
     'navbar.logoutMessage': 'Se cerró la sesión correctamente.',
+    'contact.title': 'Contacto institucional',
+    'contact.intro': 'Información de contacto de Cinvestav, responsable institucional de SINAC NEXT.',
+    'contact.addressLabel': 'Domicilio',
+    'contact.address': 'Av. Instituto Politécnico Nacional No. 2508, Col. San Pedro Zacatenco, C.P. 07360, Alcaldía Gustavo A. Madero, Ciudad de México.',
+    'contact.phoneLabel': 'Conmutador',
+    'contact.phone': '55 5747 3800',
+    'contact.transparencyLabel': 'Unidad de Transparencia',
+    'contact.transparencyText': 'Para consultas sobre datos personales, derechos ARCO y privacidad.',
+    'contact.emailLabel': 'Correo electrónico',
+    'contact.websiteLabel': 'Información de datos personales',
+    'contact.website': 'Consultar sitio oficial de Cinvestav',
+    'contact.back': 'Volver al inicio',
 
     // Login
     'login.welcome': 'Bienvenido',
@@ -74,6 +87,7 @@ export const translations = {
     'navbar.toggleTheme': 'Toggle light/dark theme',
     'navbar.toggleThemeDark': 'Switch to light theme',
     'navbar.toggleThemeLight': 'Switch to dark theme',
+    'navbar.language': 'Change language',
     'navbar.home': 'Home',
     'navbar.logout': 'Logout',
     'navbar.register': 'Register',
@@ -85,6 +99,18 @@ export const translations = {
     'navbar.alumnoPanel': 'Student Panel',
     'navbar.contact': 'Contact',
     'navbar.logoutMessage': 'Session closed successfully.',
+    'contact.title': 'Institutional contact',
+    'contact.intro': 'Contact information for Cinvestav, the institution responsible for SINAC NEXT.',
+    'contact.addressLabel': 'Address',
+    'contact.address': 'Av. Instituto Politécnico Nacional No. 2508, Col. San Pedro Zacatenco, C.P. 07360, Gustavo A. Madero, Mexico City.',
+    'contact.phoneLabel': 'Main switchboard',
+    'contact.phone': '+52 55 5747 3800',
+    'contact.transparencyLabel': 'Transparency Unit',
+    'contact.transparencyText': 'For inquiries about personal data, ARCO rights, and privacy.',
+    'contact.emailLabel': 'Email',
+    'contact.websiteLabel': 'Personal data information',
+    'contact.website': 'Visit the official Cinvestav website',
+    'contact.back': 'Back to home',
 
     // Login
     'login.welcome': 'Welcome',
@@ -149,7 +175,9 @@ export const supportedLanguages = [
 
 translations.de = {
   ...translations.en,
+  'navbar.language': 'Sprache auswählen',
   'navbar.home': 'Startseite', 'navbar.logout': 'Abmelden', 'navbar.register': 'Registrierung', 'navbar.portal': 'Bewerberportal', 'navbar.panel': 'Mein Panel', 'navbar.adminPanel': 'Administrationsbereich', 'navbar.coordinacionPanel': 'Koordinationsbereich', 'navbar.docentePanel': 'Lehrendenbereich', 'navbar.alumnoPanel': 'Studierendenbereich', 'navbar.contact': 'Kontakt', 'navbar.logoutMessage': 'Die Sitzung wurde erfolgreich beendet.',
+  'contact.title': 'Institutioneller Kontakt', 'contact.intro': 'Kontaktinformationen des Cinvestav, der für SINAC NEXT verantwortlichen Institution.', 'contact.addressLabel': 'Adresse', 'contact.address': 'Av. Instituto Politécnico Nacional Nr. 2508, Col. San Pedro Zacatenco, C.P. 07360, Gustavo A. Madero, Mexiko-Stadt.', 'contact.phoneLabel': 'Zentrale', 'contact.phone': '+52 55 5747 3800', 'contact.transparencyLabel': 'Transparenzeinheit', 'contact.transparencyText': 'Für Anfragen zu personenbezogenen Daten, ARCO-Rechten und Datenschutz.', 'contact.emailLabel': 'E-Mail', 'contact.websiteLabel': 'Informationen zu personenbezogenen Daten', 'contact.website': 'Offizielle Cinvestav-Website besuchen', 'contact.back': 'Zur Startseite',
   'login.welcome': 'Willkommen', 'login.signIn': 'Anmelden', 'login.userOrEmail': 'Benutzername oder institutionelle E-Mail', 'login.password': 'Passwort', 'login.rememberMe': 'Auf diesem Gerät merken', 'login.forgotPassword': 'Passwort vergessen?', 'login.signInButton': 'Anmelden', 'login.noAccount': 'Noch kein Konto?', 'login.registerHere': 'Hier registrieren', 'login.errorValidation': 'Benutzername/E-Mail und Passwort eingeben.', 'login.errorCredentials': 'Ungültiger Benutzername oder ungültiges Passwort.', 'login.errorConnection': 'Verbindung zum Server konnte nicht hergestellt werden.', 'login.institutionalAccess': 'Institutioneller Zugang', 'login.automaticProfile': 'Automatisches Profil',
   'role.aspirante': 'Bewerber', 'role.alumno': 'Studierender', 'role.coordinacion': 'Akademische Koordination', 'role.docente': 'Lehrkraft', 'role.director': 'Dissertationsbetreuer', 'role.admin': 'Administrator', 'role.servicios': 'Studierendenservice',
   'home.title': 'Willkommen bei SINAC NEXT', 'home.subtitle': 'Akademisches Verwaltungssystem', 'home.description': 'Melden Sie sich an, um fortzufahren', 'home.login': 'Anmelden', 'home.register': 'Als Bewerber registrieren', 'message.loggingOut': 'Abmeldung...', 'message.loggedOut': 'Sitzung erfolgreich beendet',
@@ -159,7 +187,9 @@ translations.de = {
 
 translations.zh = {
   ...translations.en,
+  'navbar.language': '选择语言',
   'navbar.home': '首页', 'navbar.logout': '退出登录', 'navbar.register': '注册', 'navbar.portal': '申请人门户', 'navbar.panel': '我的面板', 'navbar.adminPanel': '管理面板', 'navbar.coordinacionPanel': '学术协调面板', 'navbar.docentePanel': '教师面板', 'navbar.alumnoPanel': '学生面板', 'navbar.contact': '联系', 'navbar.logoutMessage': '已成功退出登录。',
+  'contact.title': '机构联系方式', 'contact.intro': 'SINAC NEXT 负责机构 Cinvestav 的联系信息。', 'contact.addressLabel': '地址', 'contact.address': '墨西哥城 Gustavo A. Madero 区，San Pedro Zacatenco，Av. Instituto Politécnico Nacional 2508号，邮编 07360。', 'contact.phoneLabel': '总机', 'contact.phone': '+52 55 5747 3800', 'contact.transparencyLabel': '透明度办公室', 'contact.transparencyText': '个人数据、ARCO 权利和隐私相关咨询。', 'contact.emailLabel': '电子邮件', 'contact.websiteLabel': '个人数据相关信息', 'contact.website': '访问 Cinvestav 官方网站', 'contact.back': '返回首页',
   'login.welcome': '欢迎', 'login.signIn': '登录', 'login.userOrEmail': '用户名或机构邮箱', 'login.password': '密码', 'login.rememberMe': '在此设备上记住我', 'login.forgotPassword': '忘记密码？', 'login.signInButton': '登录', 'login.noAccount': '还没有账户？', 'login.registerHere': '立即注册', 'login.errorValidation': '请输入用户名/邮箱和密码。', 'login.errorCredentials': '用户名或密码错误。', 'login.errorConnection': '无法连接服务器。', 'login.institutionalAccess': '机构访问', 'login.automaticProfile': '自动识别资料',
   'role.aspirante': '申请人', 'role.alumno': '学生', 'role.coordinacion': '学术协调', 'role.docente': '教师', 'role.director': '论文导师', 'role.admin': '管理员', 'role.servicios': '学生事务服务',
   'home.title': '欢迎使用 SINAC NEXT', 'home.subtitle': '学术管理系统', 'home.description': '登录后继续', 'home.login': '登录', 'home.register': '注册为申请人', 'message.loggingOut': '正在退出登录...', 'message.loggedOut': '已成功退出登录',
@@ -169,7 +199,9 @@ translations.zh = {
 
 translations.pt = {
   ...translations.en,
+  'navbar.language': 'Alterar idioma',
   'navbar.home': 'Início', 'navbar.logout': 'Sair', 'navbar.register': 'Cadastro', 'navbar.portal': 'Portal de candidatos', 'navbar.panel': 'Meu painel', 'navbar.adminPanel': 'Painel administrativo', 'navbar.coordinacionPanel': 'Painel de coordenação', 'navbar.docentePanel': 'Painel do docente', 'navbar.alumnoPanel': 'Painel do aluno', 'navbar.contact': 'Contato', 'navbar.logoutMessage': 'A sessão foi encerrada com sucesso.',
+  'contact.title': 'Contato institucional', 'contact.intro': 'Informações de contato do Cinvestav, instituição responsável pelo SINAC NEXT.', 'contact.addressLabel': 'Endereço', 'contact.address': 'Av. Instituto Politécnico Nacional nº 2508, Col. San Pedro Zacatenco, C.P. 07360, Gustavo A. Madero, Cidade do México.', 'contact.phoneLabel': 'Central telefônica', 'contact.phone': '+52 55 5747 3800', 'contact.transparencyLabel': 'Unidade de Transparência', 'contact.transparencyText': 'Para consultas sobre dados pessoais, direitos ARCO e privacidade.', 'contact.emailLabel': 'E-mail', 'contact.websiteLabel': 'Informações sobre dados pessoais', 'contact.website': 'Consultar o site oficial do Cinvestav', 'contact.back': 'Voltar ao início',
   'login.welcome': 'Bem-vindo', 'login.signIn': 'Entrar', 'login.userOrEmail': 'Usuário ou e-mail institucional', 'login.password': 'Senha', 'login.rememberMe': 'Lembrar neste dispositivo', 'login.forgotPassword': 'Esqueceu a senha?', 'login.signInButton': 'Entrar', 'login.noAccount': 'Não tem uma conta?', 'login.registerHere': 'Cadastre-se aqui', 'login.errorValidation': 'Informe usuário/e-mail e senha.', 'login.errorCredentials': 'Usuário ou senha incorretos.', 'login.errorConnection': 'Não foi possível conectar ao servidor.', 'login.institutionalAccess': 'Acesso institucional', 'login.automaticProfile': 'Perfil automático',
   'role.aspirante': 'Candidato', 'role.alumno': 'Aluno', 'role.coordinacion': 'Coordenação acadêmica', 'role.docente': 'Docente', 'role.director': 'Orientador de tese', 'role.admin': 'Administrador', 'role.servicios': 'Serviços escolares',
   'home.title': 'Bem-vindo ao SINAC NEXT', 'home.subtitle': 'Sistema de gestão acadêmica', 'home.description': 'Acesse com suas credenciais para continuar', 'home.login': 'Entrar', 'home.register': 'Cadastrar-se como candidato', 'message.loggingOut': 'Encerrando sessão...', 'message.loggedOut': 'Sessão encerrada com sucesso',

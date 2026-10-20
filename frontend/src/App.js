@@ -1,6 +1,7 @@
 import React, {useState, useEffect, useRef} from 'react';
 import {createPortal} from 'react-dom';
 import LoadingScreen from './components/LoadingScreen';
+import LogoutModal from './components/LogoutModal';
 import Navbar from './components/Navbar';
 import HomePage from './components/HomePage';
 import AspirantRegistration from './components/AspirantRegistration';
@@ -14,6 +15,7 @@ import PanelDirector from './components/PanelDirector';
 import PanelServiciosEscolares from './components/PanelServiciosEscolares';
 import AvisoPrivacidad from './components/AvisoPrivacidad';
 import Footer from './components/Footer';
+import ContactPage from './components/ContactPage';
 import NotificationBell from './components/NotificationBell';
 import './styles.css';
 import './components/Navbar.css';
@@ -63,7 +65,7 @@ function getSession(){
 }
 
 function normalizedRole(role) {
-  const value = String(role || 'aspirante').trim().toLowerCase();
+  const value = String(role || '').trim().toLowerCase();
   if (value === 'teacher' || value === 'profesor') return 'docente';
   return ['servicios_escolares', 'servicios escolares'].includes(value) ? 'servicios' : value;
 }
@@ -75,6 +77,7 @@ export default function App(){
   const [isViewTransitioning, setIsViewTransitioning] = useState(false);
   const [session, setSession]                 = useState(() => getSession());
   const [toastMessage, setToastMessage]       = useState('');
+  const [pendingLogoutReason, setPendingLogoutReason] = useState(null);
   const switchTimerRef = useRef(null);
 
   useEffect(()=>{
@@ -123,21 +126,40 @@ export default function App(){
 
   function handleLogout(reason = 'Tu sesión ha finalizado. Inicia sesión nuevamente para continuar.'){
     clearAuthStorage();
+    if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+    switchTimerRef.current = null;
     setSession(null);
     setToastMessage(reason);
-    handleNavigate('home');
+    setView('home');
+    setDisplayView('home');
+    setIsViewTransitioning(false);
+  }
+
+  function requestLogout(reason){
+    setPendingLogoutReason(reason || 'Tu sesión ha finalizado. Inicia sesión nuevamente para continuar.');
+  }
+
+  function confirmLogout(){
+    const reason = pendingLogoutReason;
+    setPendingLogoutReason(null);
+    handleLogout(reason);
   }
 
   return (
     <div className={`app-root ${!loading ? 'loaded' : ''}`}>
       <LoadingScreen />
-      <Navbar onNavigate={handleNavigate} activeView={view} session={session} onLogout={handleLogout} />
+      {pendingLogoutReason && createPortal(
+        <LogoutModal onCancel={() => setPendingLogoutReason(null)} onConfirm={confirmLogout} />,
+        document.body
+      )}
+      <Navbar onNavigate={handleNavigate} activeView={view} session={session} onLogout={requestLogout} />
       <main className={`main-content view-transition ${isViewTransitioning ? 'is-switching' : ''}`}>
         {toastMessage && createPortal(
           <SessionToast message={toastMessage} onClose={() => setToastMessage('')} />,
           document.body
         )}
         {displayView === 'home'   && <HomePage />}
+        {displayView === 'contact' && <ContactPage onNavigate={handleNavigate} />}
         {displayView === 'privacy' && <AvisoPrivacidad onNavigate={handleNavigate} />}
         {displayView === 'portal' && <AspirantRegistration />}
         {displayView === 'login'  && (
@@ -147,37 +169,37 @@ export default function App(){
           />
         )}
             {displayView === 'panel'  && (
-              normalizedRole(session?.role) === 'aspirante'
-            ? <PanelAspirante session={session} onLogout={handleLogout} />
+              session && normalizedRole(session.role) === 'aspirante'
+            ? <PanelAspirante session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'admin-panel' && (
-          normalizedRole(session?.role) === 'admin'
-            ? <PanelAdministrador session={session} onLogout={handleLogout} />
+          session && normalizedRole(session.role) === 'admin'
+            ? <PanelAdministrador session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'coordinacion-panel' && (
-          normalizedRole(session?.role) === 'coordinacion'
-            ? <PanelCoordinacion session={session} onLogout={handleLogout} />
+          session && normalizedRole(session.role) === 'coordinacion'
+            ? <PanelCoordinacion session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'alumno-panel' && (
-          normalizedRole(session?.role) === 'alumno'
-            ? <PanelAlumno session={session} onLogout={handleLogout} />
+          session && normalizedRole(session.role) === 'alumno'
+            ? <PanelAlumno session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'docente-panel' && (
-          normalizedRole(session?.role) === 'docente'
-            ? <PanelDocente session={session} onLogout={handleLogout} />
+          session && normalizedRole(session.role) === 'docente'
+            ? <PanelDocente session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'director-panel' && (
-          normalizedRole(session?.role) === 'director'
-            ? <PanelDirector session={session} onLogout={handleLogout} />
+          session && normalizedRole(session.role) === 'director'
+            ? <PanelDirector session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'servicios-panel' && (
-          normalizedRole(session?.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={handleLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
+          session && normalizedRole(session.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={requestLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
       </main>
       {session && <NotificationBell session={session} />}
