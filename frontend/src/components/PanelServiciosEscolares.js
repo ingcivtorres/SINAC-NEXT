@@ -4,12 +4,13 @@ import EgresadosPanel from "./EgresadosPanel";
 import HistoricoPanel from "./HistoricoPanel";
 import DocentesDirectorioPanel from "./DocentesDirectorioPanel";
 import ExamenesGestionPanel from "./ExamenesGestionPanel";
+import SolicitudesAcademicasReview from "./SolicitudesAcademicasReview";
 import SchoolAcademicConfiguration from "./SchoolAcademicConfiguration";
 import {useSchoolServicesCopy} from "./schoolServicesPanelTranslations";
 
 const buildMenu = (copy) => [
   {label: copy.groups.panorama, items: [["resumen", copy.menu.resumen, "▦"], ["alumnos", copy.menu.alumnos, "♙"], ["docentes", copy.menu.docentes, "♜"]]},
-  {label: copy.groups.academicControl, items: [["planes", copy.menu.planes, "▧"], ["periodos", copy.menu.periodos, "◫"], ["inscripciones", copy.menu.inscripciones, "▣"], ["historial", copy.menu.historial, "▤"], ["calificaciones", copy.menu.calificaciones, "✓"], ["examenes", copy.menu.examenes || "Exámenes en línea", "✎"]]},
+  {label: copy.groups.academicControl, items: [["planes", copy.menu.planes, "▧"], ["periodos", copy.menu.periodos, "◫"], ["cargas", copy.menu.cargas, "↗"], ["extemporaneas", copy.menu.extemporaneas, "⌁"], ["solicitudesAcademicas", copy.menu.solicitudesAcademicas, "✉"], ["inscripciones", copy.menu.inscripciones, "▣"], ["historial", copy.menu.historial, "▤"], ["calificaciones", copy.menu.calificaciones, "✓"], ["examenes", copy.menu.examenes || "Exámenes en línea", "✎"]]},
   {label: copy.groups.documentation, items: [["constancias", copy.menu.constancias, "▣"], ["egreso", copy.menu.egreso, "◆"], ["egresados", copy.menu.egresados, "♛"], ["historico", copy.menu.historico, "⟲"]]},
   {label: copy.groups.institutional, items: [["reportes", copy.menu.reportes, "▥"]]},
 ];
@@ -52,6 +53,9 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [solicitudesExtemporaneas, setSolicitudesExtemporaneas] = useState([]);
+  const [comentariosExtemporaneas, setComentariosExtemporaneas] = useState({});
+  const [recargaExtemporaneas, setRecargaExtemporaneas] = useState(0);
   const cargaId = useRef(0);
 
   const headers = useMemo(() => ({Authorization: `Bearer ${session.access}`}), [session.access]);
@@ -88,6 +92,21 @@ export default function PanelServiciosEscolares({session, onLogout}) {
       .catch(err => { if (err.name !== "AbortError") setError(err.message); });
     return () => controller.abort();
   }, [active, session.access]);
+
+  useEffect(() => {
+    if (active !== "extemporaneas") return;
+    const controller = new AbortController();
+    fetch("/api/servicios-escolares/solicitudes-extemporaneas/", {headers, signal: controller.signal})
+      .then(async response => {
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 401) { onLogout(copy.messages.sessionExpired); return []; }
+        if (!response.ok) throw new Error(body.detail || copy.extemporaneas.loadError);
+        return body;
+      })
+      .then(data => { if (Array.isArray(data)) setSolicitudesExtemporaneas(data); })
+      .catch(err => { if (err.name !== "AbortError") setError(err.message || copy.extemporaneas.loadError); });
+    return () => controller.abort();
+  }, [active, headers, onLogout, copy.messages.sessionExpired, copy.extemporaneas.loadError, recargaExtemporaneas]);
 
   function seleccionar(item) {
     setSelectedId(item.id);
@@ -163,6 +182,45 @@ export default function PanelServiciosEscolares({session, onLogout}) {
       enlace.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) { setError(err.message || copy.messages.documentError); }
+  }
+
+  async function resolverSolicitudExtemporanea(solicitud, estado) {
+    const comentario_revision = comentariosExtemporaneas[solicitud.id]?.trim() || "";
+    if (estado === "rechazada" && !comentario_revision) {
+      setError(copy.extemporaneas.rejectCommentRequired);
+      return;
+    }
+    setError("");
+    try {
+      const response = await fetch(`/api/servicios-escolares/solicitudes-extemporaneas/${solicitud.id}/`, {
+        method: "PATCH",
+        headers: {...headers, "Content-Type": "application/json"},
+        body: JSON.stringify({estado, comentario_revision}),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || copy.extemporaneas.updateError);
+      setSolicitudesExtemporaneas(items => items.map(item => item.id === body.id ? body : item));
+      setMessage(estado === "aprobada" ? copy.extemporaneas.approved : copy.extemporaneas.rejected);
+      setComentariosExtemporaneas(items => ({...items, [solicitud.id]: ""}));
+    } catch (err) { setError(err.message || copy.extemporaneas.updateError); }
+  }
+
+  async function descargarOficioExtemporanea(solicitud) {
+    try {
+      const response = await fetch(`/api/servicios-escolares/solicitudes-extemporaneas/${solicitud.id}/oficio/`, {headers});
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || copy.extemporaneas.officeError);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${solicitud.folio}_oficio.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) { setError(err.message || copy.extemporaneas.officeError); }
   }
 
   const label = buildMenu(copy).flatMap(group => group.items).find(item => item[0] === active)?.[1] || copy.menu.resumen;
@@ -251,9 +309,10 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   }
 
   function contenido() {
-    if (active === "planes" || active === "periodos") {
+    if (active === "planes" || active === "periodos" || active === "cargas") {
       return <SchoolAcademicConfiguration key={active} section={active} session={session} onLogout={onLogout}/>;
     }
+    if (active === "solicitudesAcademicas") return <SolicitudesAcademicasReview session={session} onLogout={onLogout}/>;
 
     if (active === "resumen") {
       return (
@@ -305,6 +364,41 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             </form>
           )}
         </>
+      );
+    }
+
+    if (active === "extemporaneas") {
+      const etiquetasEstado = {
+        pendiente: copy.extemporaneas.pending,
+        aprobada: copy.extemporaneas.approvedStatus,
+        rechazada: copy.extemporaneas.rejectedStatus,
+      };
+      return (
+        <section className="servicios-card">
+          <div className="servicios-card-heading">
+            <div><span className="panel-kicker">{copy.extemporaneas.kicker}</span><h3>{copy.extemporaneas.title}</h3><p>{copy.extemporaneas.intro}</p></div>
+            <button type="button" className="btn-secondary" onClick={() => setRecargaExtemporaneas(count => count + 1)}>{copy.refresh}</button>
+          </div>
+          {solicitudesExtemporaneas.length ? solicitudesExtemporaneas.map(solicitud => (
+            <article className="servicios-card" key={solicitud.id}>
+              <div className="servicios-card-heading">
+                <div><h4>{solicitud.alumno_nombre} · {solicitud.alumno_matricula || copy.common.noEnrollment}</h4><p>{copy.extemporaneas.folio}: {solicitud.folio} · {solicitud.periodo} · {solicitud.programa}</p></div>
+                <Estado value={etiquetasEstado[solicitud.estado] || solicitud.estado} copy={copy}/>
+              </div>
+              <p><strong>{copy.extemporaneas.reason}:</strong> {solicitud.motivo}</p>
+              <ul>{solicitud.materias.map(materia => <li key={materia.id}>{materia.clave} · {materia.nombre} · {materia.horario || "—"} · {materia.salon}</li>)}</ul>
+              {solicitud.comentario_revision && <p><strong>{copy.extemporaneas.reviewComment}:</strong> {solicitud.comentario_revision}</p>}
+              {solicitud.estado === "pendiente" && <>
+                <label>{copy.extemporaneas.reviewComment}<textarea rows="2" maxLength="2000" value={comentariosExtemporaneas[solicitud.id] || ""} onChange={event => setComentariosExtemporaneas(items => ({...items, [solicitud.id]: event.target.value}))}/></label>
+                <div className="servicios-row-actions">
+                  <button type="button" className="btn-primary" onClick={() => resolverSolicitudExtemporanea(solicitud, "aprobada")}>{copy.extemporaneas.approve}</button>
+                  <button type="button" className="btn-secondary" disabled={!comentariosExtemporaneas[solicitud.id]?.trim()} onClick={() => resolverSolicitudExtemporanea(solicitud, "rechazada")}>{copy.extemporaneas.reject}</button>
+                </div>
+              </>}
+              {solicitud.estado === "aprobada" && <button type="button" className="btn-primary" onClick={() => descargarOficioExtemporanea(solicitud)}>{copy.extemporaneas.downloadOffice}</button>}
+            </article>
+          )) : <p className="servicios-muted">{copy.extemporaneas.empty}</p>}
+        </section>
       );
     }
 

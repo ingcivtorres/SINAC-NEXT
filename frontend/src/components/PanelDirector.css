@@ -1,0 +1,145 @@
+.director-summary-hero {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.director-summary-hero .alumno-dashboard-identity {
+  flex: 1 1 320px;
+}
+
+.director-summary-hero > .badge {
+  margin-left: auto;
+}
+
+.director-summary-hero .alumno-dashboard-profile {
+  flex-basis: 100%;
+}
+
+.director-summary-stat {
+  min-width: 0;
+}
+
+.director-summary-followup {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.director-summary-followup-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.director-summary-advisee-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.director-summary-advisee {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.65fr);
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 0.875rem;
+  background: var(--surface, #fff);
+}
+
+.director-summary-advisee-info {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.director-summary-advisee-main {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.director-summary-advisee-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.director-summary-advisee-heading > b {
+  color: var(--primary-color, #2563eb);
+  font-size: 0.9rem;
+}
+
+.director-summary-advisee-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: rgba(0, 137, 123, 0.1);
+  color: var(--primary, #087d74);
+  font-weight: 800;
+}
+
+.director-summary-advisee-info strong {
+  color: var(--text-primary, #1f2937);
+}
+
+.director-summary-advisee-info span,
+.director-summary-progress-label {
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.875rem;
+}
+
+.director-summary-progress {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.director-summary-progress-track {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--content-bg, #eef2f7);
+}
+
+.director-summary-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary-color, #2563eb);
+}
+
+.director-summary-aggregate {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 1rem;
+  border-radius: 0.875rem;
+  background: var(--content-bg, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+}
+
+.director-summary-aggregate strong {
+  color: var(--primary-color, #2563eb);
+  font-size: 1.25rem;
+}
+
+.director-summary-aggregate small {
+  flex-basis: 100%;
+}
+
+@media (max-width: 640px) {
+  .director-summary-hero > .badge {
+    margin-left: 0;
+  }
+
+  .director-summary-advisee {
+    grid-template-columns: 1fr;
+  }
+
+  .director-summary-followup-heading {
+    align-items: flex-start;
+  }
+}

@@ -7,6 +7,7 @@ calificaciones de los docentes.
 from io import BytesIO
 import uuid
 import re
+from xml.sax.saxutils import escape
 
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q, Sum
@@ -21,7 +22,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, SeguimientoSolicitud
+from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria
 from .serializers import DocumentoAspiranteSerializer, InscripcionSerializer
 
 
@@ -340,6 +341,235 @@ class ServiciosEscolaresValidacionView(APIView):
             inscripciones.update(validacion_servicios='validada' if validar else 'observada', updated_at=timezone.now())
             movimiento = SeguimientoSolicitud.objects.create(aspirante=alumno, estado='inscripcion_validada' if validar else 'inscripcion_observada', detalle=detalle, origen='Servicios Escolares')
         return Response({'validada': validar, 'movimiento_id': movimiento.id, 'inscripciones': InscripcionSerializer(inscripciones.select_related('materia'), many=True).data})
+
+
+class SolicitudesExtemporaneasServiciosView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def serializar(solicitud):
+        return {
+            'id': solicitud.id,
+            'folio': f'EXT-{solicitud.created_at.year}-{solicitud.id:06d}',
+            'alumno_id': solicitud.alumno_id,
+            'alumno_nombre': solicitud.alumno.nombre,
+            'alumno_matricula': solicitud.alumno.matricula or '',
+            'programa': solicitud.alumno.programa or '',
+            'periodo_id': solicitud.periodo_inscripcion_id,
+            'periodo': solicitud.periodo_inscripcion.nombre,
+            'motivo': solicitud.motivo,
+            'estado': solicitud.estado,
+            'comentario_revision': solicitud.comentario_revision,
+            'solicitante': solicitud.solicitante.nombre,
+            'revisor': solicitud.revisado_por.nombre if solicitud.revisado_por else '',
+            'materias': [{
+                'id': item.carga_materia.materia_id,
+                'clave': item.carga_materia.materia.clave,
+                'nombre': item.carga_materia.materia.nombre,
+                'creditos': item.carga_materia.materia.creditos,
+                'profesor': item.carga_materia.docente.nombre if item.carga_materia.docente else item.carga_materia.materia.profesor,
+                'horario': item.carga_materia.horario,
+                'salon': item.carga_materia.get_salon_display(),
+            } for item in solicitud.materias_solicitadas.select_related(
+                'carga_materia__materia', 'carga_materia__docente',
+            ).order_by('carga_materia__materia__clave')],
+            'created_at': solicitud.created_at,
+            'updated_at': solicitud.updated_at,
+        }
+
+    def get(self, request, pk=None):
+        if not es_servicios(request.user):
+            return Response({'detail': 'No tienes permisos de Servicios Escolares.'}, status=status.HTTP_403_FORBIDDEN)
+        solicitudes = SolicitudInscripcionExtemporanea.objects.select_related(
+            'alumno', 'periodo_inscripcion', 'solicitante', 'revisado_por',
+        ).prefetch_related('materias_solicitadas__carga_materia__materia', 'materias_solicitadas__carga_materia__docente')
+        if pk is not None:
+            solicitud = solicitudes.filter(pk=pk).first()
+            if not solicitud:
+                return Response({'detail': 'No se encontró la solicitud.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(self.serializar(solicitud))
+        return Response([self.serializar(solicitud) for solicitud in solicitudes])
+
+    def patch(self, request, pk=None):
+        if not es_servicios(request.user):
+            return Response({'detail': 'No tienes permisos de Servicios Escolares.'}, status=status.HTTP_403_FORBIDDEN)
+        solicitud = SolicitudInscripcionExtemporanea.objects.filter(pk=pk).first()
+        if not solicitud:
+            return Response({'detail': 'No se encontró la solicitud.'}, status=status.HTTP_404_NOT_FOUND)
+        if solicitud.estado != 'pendiente':
+            return Response({'detail': 'La solicitud ya fue resuelta.'}, status=status.HTTP_409_CONFLICT)
+        estado = request.data.get('estado')
+        if estado not in {'aprobada', 'rechazada'}:
+            return Response({'estado': 'Selecciona aprobar o rechazar la solicitud.'}, status=status.HTTP_400_BAD_REQUEST)
+        comentario = str(request.data.get('comentario_revision') or '').strip()
+        if estado == 'rechazada' and not comentario:
+            return Response({'comentario_revision': 'Explica el motivo del rechazo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                solicitud = SolicitudInscripcionExtemporanea.objects.select_for_update().select_related(
+                    'alumno', 'periodo_inscripcion', 'solicitante',
+                ).get(pk=pk)
+                if solicitud.estado != 'pendiente':
+                    return Response({'detail': 'La solicitud ya fue resuelta.'}, status=status.HTTP_409_CONFLICT)
+                if estado == 'aprobada':
+                    carga_materia_ids = list(
+                        solicitud.materias_solicitadas.order_by('carga_materia_id').values_list(
+                            'carga_materia_id', flat=True,
+                        )
+                    )
+                    if not carga_materia_ids:
+                        return Response({'detail': 'La solicitud no contiene materias.'}, status=status.HTTP_409_CONFLICT)
+                    list(
+                        CargaAcademicaMateria.objects.select_for_update()
+                        .filter(pk__in=carga_materia_ids)
+                        .order_by('pk')
+                        .values_list('pk', flat=True)
+                    )
+                    detalles = list(
+                        CargaAcademicaMateria.objects.filter(pk__in=carga_materia_ids)
+                        .select_related('materia', 'docente')
+                        .order_by('materia__clave')
+                    )
+                    materias_ids = [detalle.materia_id for detalle in detalles]
+                    if Inscripcion.objects.filter(
+                        aspirante=solicitud.alumno,
+                        periodo_inscripcion=solicitud.periodo_inscripcion,
+                        materia_id__in=materias_ids,
+                    ).exists():
+                        return Response({'detail': 'El alumno ya tiene una de las materias solicitadas en este periodo.'}, status=status.HTTP_409_CONFLICT)
+                    llenas = [
+                        detalle.materia.clave for detalle in detalles
+                        if Inscripcion.objects.filter(
+                            periodo_inscripcion=solicitud.periodo_inscripcion,
+                            materia_id=detalle.materia_id,
+                        ).count() >= detalle.capacidad
+                    ]
+                    if llenas:
+                        return Response(
+                            {'detail': f'Ya no hay cupo en: {", ".join(llenas)}.'},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    Inscripcion.objects.bulk_create([
+                        Inscripcion(
+                            aspirante=solicitud.alumno,
+                            materia=detalle.materia,
+                            periodo_inscripcion=solicitud.periodo_inscripcion,
+                            horario=detalle.horario,
+                            extemporanea=True,
+                            motivo_extemporanea=solicitud.motivo,
+                            registrada_por=solicitud.solicitante,
+                            validacion_servicios='validada',
+                        )
+                        for detalle in detalles
+                    ])
+                solicitud.estado = estado
+                solicitud.comentario_revision = comentario
+                solicitud.revisado_por = request.user
+                solicitud.save(update_fields=['estado', 'comentario_revision', 'revisado_por', 'updated_at'])
+        except IntegrityError:
+            return Response({'detail': 'Las inscripciones ya fueron registradas para este periodo.'}, status=status.HTTP_409_CONFLICT)
+
+        detalle = (
+            f'La solicitud de inscripción extemporánea para {solicitud.periodo_inscripcion.nombre} fue '
+            f'{"aprobada" if estado == "aprobada" else "rechazada"} por Servicios Escolares.'
+        )
+        if comentario:
+            detalle = f'{detalle} Comentario: {comentario}'
+        SeguimientoSolicitud.objects.create(
+            aspirante=solicitud.alumno,
+            estado=f'inscripcion_extemporanea_{estado}',
+            detalle=detalle,
+            origen='Servicios Escolares',
+        )
+        solicitud = SolicitudInscripcionExtemporanea.objects.select_related(
+            'alumno', 'periodo_inscripcion', 'solicitante', 'revisado_por',
+        ).prefetch_related('materias_solicitadas__carga_materia__materia', 'materias_solicitadas__carga_materia__docente').get(pk=solicitud.pk)
+        return Response(self.serializar(solicitud))
+
+    @staticmethod
+    def descargar_oficio(request, pk, permitir_coordinacion=False):
+        rol = str(getattr(request.user, 'rol', '')).strip().lower()
+        es_coordinacion = bool(
+            (request.user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+            and rol not in {'servicios', 'servicios_escolares', 'servicios escolares'}
+        )
+        if not es_servicios(request.user) and not (permitir_coordinacion and es_coordinacion):
+            return Response({'detail': 'No tienes permisos de Servicios Escolares.'}, status=status.HTTP_403_FORBIDDEN)
+        solicitud = SolicitudInscripcionExtemporanea.objects.select_related(
+            'alumno', 'periodo_inscripcion', 'revisado_por',
+        ).prefetch_related('materias_solicitadas__carga_materia__materia', 'materias_solicitadas__carga_materia__docente').filter(pk=pk).first()
+        if not solicitud:
+            return Response({'detail': 'No se encontró la solicitud.'}, status=status.HTTP_404_NOT_FOUND)
+        if solicitud.estado != 'aprobada':
+            return Response({'detail': 'El oficio estará disponible cuando Servicios Escolares apruebe la solicitud.'}, status=status.HTTP_409_CONFLICT)
+
+        folio = f'EXT-{solicitud.created_at.year}-{solicitud.id:06d}'
+        buffer = BytesIO()
+        document = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=.7 * inch, leftMargin=.7 * inch, topMargin=.65 * inch, bottomMargin=.65 * inch)
+        styles = getSampleStyleSheet()
+        title = ParagraphStyle('OficioTitle', parent=styles['Title'], alignment=1, textColor=colors.HexColor('#00695c'), fontSize=14)
+        body = ParagraphStyle('OficioBody', parent=styles['BodyText'], leading=15, spaceAfter=10)
+        safe = lambda value: escape(str(value or '—'))
+        story = [
+            Paragraph('CENTRO DE INVESTIGACIÓN Y DE ESTUDIOS AVANZADOS', title),
+            Paragraph('SERVICIOS ESCOLARES', ParagraphStyle('OficioDept', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'))),
+            Paragraph(f'<b>Oficio:</b> {folio}<br/><b>Fecha:</b> {timezone.localtime(solicitud.updated_at).strftime("%d/%m/%Y")}<br/><b>Asunto:</b> Autorización de inscripción extemporánea', body),
+            Paragraph('A quien corresponda:', body),
+            Paragraph(
+                f'Por medio del presente, Servicios Escolares hace constar que fue autorizada la inscripción extemporánea '
+                f'de <b>{safe(solicitud.alumno.nombre)}</b>, matrícula <b>{safe(solicitud.alumno.matricula)}</b>, '
+                f'del programa <b>{safe(solicitud.alumno.programa)}</b>, correspondiente al periodo '
+                f'<b>{safe(solicitud.periodo_inscripcion.nombre)}</b>. La autorización se emite con base en el motivo '
+                f'registrado en la solicitud: “{safe(solicitud.motivo)}”.',
+                body,
+            ),
+        ]
+        rows = [['Clave', 'Materia', 'Docente', 'Horario', 'Salón']]
+        for item in solicitud.materias_solicitadas.select_related('carga_materia__materia', 'carga_materia__docente').order_by('carga_materia__materia__clave'):
+            detalle = item.carga_materia
+            rows.append([
+                safe(detalle.materia.clave), safe(detalle.materia.nombre),
+                safe(detalle.docente.nombre if detalle.docente else detalle.materia.profesor),
+                safe(detalle.horario), safe(detalle.get_salon_display()),
+            ])
+        table = Table(rows, colWidths=[.75 * inch, 2.0 * inch, 1.55 * inch, 1.55 * inch, 1.2 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00695c')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#b8c7d1')),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f1f5f9')]),
+            ('PADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.extend([
+            table,
+            Spacer(1, 18),
+            Paragraph('Se expide el presente oficio para los fines académicos y administrativos correspondientes.', body),
+            Spacer(1, 32),
+            Table([
+                ['________________________________', ''],
+                ['Nombre y firma de quien autoriza', 'Sello de Servicios Escolares'],
+            ], colWidths=[3.7 * inch, 3.2 * inch], rowHeights=[.32 * inch, .35 * inch]),
+        ])
+        document.build(story)
+        buffer.seek(0)
+        return FileResponse(buffer, as_attachment=True, filename=f'{folio}_oficio_inscripcion_extemporanea.pdf', content_type='application/pdf')
+
+
+class OficioInscripcionExtemporaneaView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        return SolicitudesExtemporaneasServiciosView.descargar_oficio(request, pk)
+
+
+class OficioInscripcionExtemporaneaCoordinacionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        return SolicitudesExtemporaneasServiciosView.descargar_oficio(request, pk, permitir_coordinacion=True)
 
 
 class ServiciosEscolaresReporteView(APIView):

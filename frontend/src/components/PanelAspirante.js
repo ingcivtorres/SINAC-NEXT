@@ -76,9 +76,6 @@ export default function PanelAspirante({session, onLogout}) {
   const [openSections, setOpenSections] = useState({inicio: true, perfil: false, expediente: false, proceso: false, documentos: false, examenes: false, notificaciones: false});
   const [seguimiento, setSeguimiento] = useState(null);
   const [seguimientoCargando, setSeguimientoCargando] = useState(true);
-  const [confirmarConversion, setConfirmarConversion] = useState(false);
-  const [convirtiendo, setConvirtiendo] = useState(false);
-  const [mensajeConversion, setMensajeConversion] = useState('');
   const [examenes, setExamenes] = useState([]);
   const [expedienteCentral, setExpedienteCentral] = useState(null);
   const [expedienteCargando, setExpedienteCargando] = useState(false);
@@ -192,36 +189,6 @@ export default function PanelAspirante({session, onLogout}) {
   const etapa = etapaIndex(perfil?.proceso_estado);
   const estadoTerminal = ['rechazado', 'baja'].includes(perfil?.proceso_estado);
 
-  const manejarConversion = async (confirmado) => {
-    if (!confirmado) {
-      setConfirmarConversion(false);
-      setMensajeConversion(copy.messages.conversionDeclined);
-      return;
-    }
-
-    try {
-      setConvirtiendo(true);
-      setError('');
-      const response = await fetch('/api/preregistro/convertir-misma-cuenta/', {
-        method: 'POST',
-        headers: {Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'},
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.detail || copy.messages.conversionError);
-      }
-      setConfirmarConversion(false);
-      setMensajeConversion(copy.messages.conversionSuccess);
-      onLogout(copy.messages.conversionLogout);
-    } catch (err) {
-      setConfirmarConversion(false);
-      setError(err.message || copy.messages.conversionError);
-    } finally {
-      setConvirtiendo(false);
-    }
-  };
-
-  const mostrarConversion = perfil?.proceso_estado === 'aceptado' && perfil?.rol !== 'alumno';
 
   return (
     <section className="panel-section" aria-label={copy.panelTitle}>
@@ -244,20 +211,6 @@ export default function PanelAspirante({session, onLogout}) {
       )}
 
       {cargando && !perfil && <div className="panel-card">{copy.loadingRequest}</div>}
-
-      {confirmarConversion && (
-        <div className="conversion-modal-backdrop" role="dialog" aria-modal="true" aria-label={copy.conversion.aria}>
-          <div className="conversion-modal">
-            <div className="conversion-modal-icon">🎓</div>
-            <h3>{copy.conversion.title}</h3>
-            <p>{copy.conversion.question}</p>
-            <div className="conversion-modal-actions">
-              <button type="button" className="conversion-modal-btn secondary" onClick={() => manejarConversion(false)} disabled={convirtiendo}>{copy.conversion.cancel}</button>
-              <button type="button" className="conversion-modal-btn primary" onClick={() => manejarConversion(true)} disabled={convirtiendo}>{convirtiendo ? copy.conversion.processing : copy.conversion.confirm}</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {perfil && <div className="aspirante-layout">
         <aside className="aspirante-sidebar" aria-label="Menú de navegación del panel">
@@ -294,6 +247,12 @@ export default function PanelAspirante({session, onLogout}) {
         <div className="aspirante-content">
           <SectionPanel id="inicio" label={copy.menu.inicio} open={openSections.inicio} onToggle={() => toggleSection('inicio')}>
             <div className="panel-grid">
+              {perfil.proceso_estado === 'aceptado' && perfil.rol === 'aspirante' && (
+                <div className="panel-card aspirant-enrollment-notice" role="status">
+                  <span className="aspirant-enrollment-notice-icon" aria-hidden="true">✓</span>
+                  <div><h3>{copy.overview.next}</h3><p>{copy.stageMessages.aceptado}</p></div>
+                </div>
+              )}
               <div className="panel-card panel-card--wide">
                 <h3>{copy.overview.summary}</h3>
                 <div className="panel-stepper">
@@ -323,17 +282,8 @@ export default function PanelAspirante({session, onLogout}) {
                 <div className="quick-actions">
                   <button type="button" className="qa-btn" onClick={() => toggleSection('expediente')}>{copy.overview.fullRecord}</button>
                   <button type="button" className="qa-btn" onClick={() => toggleSection('proceso')}>{copy.overview.track}</button>
-                  {mostrarConversion && (
-                    <button type="button" className="qa-btn" onClick={() => setConfirmarConversion(true)}>{copy.overview.continueStudent}</button>
-                  )}
                 </div>
               </div>
-              {mensajeConversion && (
-                <div className="panel-card" style={{gridColumn: '1 / -1'}}>
-                  <h3>{copy.overview.next}</h3>
-                  <p className="support-locked">{mensajeConversion}</p>
-                </div>
-              )}
               <SolicitudApoyo perfil={perfil} session={session} onActualizado={() => cargarPerfil(new AbortController().signal)}/>
             </div>
           </SectionPanel>

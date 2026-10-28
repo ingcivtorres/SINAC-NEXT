@@ -130,6 +130,8 @@ class Aspirante(AbstractBaseUser, PermissionsMixin):
     # Control
     is_active  = models.BooleanField(default=True)
     is_staff   = models.BooleanField(default=False)
+    login_failed_attempts = models.PositiveSmallIntegerField(default=0)
+    login_locked_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -530,6 +532,8 @@ class PlanEstudioMateria(models.Model):
 class SolicitudDireccionTesis(models.Model):
     ESTADOS = [
         ('pendiente', 'Pendiente de revisión'),
+        ('pendiente_director', 'Pendiente de aceptación del director'),
+        ('pendiente_alumno', 'Pendiente de confirmación del alumno'),
         ('aprobada', 'Director asignado'),
         ('rechazada', 'Rechazada'),
         ('cancelada', 'Cancelada'),
@@ -537,6 +541,8 @@ class SolicitudDireccionTesis(models.Model):
     alumno = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='solicitudes_direccion_tesis')
     director_sugerido = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='solicitudes_sugeridas')
     director_asignado = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='asignaciones_direccion_tesis')
+    alumno_acepto_director = models.BooleanField(default=False)
+    director_acepto = models.BooleanField(default=False)
     linea_investigacion = models.CharField(max_length=180, blank=True)
     justificacion = models.TextField(blank=True)
     estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
@@ -652,6 +658,52 @@ class Inscripcion(models.Model):
         return 'aprobada_ocho'
 
 
+class SolicitudInscripcionExtemporanea(models.Model):
+    ESTADOS = [
+        ('pendiente', 'Pendiente'),
+        ('aprobada', 'Aprobada'),
+        ('rechazada', 'Rechazada'),
+    ]
+
+    alumno = models.ForeignKey(Aspirante, on_delete=models.PROTECT, related_name='solicitudes_inscripcion_extemporanea')
+    periodo_inscripcion = models.ForeignKey(PeriodoInscripcion, on_delete=models.PROTECT, related_name='solicitudes_extemporaneas')
+    solicitante = models.ForeignKey(Aspirante, on_delete=models.PROTECT, related_name='solicitudes_extemporaneas_enviadas')
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    motivo = models.TextField()
+    comentario_revision = models.TextField(blank=True)
+    revisado_por = models.ForeignKey(
+        Aspirante, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='solicitudes_extemporaneas_revisadas',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['alumno', 'periodo_inscripcion'],
+                condition=models.Q(estado='pendiente'),
+                name='uniq_solicitud_extemporanea_pendiente',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.alumno.usuario} - {self.periodo_inscripcion.nombre} ({self.estado})'
+
+
+class SolicitudInscripcionExtemporaneaMateria(models.Model):
+    solicitud = models.ForeignKey(
+        SolicitudInscripcionExtemporanea, on_delete=models.CASCADE, related_name='materias_solicitadas',
+    )
+    carga_materia = models.ForeignKey(CargaAcademicaMateria, on_delete=models.PROTECT, related_name='solicitudes_extemporaneas')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['solicitud', 'carga_materia'], name='uniq_materia_solicitud_extemporanea'),
+        ]
+
+
 class SolicitudAcademica(models.Model):
     TIPOS = [
         ('historial', 'Historial académico'),
@@ -668,6 +720,14 @@ class SolicitudAcademica(models.Model):
     tipo = models.CharField(max_length=40, choices=TIPOS)
     comentario = models.TextField(blank=True)
     estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    respuesta_revision = models.TextField(blank=True)
+    resuelta_por = models.ForeignKey(
+        Aspirante,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='solicitudes_academicas_resueltas',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

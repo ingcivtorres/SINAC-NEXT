@@ -4,7 +4,9 @@ import DashboardAnalitico from './DashboardAnalitico';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import MiPerfilAcademico from './MiPerfilAcademico';
 import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
+import SolicitudesMatchDirector from './SolicitudesMatchDirector';
 import {useDirectorCopy} from './directorPanelTranslations';
+import './PanelDirector.css';
 
 export default function PanelDirector({session, onLogout}) {
   const copy = useDirectorCopy();
@@ -28,6 +30,7 @@ export default function PanelDirector({session, onLogout}) {
 
   const [active, setActive] = useState('resumen');
   const [datos, setDatos] = useState(null);
+  const [solicitudesDireccion, setSolicitudesDireccion] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [firmaMsg, setFirmaMsg] = useState('');
@@ -44,6 +47,7 @@ export default function PanelDirector({session, onLogout}) {
       if (response.status === 401) return onLogout(copy.messages.expired);
       if (!response.ok) throw new Error(body.detail || copy.messages.loadPanel);
       setDatos(body);
+      setSolicitudesDireccion(body.solicitudes_direccion || []);
       const examenesResponse = await fetch('/api/predoctoral/examenes/', {headers: {Authorization: `Bearer ${session.access}`}});
       const examenesBody = await examenesResponse.json().catch(() => ({}));
       if (examenesResponse.ok) setExamenesPredoctorales(examenesBody.examenes || []);
@@ -64,12 +68,18 @@ export default function PanelDirector({session, onLogout}) {
   const evaluaciones = tesistas.flatMap((tesista) => (tesista.materias || []).map((materia) => ({...materia, tesista: tesista.nombre})));
   const menuCounts = {
     tesistas: resumen.tesistas_asignados || 0,
-    avances: resumen.avances_por_revisar || 0,
+    avances: (resumen.avances_por_revisar || 0) + solicitudesDireccion.length,
     predoctoral: examenesPredoctorales.length,
     evaluaciones: evaluaciones.length,
     expedientes: expedientes.length,
     proyectos: proyectos.length,
   };
+  const materiasAprobadas = tesistas.reduce((total, item) => total + (item.materias_aprobadas || 0), 0);
+  const materiasTotales = tesistas.reduce((total, item) => total + (item.total_materias || 0), 0);
+  const porcentajeAprobacion = materiasTotales ? Math.round((materiasAprobadas / materiasTotales) * 100) : 0;
+  const promedioTesistas = tesistas.length
+    ? (tesistas.reduce((total, item) => total + (Number(item.promedio) || 0), 0) / tesistas.length).toFixed(2)
+    : '—';
 
   async function firmar(expediente) {
     setFirmaMsg('');
@@ -152,9 +162,59 @@ export default function PanelDirector({session, onLogout}) {
         {!cargando && active === 'predoctoral' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">EVALUACIÓN DOCTORAL</span><h2>Examen predoctoral</h2><p>Programa, evalúa y registra el dictamen de tus tesistas.</p></div><span className="director-count">{examenesPredoctorales.length} exámenes</span></div><form className="tesis-form" onSubmit={programarPredoctoral}><label>Tesista<select required value={predoctoralForm.aspirante_id} onChange={event => setPredoctoralForm({...predoctoralForm, aspirante_id: event.target.value})}><option value="">Selecciona un tesista</option>{tesistas.map(tesista => <option key={tesista.id} value={tesista.id}>{tesista.nombre} · {tesista.matricula || 'Sin matrícula'}</option>)}</select></label><label>Fecha y hora<input type="datetime-local" value={predoctoralForm.fecha_programada} onChange={event => setPredoctoralForm({...predoctoralForm, fecha_programada: event.target.value})}/></label><label>Duración (minutos)<input type="number" min="15" value={predoctoralForm.duracion_minutos} onChange={event => setPredoctoralForm({...predoctoralForm, duracion_minutos: event.target.value})}/></label><label>Descripción<textarea rows="2" value={predoctoralForm.descripcion} onChange={event => setPredoctoralForm({...predoctoralForm, descripcion: event.target.value})} placeholder="Objetivo y alcance de la evaluación"/></label><button type="submit" className="btn-primary">Programar examen</button></form>{firmaMsg && <p className="api-success">{firmaMsg}</p>}{examenesPredoctorales.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>Tesista</th><th>Fecha</th><th>Estado</th><th>Calificación</th><th>Acciones</th></tr></thead><tbody>{examenesPredoctorales.map(examen => <tr key={examen.id}><td><strong>{examen.alumno?.nombre || 'Alumno'}</strong><small>{examen.alumno?.matricula || ''}</small></td><td>{formatDate(examen.fecha_programada)}</td><td><span className={`director-status-badge ${examen.color || 'neutral'}`}>{examen.estado_label}</span></td><td>{examen.calificacion ?? 'Pendiente'}</td><td><button type="button" className="btn-secondary" onClick={() => actualizarPredoctoral(examen, {estado: 'iniciado'})}>Iniciar</button><button type="button" className="btn-primary" onClick={() => { const value = window.prompt('Calificación final (0 a 10):', examen.calificacion ?? ''); if (value !== null) actualizarPredoctoral(examen, {calificacion: value}); }}>Registrar resultado</button></td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>No hay exámenes programados</h3><p>Selecciona un tesista para iniciar su evaluación predoctoral.</p></div>}</div>}
 
         {!cargando && active === 'resumen' && <>
-          <div className="director-welcome"><div><small>{copy.welcome.panelTitle}</small><h2>{copy.welcome.greeting}, {nombre.split(' ')[0]}</h2><p>{copy.welcome.intro}</p></div><div className="director-welcome-mark">DT</div></div>
-          <div className="director-stats"><article><span>{copy.welcome.assigned}</span><strong>{resumen.tesistas_asignados || 0}</strong><small>{copy.common.assignedToYou}</small></article><article><span>{copy.welcome.activeFiles}</span><strong>{resumen.expedientes_activos || 0}</strong><small>{resumen.expedientes_sin_firma || 0} {copy.cards.pendingReview}</small></article><article><span>{copy.welcome.evaluations}</span><strong>{resumen.evaluaciones || 0}</strong><small>{copy.cards.registeredSubjects}</small></article><article><span>{copy.welcome.advances}</span><strong>{resumen.avances_por_revisar || 0}</strong><small>{datos?.avance_tesis_disponible ? copy.cards.pendingFollowUp : copy.cards.modulePending}</small></article></div>
-          {tesistas.length ? <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.welcome.followUp}</span><h2>{copy.tables.studentProgress}</h2></div><button type="button" className="btn-secondary" onClick={() => setActive('tesistas')}>{copy.welcome.visible}</button></div><div className="director-mini-grid">{tesistas.slice(0, 3).map((tesista) => <article key={tesista.id}><strong>{tesista.nombre}</strong><span>{tesista.matricula || copy.common.noEnrollment} · {tesista.programa || copy.common.noProgram}</span><b>{tesista.materias_aprobadas}/{tesista.total_materias} {copy.tables.approved} {copy.tables.matters}</b></article>)}</div></div> : <div className="director-empty"><div>◈</div><h3>{copy.welcome.noAssignmentsTitle}</h3><p>{copy.welcome.noAssignmentsText}</p></div>}
+          <section className="alumno-dashboard-hero director-summary-hero">
+            <div className="alumno-dashboard-identity">
+              <span className="alumno-dashboard-avatar">
+                {nombre.charAt(0).toUpperCase()}
+                {director.profile_photo && <img src={fotoUrl(director.profile_photo)} alt="" onError={event => {event.currentTarget.style.display = 'none';}}/>}
+              </span>
+              <div className="alumno-dashboard-greeting">
+                <p className="panel-kicker">{copy.panel}</p>
+                <h3>{copy.welcome.greeting}, {nombre.split(' ')[0]}</h3>
+                <p>{copy.common.professor}: <strong>{director.usuario || director.correo || '—'}</strong></p>
+              </div>
+            </div>
+            <span className="badge badge--info">{copy.subtitle}</span>
+            <div className="alumno-dashboard-profile" aria-label={copy.menu.resumen}>
+              <div className="info-row"><span>{copy.tables.program}</span><strong>{director.programa || copy.common.noProgram}</strong></div>
+              <div className="info-row"><span>{copy.welcome.activeFiles}</span><strong>{resumen.expedientes_activos || 0}</strong></div>
+              <div className="info-row"><span>{copy.welcome.evaluations}</span><strong>{resumen.evaluaciones || 0}</strong></div>
+            </div>
+          </section>
+
+          <section className="alumno-stats director-summary-stats" aria-label={copy.menu.resumen}>
+            <article className="alumno-stat-card director-summary-stat director-summary-stat--students"><span aria-hidden="true">♙</span><strong>{resumen.tesistas_asignados || 0}</strong><small>{copy.welcome.assigned}</small></article>
+            <article className="alumno-stat-card director-summary-stat director-summary-stat--files"><span aria-hidden="true">▤</span><strong>{resumen.expedientes_activos || 0}</strong><small>{copy.welcome.activeFiles}</small></article>
+            <article className="alumno-stat-card director-summary-stat director-summary-stat--courses"><span aria-hidden="true">✓</span><strong>{resumen.evaluaciones || 0}</strong><small>{copy.welcome.evaluations}</small></article>
+            <article className="alumno-stat-card director-summary-stat director-summary-stat--reviews"><span aria-hidden="true">◷</span><strong>{menuCounts.avances}</strong><small>{copy.welcome.advances}</small></article>
+          </section>
+
+          <section className="panel-card alumno-dashboard-actions director-summary-actions">
+            <div className="alumno-dashboard-section-heading"><p className="panel-kicker">{copy.panel}</p><h3>{copy.dashboard.quickAccess}</h3></div>
+            <div className="alumno-dashboard-action-grid">
+              <button type="button" onClick={() => setActive('tesistas')}><span aria-hidden="true">♙</span><strong>{copy.menu.tesistas}</strong><span aria-hidden="true">↗</span></button>
+              <button type="button" onClick={() => setActive('avances')}><span aria-hidden="true">◷</span><strong>{copy.menu.avances}</strong><span aria-hidden="true">↗</span></button>
+              <button type="button" onClick={() => setActive('proyectos')}><span aria-hidden="true">✦</span><strong>{copy.menu.proyectos}</strong><span aria-hidden="true">↗</span></button>
+            </div>
+          </section>
+
+          {tesistas.length ? <section className="panel-card alumno-dashboard-actions director-summary-followup">
+              <div className="alumno-dashboard-section-heading director-summary-followup-heading"><div><p className="panel-kicker">{copy.welcome.followUp}</p><h3>{copy.tables.studentProgress}</h3></div><button type="button" className="btn-secondary" onClick={() => setActive('tesistas')}>{copy.welcome.visible}</button></div>
+              <div className="director-summary-advisee-list">{tesistas.slice(0, 4).map((tesista) => {
+                const total = tesista.total_materias || 0;
+                const aprobadas = tesista.materias_aprobadas || 0;
+                const progreso = total ? Math.round((aprobadas / total) * 100) : 0;
+                return <article className="director-summary-advisee" key={tesista.id}>
+                  <span className="director-summary-advisee-avatar" aria-hidden="true">{tesista.nombre?.trim().charAt(0).toUpperCase() || '•'}</span>
+                  <div className="director-summary-advisee-main">
+                    <div className="director-summary-advisee-heading"><div className="director-summary-advisee-info"><strong>{tesista.nombre}</strong><small>{tesista.matricula || copy.common.noEnrollment} · {tesista.programa || copy.common.noProgram}</small></div><b>{tesista.promedio == null ? '—' : Number(tesista.promedio).toFixed(2)}</b></div>
+                    <div className="director-summary-progress-track" role="progressbar" aria-valuenow={progreso} aria-valuemin="0" aria-valuemax="100" aria-label={`${copy.tables.approved}: ${progreso}%`}><span style={{width: `${progreso}%`}}/></div>
+                    <small className="director-summary-progress-label">{aprobadas}/{total} {copy.tables.approved.toLowerCase()} {copy.tables.matters.toLowerCase()}</small>
+                  </div>
+                </article>;
+              })}</div>
+              <div className="director-summary-aggregate"><span>{copy.dashboard.academicProgress}</span><strong>{porcentajeAprobacion}%</strong><small>{materiasAprobadas}/{materiasTotales} {copy.tables.approved.toLowerCase()} · {copy.tables.average}: {promedioTesistas}</small></div>
+          </section> : <div className="director-empty"><div>◈</div><h3>{copy.welcome.noAssignmentsTitle}</h3><p>{copy.welcome.noAssignmentsText}</p></div>}
         </>}
 
         {!cargando && active === 'tesistas' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.welcome.academicAssign}</span><h2>{copy.menu.tesistas}</h2></div><span className="director-count">{tesistas.length} {copy.common.records}</span></div>{tesistas.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>{copy.tables.students}</th><th>{copy.tables.enrollment}</th><th>{copy.tables.program}</th><th>{copy.tables.subjects}</th><th>{copy.tables.approved}</th><th>{copy.tables.average}</th></tr></thead><tbody>{tesistas.map((tesista) => <tr key={tesista.id}><td><strong>{tesista.nombre}</strong><small>{tesista.correo}</small></td><td>{tesista.matricula || copy.common.pending}</td><td>{tesista.programa || copy.common.noProgram}</td><td>{tesista.total_materias}</td><td>{tesista.materias_aprobadas}</td><td>{tesista.promedio == null ? '—' : tesista.promedio.toFixed(2)}</td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>{copy.records.noTesistasTitle}</h3><p>{copy.records.noTesistasText}</p></div>}</div>}
@@ -163,12 +223,34 @@ export default function PanelDirector({session, onLogout}) {
 
         {!cargando && active === 'proyectos' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.dashboard.projectTitle}</span><h2>{copy.dashboard.projectTitle}</h2><p>{copy.dashboard.projectDescription}</p></div><span className="director-count">{proyectos.length} {copy.dashboard.projects}</span></div>{proyectos.length ? <div className="director-project-list">{proyectos.map((proyecto) => <article key={proyecto.id}><div><strong>{proyecto.titulo}</strong><small>{proyecto.alumno_nombre} · {proyecto.alumno_matricula || copy.common.noEnrollment} · {proyecto.alumno_programa || copy.common.noProgram}</small><p>{proyecto.resumen}</p><span className="director-project-meta">{proyecto.linea_investigacion || copy.tables.linePending} · {copy.tables.updated} {formatDate(proyecto.updated_at)}</span>{proyecto.comentarios_revision && <blockquote>{proyecto.comentarios_revision}</blockquote>}</div><div className="director-project-actions"><span className={`director-status-badge ${proyecto.estado === 'aprobado' ? 'success' : proyecto.estado === 'rechazado' ? 'danger' : proyecto.estado === 'observado' ? 'warning' : 'neutral'}`}>{proyecto.estado_label}</span>{['en_revision','observado'].includes(proyecto.estado) && <><button type="button" className="btn-primary" onClick={() => actualizarProyecto(proyecto, 'aprobado')}>{copy.tables.approval}</button><button type="button" className="btn-secondary" onClick={() => actualizarProyecto(proyecto, 'observado')}>{copy.tables.requestChanges}</button><button type="button" className="btn-secondary" onClick={() => actualizarProyecto(proyecto, 'rechazado')}>{copy.tables.reject}</button></>}</div></article>)}</div> : <div className="director-empty"><h3>{copy.records.noProjectsTitle}</h3><p>{copy.records.noProjectsText}</p></div>}</div>}
 
-        {!cargando && active === 'avances' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.dashboard.reviewPanel}</span><h2>{copy.dashboard.academicProgress}</h2></div></div>{tesistas.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>{copy.tables.student}</th><th>{copy.tables.subjects}</th><th>{copy.tables.approved}</th><th>{copy.tables.state}</th><th>{copy.common.grade}</th><th>{copy.tables.average}</th></tr></thead><tbody>{tesistas.map((tesista) => <tr key={tesista.id}><td><strong>{tesista.nombre}</strong></td><td>{tesista.total_materias}</td><td><span className="director-status-badge success">{tesista.materias_aprobadas}</span></td><td><span className="director-status-badge danger">{tesista.materias_reprobadas}</span></td><td>{tesista.creditos_aprobados}</td><td>{tesista.promedio == null ? '—' : tesista.promedio.toFixed(2)}</td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>{copy.cards.noAcademicProgress}</h3><p>{copy.cards.noAcademicProgressText}</p></div>}<p className="director-note">{datos?.avance_tesis_mensaje}</p></div>}
+        {!cargando && active === 'avances' && <><div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.dashboard.reviewPanel}</span><h2>{copy.dashboard.academicProgress}</h2></div></div>{tesistas.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>{copy.tables.student}</th><th>{copy.tables.subjects}</th><th>{copy.tables.approved}</th><th>{copy.tables.state}</th><th>{copy.common.grade}</th><th>{copy.tables.average}</th></tr></thead><tbody>{tesistas.map((tesista) => <tr key={tesista.id}><td><strong>{tesista.nombre}</strong></td><td>{tesista.total_materias}</td><td><span className="director-status-badge success">{tesista.materias_aprobadas}</span></td><td><span className="director-status-badge danger">{tesista.materias_reprobadas}</span></td><td>{tesista.creditos_aprobados}</td><td>{tesista.promedio == null ? '—' : tesista.promedio.toFixed(2)}</td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>{copy.cards.noAcademicProgress}</h3><p>{copy.cards.noAcademicProgressText}</p></div>}<p className="director-note">{datos?.avance_tesis_mensaje}</p></div><SolicitudesMatchDirector solicitudes={solicitudesDireccion} session={session} onUpdated={cargarPanel} onError={setError}/></>}
 
         {!cargando && active === 'evaluaciones' && <div className="director-card"><div className="director-card-head"><div><span className="panel-kicker">{copy.dashboard.evaluationTitle}</span><h2>{copy.dashboard.academicTrajectory}</h2></div><span className="director-count">{evaluaciones.length} {copy.tables.matters}</span></div>{evaluaciones.length ? <div className="director-table-wrap"><table className="director-table"><thead><tr><th>{copy.tables.student}</th><th>{copy.tables.subjects}</th><th>{copy.tables.partials}</th><th>{copy.common.grade}</th><th>{copy.tables.state}</th></tr></thead><tbody>{evaluaciones.map((materia) => <tr key={`${materia.id}-${materia.tesista}`}><td>{materia.tesista}</td><td><strong>{materia.materia_clave}</strong><small>{materia.materia_nombre}</small></td><td>{[materia.parcial_1, materia.parcial_2, materia.parcial_3].map((value) => value ?? '—').join(' / ')}</td><td>{materia.calificacion ?? '—'}</td><td><span className={`director-status-badge ${materia.color || 'neutral'}`}>{estadoMateria(materia)}</span></td></tr>)}</tbody></table></div> : <div className="director-empty"><h3>{copy.records.noEvaluationsTitle}</h3><p>{copy.records.noEvaluationsText}</p></div>}</div>}
 
-        {!cargando && active === 'perfil' && <MiPerfilAcademico session={session} docenteId={director.id} onLogout={onLogout} />}
-        {!cargando && active === 'perfil' && <PerfilAspirante perfil={{...director, telefono: director.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, director: {...actual.director, ...actualizado}}))} />}
+        {!cargando && active === 'perfil' && <section className="docente-profile-layout director-profile-layout">
+          <header className="docente-profile-hero">
+            <div className="docente-profile-avatar">
+              {director.profile_photo
+                ? <img src={fotoUrl(director.profile_photo)} alt={nombre}/>
+                : <span>{nombre.charAt(0).toUpperCase()}</span>}
+            </div>
+            <div className="docente-profile-identity">
+              <p className="panel-kicker">{copy.menu.perfil}</p>
+              <h2>{nombre}</h2>
+              <p>{copy.subtitle}</p>
+            </div>
+            <div className="docente-profile-details">
+              <div><span>{copy.common.user}</span><strong>{director.usuario || '—'}</strong></div>
+              <div><span>{copy.common.email}</span><strong>{director.correo || '—'}</strong></div>
+              <div><span>{copy.tables.program}</span><strong>{director.programa || copy.common.noProgram}</strong></div>
+              <div><span>{copy.common.unit}</span><strong>{director.unidad || director.departamento || '—'}</strong></div>
+            </div>
+          </header>
+          <div className="docente-profile-sections">
+            <MiPerfilAcademico session={session} docenteId={director.id} onLogout={onLogout} />
+            <PerfilAspirante perfil={{...director, telefono: director.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, director: {...actual.director, ...actualizado}}))} />
+          </div>
+        </section>}
       </main>
     </section>
   );

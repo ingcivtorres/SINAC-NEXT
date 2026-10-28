@@ -1,11 +1,18 @@
 from pathlib import Path
 import os
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CAMUNDA_URL = os.getenv('CAMUNDA_URL', '')
 
-SECRET_KEY = 'dev-secret-key'
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'true').strip().lower() in ('true', '1', 'yes', 'on')
+SECRET_KEY = (os.getenv('DJANGO_SECRET_KEY') or '').strip()
+if not DEBUG and len(SECRET_KEY) < 50:
+    raise ImproperlyConfigured(
+        'DJANGO_SECRET_KEY debe configurarse con al menos 50 caracteres cuando DEBUG está desactivado.'
+    )
+if not SECRET_KEY:
+    SECRET_KEY = 'sinac-local-development-only-key-change-before-deployment-2026'
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [

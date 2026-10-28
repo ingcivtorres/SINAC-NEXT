@@ -3,7 +3,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, ExpedienteDigital, Inscripcion, ProyectoTesis
+from .models import Aspirante, ExpedienteDigital, Inscripcion, ProyectoTesis, SolicitudDireccionTesis
 from .serializers import ExpedienteDigitalSerializer, FirmaElectronicaSerializer, InscripcionSerializer, ProyectoTesisSerializer
 
 
@@ -54,6 +54,9 @@ class DirectorPanelView(APIView):
         proyectos = ProyectoTesis.objects.filter(
             Q(director=request.user) | Q(alumno_id__in=tesista_ids)
         ).select_related('alumno', 'director').distinct()
+        solicitudes_direccion = SolicitudDireccionTesis.objects.filter(
+            director_asignado=request.user, estado='pendiente_director',
+        ).select_related('alumno', 'director_sugerido', 'director_asignado')
         inscripciones_por_alumno = {tesista.id: [] for tesista in tesistas}
         for inscripcion in inscripciones:
             inscripciones_por_alumno.setdefault(inscripcion.aspirante_id, []).append(inscripcion)
@@ -99,12 +102,22 @@ class DirectorPanelView(APIView):
             'tesistas': tesistas_data,
             'expedientes': expedientes_data,
             'proyectos_tesis': ProyectoTesisSerializer(proyectos, many=True).data,
+            'solicitudes_direccion': [{
+                'id': solicitud.id,
+                'alumno': {'id': solicitud.alumno_id, 'nombre': solicitud.alumno.nombre, 'matricula': solicitud.alumno.matricula, 'programa': solicitud.alumno.programa},
+                'director_sugerido': {'id': solicitud.director_sugerido_id, 'nombre': solicitud.director_sugerido.nombre} if solicitud.director_sugerido else None,
+                'linea_investigacion': solicitud.linea_investigacion,
+                'justificacion': solicitud.justificacion,
+                'estado': solicitud.estado,
+                'created_at': solicitud.created_at,
+            } for solicitud in solicitudes_direccion],
             'resumen': {
                 'tesistas_asignados': len(tesistas_data),
                 'expedientes_activos': sum(1 for item in expedientes if item.estado == 'activo'),
                 'expedientes_sin_firma': sum(1 for item in expedientes if not any(firma.rol_firmante == 'director' for firma in item.firmas.all())),
                 'evaluaciones': len(inscripciones),
                 'avances_por_revisar': proyectos.filter(estado='en_revision').count(),
+                'solicitudes_direccion_pendientes': solicitudes_direccion.count(),
             },
             'avance_tesis_disponible': True,
             'avance_tesis_mensaje': 'Los proyectos enviados por tus tesistas aparecen aquí para revisión y dictamen.',

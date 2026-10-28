@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from .models import Aspirante, ProyectoTesis
 from .serializers import ProyectoTesisSerializer
 from .views import _registrar_seguimiento
-from .tesis_flujo_views import evaluar_elegibilidad_tesis
+from .tesis_flujo_views import evaluar_elegibilidad_tesis, tiene_match_tesis
 
 
 ESTADOS_EDITABLES_ALUMNO = {'borrador', 'observado'}
@@ -91,8 +91,10 @@ class ProyectoTesisView(APIView):
             elegibilidad = evaluar_elegibilidad_tesis(alumno)
             if not elegibilidad['elegible']:
                 return Response({'detail': 'Aún no cumples los requisitos académicos para registrar el proyecto de tesis.', 'elegibilidad': elegibilidad}, status=status.HTTP_400_BAD_REQUEST)
-            if not alumno.director_tesis_id:
-                return Response({'detail': 'Coordinación Académica debe asignarte un Director de Tesis antes de registrar el proyecto.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not alumno.director_tesis_id or not tiene_match_tesis(alumno):
+                return Response({'detail': 'El proyecto se habilita después de que tú y tu Director confirmen el match.'}, status=status.HTTP_400_BAD_REQUEST)
+        if _es_director(user) and not tiene_match_tesis(alumno):
+            return Response({'detail': 'El proyecto se habilita después de que el tesista y tú confirmen el match.'}, status=status.HTTP_400_BAD_REQUEST)
         if _es_director(user) and alumno not in _tesistas_director(user):
             return Response({'detail': 'El alumno no pertenece a tus tesistas asignados.'}, status=status.HTTP_403_FORBIDDEN)
 

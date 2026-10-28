@@ -1,67 +1,89 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import './NotificationBell.css';
 import notificIcon from '../assets/notific.png';
 
 export default function NotificationBell({session}) {
   const [eventos, setEventos] = useState([]);
+  const [noLeidas, setNoLeidas] = useState(0);
   const [abierto, setAbierto] = useState(false);
-  const detenido = useRef(false);
+  const [cargando, setCargando] = useState(true);
+  const [marcando, setMarcando] = useState(false);
+  const [error, setError] = useState('');
+  const [disponible, setDisponible] = useState(true);
+  const solicitudActiva = useRef(false);
 
-  async function cargar() {
-    if (detenido.current) return;
+  const cargar = useCallback(async () => {
+    if (solicitudActiva.current || !disponible) return;
+    solicitudActiva.current = true;
     try {
       const respuesta = await fetch('/api/preregistro/seguimiento/', {
         headers: {Authorization: `Bearer ${session.access}`},
       });
       if (respuesta.status === 403) {
-        detenido.current = true;
+        setDisponible(false);
         return;
       }
-      if (respuesta.ok) {
-        const data = await respuesta.json();
-        setEventos(data.eventos || []);
-      }
-    } catch (error) {
-      // La campana no debe bloquear el panel si el servicio no responde.
+      if (!respuesta.ok) throw new Error('No se pudieron cargar las notificaciones.');
+      const data = await respuesta.json();
+      setEventos(Array.isArray(data.eventos) ? data.eventos : []);
+      setNoLeidas(Number.isFinite(data.no_leidas) ? data.no_leidas : 0);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'No se pudieron cargar las notificaciones.');
+    } finally {
+      solicitudActiva.current = false;
+      setCargando(false);
     }
-  }
+  }, [disponible, session.access]);
 
   useEffect(() => {
     cargar();
-    const timer = setInterval(cargar, 10000);
+    const timer = setInterval(cargar, 30000);
     return () => clearInterval(timer);
-  }, [session.access]);
+  }, [cargar]);
 
   async function marcarLeidas() {
-    setEventos(items => items.map(item => ({...item, leido: true})));
-    await fetch('/api/preregistro/notificaciones/marcar-leidas/', {
-      method: 'POST',
-      headers: {Authorization: `Bearer ${session.access}`},
-    });
+    setMarcando(true);
+    setError('');
+    try {
+      const respuesta = await fetch('/api/preregistro/notificaciones/marcar-leidas/', {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${session.access}`},
+      });
+      if (!respuesta.ok) throw new Error('No se pudieron marcar las notificaciones como leídas.');
+      const data = await respuesta.json();
+      setEventos(items => items.map(item => ({...item, leido: true})));
+      setNoLeidas(count => Math.max(0, count - (data.updated || 0)));
+    } catch (err) {
+      setError(err.message || 'No se pudieron marcar las notificaciones como leídas.');
+    } finally {
+      setMarcando(false);
+    }
   }
-
-  const pendientes = eventos.filter(item => !item.leido).length;
 
   return (
     <div className="notification-bell-wrap">
       <button
         type="button"
-        className={`notification-bell ${pendientes ? 'has-new' : ''}`}
+        className={`notification-bell ${noLeidas ? 'has-new' : ''}`}
         aria-label="Notificaciones"
         aria-expanded={abierto}
         onClick={() => setAbierto(!abierto)}
       >
         <img src={notificIcon} alt="" className="bell-icon" aria-hidden="true" />
-        {pendientes > 0 && <span className="bell-count">{pendientes > 99 ? '99+' : pendientes}</span>}
+        {noLeidas > 0 && <span className="bell-count">{noLeidas > 99 ? '99+' : noLeidas}</span>}
       </button>
       {abierto && (
         <div className="notification-popover">
           <div className="notification-popover-head">
-            <strong>Notificaciones</strong>
-            <button type="button" onClick={marcarLeidas}>Marcar leídas</button>
+            <strong>Notificaciones {noLeidas > 0 ? `(${noLeidas} sin leer)` : ''}</strong>
+            <button type="button" disabled={!disponible || !noLeidas || marcando} onClick={marcarLeidas}>
+              {marcando ? 'Guardando...' : 'Marcar leídas'}
+            </button>
           </div>
+          {error && <div className="notification-error" role="alert">{error}<button type="button" onClick={cargar}>Reintentar</button></div>}
           <div className="notification-items">
-            {eventos.length ? eventos.slice(0, 8).map(item => (
+            {!disponible ? <p className="notification-empty">Las notificaciones están disponibles para aspirantes y alumnos.</p> : cargando ? <p className="notification-empty">Cargando notificaciones...</p> : eventos.length ? eventos.slice(0, 20).map(item => (
               <article key={item.id} className={!item.leido ? 'unread' : ''}>
                 <div>
                   <strong>{item.origen || 'SINAC NEXT'}</strong>
@@ -71,6 +93,7 @@ export default function NotificationBell({session}) {
               </article>
             )) : <p className="notification-empty">No tienes notificaciones.</p>}
           </div>
+          {eventos.length > 20 && <p className="notification-more">Se muestran las 20 notificaciones más recientes.</p>}
         </div>
       )}
     </div>

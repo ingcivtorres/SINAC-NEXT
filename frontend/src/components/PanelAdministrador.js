@@ -62,8 +62,13 @@ function roleLabel(role, copy) {
   return copy.roles.aspirante;
 }
 
-function passwordCumplePolitica(password) {
-  return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password);
+function passwordCumplePolitica(password, policyText = '8 caracteres, mayúscula, minúscula y número') {
+  const length = policyText.match(/(\d+)\s*(?:caracter|character)/i);
+  const normalized = policyText.toLowerCase();
+  return password.length >= Number(length?.[1] || 8)
+    && (!/(mayúscula|mayuscula|uppercase)/i.test(normalized) || /[A-Z]/.test(password))
+    && (!/(minúscula|minuscula|lowercase)/i.test(normalized) || /[a-z]/.test(password))
+    && (!/(número|numero|number)/i.test(normalized) || /[0-9]/.test(password));
 }
 
 function roleFormValue(role) {
@@ -109,8 +114,10 @@ export default function PanelAdministrador({session, onLogout}) {
   const [auditoria, setAuditoria] = useState([]);
   const [configuracion, setConfiguracion] = useState({});
   const [catalogForm, setCatalogForm] = useState({tipo: 'materia', clave: '', nombre: '', creditos: 4, profesor: '', horario: '', salon: 'salon_1', capacidad: 42});
+  const [catalogEditing, setCatalogEditing] = useState(false);
   const [periodoForm, setPeriodoForm] = useState({nombre: '', apertura: '', cierre: '', activo: true});
-  const [apiStatus, setApiStatus] = useState('Sin comprobar');
+  const [periodoEditing, setPeriodoEditing] = useState(false);
+  const [apiStatus, setApiStatus] = useState('checking');
 
   const pedirConfirmacion = (text) => new Promise(resolve => {
     dialogResolver.current = resolve;
@@ -205,7 +212,7 @@ export default function PanelAdministrador({session, onLogout}) {
         setUsers((userData.usuarios || []).map((user) => ({
           id: user.id, name: user.nombre, usuario: user.usuario, email: user.correo,
           role: roleLabel(user.rol, copy), rawRole: user.rol, area: user.programa || user.departamento || 'General',
-          status: user.is_active ? copy.common.active : copy.common.inactive, rawStatus: user.is_active ? 'Activo' : 'Inactivo', isActive: user.is_active, lastLogin: copy.messages.notAvailable,
+          status: user.is_locked ? copy.users.locked : user.is_active ? copy.common.active : copy.common.inactive, rawStatus: user.is_active ? 'Activo' : 'Inactivo', isActive: user.is_active, isLocked: user.is_locked, lastLogin: copy.messages.notAvailable,
         })));
       }
       if (alumnosResponse.ok) {
@@ -230,8 +237,8 @@ export default function PanelAdministrador({session, onLogout}) {
     if (activeSection !== 'maintenance') return;
     const controller = new AbortController();
     fetch('/health/', {headers: {Authorization: `Bearer ${session.access}`}, signal: controller.signal})
-      .then(response => { if (!response.ok) throw new Error(); setApiStatus('Operativa'); })
-      .catch(error => { if (error.name !== 'AbortError') setApiStatus('No disponible'); });
+      .then(response => { if (!response.ok) throw new Error(); setApiStatus('operational'); })
+      .catch(error => { if (error.name !== 'AbortError') setApiStatus('unavailable'); });
     return () => controller.abort();
   }, [activeSection, session.access]);
 
@@ -249,6 +256,7 @@ export default function PanelAdministrador({session, onLogout}) {
         : aspirante.proceso_estado === 'revision' ? 'En revisión'
           : aspirante.proceso_estado === 'iniciado' ? 'En proceso' : 'Pendiente',
     isActive: typeof aspirante.is_active === 'boolean' ? aspirante.is_active : true,
+    isLocked: false,
     lastLogin: copy.messages.recent,
   }));
 
@@ -337,12 +345,15 @@ export default function PanelAdministrador({session, onLogout}) {
     String(aspirante.rol || '').trim().toLowerCase() === 'aspirante'
     && (filtro === 'todos' || aspirante.proceso_estado === filtro)
   ));
-  const requestItems = (datos?.aspirantes || []).slice(0, 3).map((aspirante, index) => ({
-    id: aspirante.id || index + 1,
-    title: `${copy.shell.requestLabel} #${String(aspirante.id || index + 1).padStart(4, '0')}`,
-    status: etiquetaEstado(aspirante.proceso_estado, copy),
-    name: aspirante.nombre,
-  }));
+  const requestItems = (datos?.aspirantes || [])
+    .filter((aspirante) => String(aspirante.rol || '').trim().toLowerCase() === 'aspirante')
+    .slice(0, 3)
+    .map((aspirante, index) => ({
+      id: aspirante.id || index + 1,
+      title: `${copy.shell.requestLabel} #${String(aspirante.id || index + 1).padStart(4, '0')}`,
+      status: etiquetaEstado(aspirante.proceso_estado, copy),
+      name: aspirante.nombre,
+    }));
 
   const actividadMensual = reportes?.actividad_mensual || [];
   const chartMax = Math.max(...actividadMensual.map((item) => item.total), 1);
@@ -358,7 +369,7 @@ export default function PanelAdministrador({session, onLogout}) {
     if (item.id === 'students') return reportes?.alumnos || 0;
     if (item.id === 'faculty') return reportes?.docentes || 0;
     if (item.id === 'overview') return reportes?.usuarios_total || dashboardUsers.length;
-    if (item.id === 'solicitudes') return datos?.aspirantes?.length || 0;
+    if (item.id === 'solicitudes') return datos?.aspirantes?.filter((aspirante) => String(aspirante.rol || '').trim().toLowerCase() === 'aspirante').length || 0;
     if (item.id === 'reports') return reportes?.inscripciones || 0;
     if (item.id === 'audit') return auditoria.length;
     return null;
@@ -401,8 +412,10 @@ export default function PanelAdministrador({session, onLogout}) {
       if (response.ok) {
         setMessage(copy.messages.userDeactivated);
         await cargarAdministracion();
+        await cargarPanel(new AbortController().signal);
       } else if (!response.ok) {
-        setError(copy.messages.deactivateError);
+        const body = await response.json().catch(() => ({}));
+        setError(body.error || copy.messages.deactivateError);
       }
     } catch (err) {
       setError(err.message || copy.messages.deactivateException);
@@ -412,7 +425,7 @@ export default function PanelAdministrador({session, onLogout}) {
   const handleResetPassword = async (userId) => {
     const password = await pedirNuevaPassword();
     if (!password) return;
-    if (!passwordCumplePolitica(password)) { setError(copy.messages.passwordPolicy); return; }
+    if (!passwordCumplePolitica(password, configuracion.politica_password)) { setError(copy.messages.passwordPolicy); return; }
     try {
       const response = await fetch(`/api/administracion/usuarios/${userId}/`, {
         method: 'PATCH', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${session.access}`},
@@ -426,7 +439,8 @@ export default function PanelAdministrador({session, onLogout}) {
       if (!response.ok) throw new Error(body.error || copy.messages.passwordResetError);
       setError('');
       setMessage(copy.messages.passwordReset);
-      cargarAdministracion();
+      await cargarAdministracion();
+      await cargarPanel(new AbortController().signal);
     } catch (err) { setError(err.message); }
   };
 
@@ -441,7 +455,7 @@ export default function PanelAdministrador({session, onLogout}) {
       setError(copy.messages.requiredUserFields);
       return;
     }
-    if ((!editingUser || formData.password) && !passwordCumplePolitica(formData.password)) {
+    if ((!editingUser || formData.password) && !passwordCumplePolitica(formData.password, configuracion.politica_password)) {
       setError(copy.messages.passwordPolicy);
       return;
     }
@@ -513,7 +527,8 @@ export default function PanelAdministrador({session, onLogout}) {
       setEditingUser(null);
       setFormData({name: '', usuario: '', email: '', password: '', role: 'Alumno', area: 'Sistemas', status: 'Activo'});
       setError('');
-      cargarPanel(new AbortController().signal);
+      await cargarAdministracion();
+      await cargarPanel(new AbortController().signal);
     } catch (err) {
       setError(err.message || copy.messages.saveUserException);
     }
@@ -526,12 +541,38 @@ export default function PanelAdministrador({session, onLogout}) {
         method: 'POST', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${session.access}`},
         body: JSON.stringify(catalogForm),
       });
+      if (response.status === 401) {
+        onLogout(copy.messages.expiredShort);
+        return;
+      }
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || copy.messages.catalogError);
       setCatalogForm({tipo: 'materia', clave: '', nombre: '', creditos: 4, profesor: '', horario: '', salon: 'salon_1', capacidad: 42});
+      setCatalogEditing(false);
       await cargarAdministracion();
-      setMessage(copy.messages.catalogSaved);
+      setMessage(catalogEditing ? copy.messages.catalogUpdated : copy.messages.catalogSaved);
     } catch (err) { setError(err.message); }
+  };
+
+  const editarMateria = (materia) => {
+    setCatalogForm({
+      tipo: 'materia', clave: materia.clave, nombre: materia.nombre, creditos: materia.creditos,
+      profesor: materia.profesor || '', horario: materia.horario || '', salon: materia.salon || 'salon_1',
+      capacidad: materia.capacidad ?? 42,
+    });
+    setCatalogEditing(true);
+  };
+
+  const editarPeriodo = (periodo) => {
+    const toLocalInput = (value) => {
+      const date = new Date(value);
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    };
+    setPeriodoForm({
+      nombre: periodo.nombre, apertura: toLocalInput(periodo.apertura),
+      cierre: toLocalInput(periodo.cierre), activo: periodo.activo,
+    });
+    setPeriodoEditing(true);
   };
 
   const guardarPeriodo = async (event) => {
@@ -541,11 +582,16 @@ export default function PanelAdministrador({session, onLogout}) {
         method: 'POST', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${session.access}`},
         body: JSON.stringify({tipo: 'periodo', ...periodoForm}),
       });
+      if (response.status === 401) {
+        onLogout(copy.messages.expiredShort);
+        return;
+      }
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || copy.messages.periodError);
       setPeriodoForm({nombre: '', apertura: '', cierre: '', activo: true});
+      setPeriodoEditing(false);
       await cargarAdministracion();
-      setMessage(copy.messages.periodSaved);
+      setMessage(periodoEditing ? copy.messages.periodUpdated : copy.messages.periodSaved);
     } catch (err) { setError(err.message); }
   };
 
@@ -556,6 +602,10 @@ export default function PanelAdministrador({session, onLogout}) {
         method: 'PUT', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${session.access}`},
         body: JSON.stringify(configuracion),
       });
+      if (response.status === 401) {
+        onLogout(copy.messages.expiredShort);
+        return;
+      }
       if (!response.ok) throw new Error(copy.messages.configError);
       setError('');
       setMessage(copy.messages.configSaved);
@@ -565,6 +615,10 @@ export default function PanelAdministrador({session, onLogout}) {
   const exportarReporte = async (formato = 'xlsx') => {
     try {
       const response = await fetch(`/api/administracion/reportes/?format=${formato}`, {headers: {Authorization: `Bearer ${session.access}`}});
+      if (response.status === 401) {
+        onLogout(copy.messages.expiredShort);
+        return;
+      }
       if (!response.ok) throw new Error(copy.messages.reportError);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -634,8 +688,8 @@ export default function PanelAdministrador({session, onLogout}) {
               </div>
               <div className="admin-stat-card">
                 <span>{copy.shell.approved}</span>
-                <strong>{reportes?.aceptadas_ultimos_30_dias ?? datos.resumen.aceptado ?? 0}</strong>
-                <small>{copy.shell.last30Days}</small>
+                <strong>{reportes?.aspirantes_aceptados ?? (datos?.aspirantes || []).filter((aspirante) => aspirante.rol === 'aspirante' && aspirante.proceso_estado === 'aceptado' && aspirante.is_active).length}</strong>
+                <small>{copy.shell.acceptedApplicants}</small>
               </div>
               <div className="admin-stat-card">
                 <span>{copy.shell.pending}</span>
@@ -769,7 +823,7 @@ export default function PanelAdministrador({session, onLogout}) {
                       <td>{user.email}</td>
                       <td>{user.role}</td>
                       <td>{user.area}</td>
-                      <td><span className={`estado-badge ${user.isActive ? 'estado-aceptado' : 'estado-pendiente'}`}>{user.status}</span></td>
+                      <td><span className={`estado-badge ${user.isActive && !user.isLocked ? 'estado-aceptado' : 'estado-pendiente'}`}>{user.status}</span></td>
                       <td>{user.lastLogin}</td>
                       <td>
                         <div className="row-actions">
@@ -858,11 +912,13 @@ export default function PanelAdministrador({session, onLogout}) {
                 {requestItems.length ? requestItems.map((item) => (
                   <li key={item.id}>
                     <strong>{item.title}</strong>
-                    <span>{item.name || item.status}</span>
-                    <button type="button" className="icon-btn">{item.status}</button>
+                    <span>{item.name || item.status} · {item.status}</span>
+                    <button type="button" className="icon-btn" onClick={() => {setUserSearch(item.name || ''); setActiveSection('users');}}>
+                      {copy.requests.view}
+                    </button>
                   </li>
                 )) : (
-                  <li><strong>{copy.messages.noRequests}</strong><span>{copy.messages.noData}</span><button type="button" className="icon-btn">{copy.requests.view}</button></li>
+                  <li><strong>{copy.messages.noRequests}</strong><span>{copy.messages.noData}</span></li>
                 )}
               </ul>
             </div>
@@ -886,7 +942,7 @@ export default function PanelAdministrador({session, onLogout}) {
 
         {activeSection === 'reports' && (
           <div className="admin-grid-layout">
-            <DashboardAnalitico eyebrow={copy.reports.kicker} title={copy.reports.title} description={copy.reports.description} metrics={[{label:copy.reports.users, value:reportes?.usuarios_total ?? dashboardUsers.length}, {label:copy.reports.students, value:reportes?.alumnos ?? 0}, {label:copy.reports.enrollments, value:reportes?.inscripciones ?? 0}, {label:copy.reports.average, value:Number(reportes?.promedio_general || 0).toFixed(2)}]} distribution={[{label:copy.reports.active, value:reportes?.usuarios_activos ?? 0}, {label:copy.reports.inactive, value:reportes?.usuarios_inactivos ?? 0}, {label:copy.reports.pendingDocuments, value:reportes?.documentos_pendientes ?? 0}, {label:copy.reports.recentAcceptances, value:reportes?.aceptadas_ultimos_30_dias ?? 0}]} />
+            <DashboardAnalitico eyebrow={copy.reports.kicker} title={copy.reports.title} description={copy.reports.description} metrics={[{label:copy.reports.users, value:reportes?.usuarios_total ?? dashboardUsers.length}, {label:copy.reports.students, value:reportes?.alumnos ?? 0}, {label:copy.reports.enrollments, value:reportes?.inscripciones ?? 0}, {label:copy.reports.average, value:Number(reportes?.promedio_general || 0).toFixed(2)}]} distribution={[{label:copy.reports.active, value:reportes?.usuarios_activos ?? 0}, {label:copy.reports.inactive, value:reportes?.usuarios_inactivos ?? 0}, {label:copy.reports.pendingDocuments, value:reportes?.documentos_pendientes ?? 0}, {label:copy.reports.acceptedApplicants, value:reportes?.aspirantes_aceptados ?? 0}]} />
             <div className="admin-card">
               <div className="admin-card-head">
                 <div>
@@ -912,7 +968,7 @@ export default function PanelAdministrador({session, onLogout}) {
               <ul className="mini-alerts">
                 <li>{reportes?.documentos_pendientes || 0} {copy.reports.pendingValidation}</li>
                 <li>{reportes?.auditoria_ultimos_30_dias || 0} {copy.reports.adminActions}</li>
-                <li>{reportes?.aceptadas_ultimos_30_dias || 0} {copy.reports.acceptances30}</li>
+                <li>{reportes?.aspirantes_aceptados || 0} {copy.reports.acceptedApplicants.toLowerCase()}</li>
               </ul>
             </div>
           </div>
@@ -921,18 +977,18 @@ export default function PanelAdministrador({session, onLogout}) {
         {activeSection === 'catalogs' && (
           <div className="admin-grid-layout">
             <div className="admin-card admin-card-wide">
-              <div className="admin-card-head"><div><p className="panel-kicker">{copy.catalogs.structure}</p><h3>{copy.catalogs.subjects}</h3></div></div>
+              <div className="admin-card-head"><div><p className="panel-kicker">{copy.catalogs.structure}</p><h3>{copy.catalogs.subjects}</h3></div>{catalogEditing && <button type="button" className="btn-secondary" onClick={() => {setCatalogEditing(false); setCatalogForm({tipo: 'materia', clave: '', nombre: '', creditos: 4, profesor: '', horario: '', salon: 'salon_1', capacidad: 42});}}>{copy.modal.cancel}</button>}</div>
               <form className="config-grid" onSubmit={guardarCatalogo}>
-                <label className="config-item">{copy.catalogs.key}<input value={catalogForm.clave} onChange={(e) => setCatalogForm({...catalogForm, clave: e.target.value})} placeholder="MAT-001" required /></label>
+                <label className="config-item">{copy.catalogs.key}<input value={catalogForm.clave} onChange={(e) => setCatalogForm({...catalogForm, clave: e.target.value})} placeholder="MAT-001" required disabled={catalogEditing} /></label>
                 <label className="config-item">{copy.catalogs.name}<input value={catalogForm.nombre} onChange={(e) => setCatalogForm({...catalogForm, nombre: e.target.value})} placeholder={copy.common.subject} required /></label>
                 <label className="config-item">{copy.catalogs.credits}<select value={catalogForm.creditos} onChange={(e) => setCatalogForm({...catalogForm, creditos: Number(e.target.value)})}><option value="4">4</option><option value="5">5</option><option value="7">7</option></select></label>
                 <label className="config-item">{copy.catalogs.professor}<input value={catalogForm.profesor} onChange={(e) => setCatalogForm({...catalogForm, profesor: e.target.value})} /></label>
                 <label className="config-item">{copy.catalogs.schedule}<input value={catalogForm.horario} onChange={(e) => setCatalogForm({...catalogForm, horario: e.target.value})} /></label>
                 <label className="config-item">{copy.catalogs.room}<select value={catalogForm.salon} onChange={(e) => setCatalogForm({...catalogForm, salon: e.target.value})}>{SALONES.map((salon) => <option key={salon.value} value={salon.value}>{copy.catalogs.rooms[salon.labelKey]}</option>)}</select></label>
                 <label className="config-item">{copy.catalogs.capacity}<input type="number" min="1" max="32767" value={catalogForm.capacidad} onChange={(e) => setCatalogForm({...catalogForm, capacidad: Number(e.target.value)})} required /></label>
-                <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{copy.catalogs.saveSubject}</button></div>
+                <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{catalogEditing ? copy.users.saveChanges : copy.catalogs.saveSubject}</button></div>
               </form>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.catalogs.key}</th><th>{copy.common.subject}</th><th>{copy.common.credits}</th><th>{copy.common.professor}</th><th>{copy.common.schedule}</th><th>{copy.catalogs.room}</th><th>{copy.common.capacity}</th></tr></thead><tbody>{catalogos.materias.map((materia) => <tr key={materia.id}><td>{materia.clave}</td><td>{materia.nombre}</td><td>{materia.creditos}</td><td>{materia.profesor || copy.common.toAssign}</td><td>{materia.horario || copy.common.toAssign}</td><td>{copy.catalogs.rooms[SALONES.find((salon) => salon.value === materia.salon)?.labelKey] || copy.catalogs.roomPending}</td><td>{materia.capacidad ?? '—'}</td></tr>)}</tbody></table></div>
+              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.catalogs.key}</th><th>{copy.common.subject}</th><th>{copy.common.credits}</th><th>{copy.common.professor}</th><th>{copy.common.schedule}</th><th>{copy.catalogs.room}</th><th>{copy.common.capacity}</th><th>{copy.common.actions}</th></tr></thead><tbody>{catalogos.materias.length ? catalogos.materias.map((materia) => <tr key={materia.id}><td>{materia.clave}</td><td>{materia.nombre}</td><td>{materia.creditos}</td><td>{materia.profesor || copy.common.toAssign}</td><td>{materia.horario || copy.common.toAssign}</td><td>{copy.catalogs.rooms[SALONES.find((salon) => salon.value === materia.salon)?.labelKey] || copy.catalogs.roomPending}</td><td>{materia.capacidad ?? '—'}</td><td><button type="button" className="icon-btn" onClick={() => editarMateria(materia)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="8">{copy.common.noRecords}</td></tr>}</tbody></table></div>
             </div>
             <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.catalogs.catalogs}</p><h3>{copy.catalogs.departmentsPrograms}</h3></div></div><p><strong>{copy.catalogs.departments}</strong> {catalogos.departamentos.join(', ') || copy.common.noRecords}</p><p><strong>{copy.catalogs.programs}</strong> {catalogos.programas.join(', ') || copy.common.noRecords}</p><p><strong>{copy.catalogs.roles}</strong> {catalogos.roles.join(', ')}</p></div>
           </div>
@@ -940,28 +996,28 @@ export default function PanelAdministrador({session, onLogout}) {
 
         {activeSection === 'periods' && (
           <div className="admin-card">
-            <div className="admin-card-head"><div><p className="panel-kicker">{copy.periods.calendar}</p><h3>{copy.periods.title}</h3></div></div>
+            <div className="admin-card-head"><div><p className="panel-kicker">{copy.periods.calendar}</p><h3>{copy.periods.title}</h3></div>{periodoEditing && <button type="button" className="btn-secondary" onClick={() => {setPeriodoEditing(false); setPeriodoForm({nombre: '', apertura: '', cierre: '', activo: true});}}>{copy.modal.cancel}</button>}</div>
             <form className="config-grid" onSubmit={guardarPeriodo}>
-              <label className="config-item">{copy.periods.period}<input value={periodoForm.nombre} onChange={(e) => setPeriodoForm({...periodoForm, nombre: e.target.value})} placeholder="2026-2" required /></label>
+              <label className="config-item">{copy.periods.period}<input value={periodoForm.nombre} onChange={(e) => setPeriodoForm({...periodoForm, nombre: e.target.value})} placeholder="2026-2" required disabled={periodoEditing} /></label>
               <label className="config-item">{copy.periods.opening}<input type="datetime-local" value={periodoForm.apertura} onChange={(e) => setPeriodoForm({...periodoForm, apertura: e.target.value})} required /></label>
               <label className="config-item">{copy.periods.closing}<input type="datetime-local" value={periodoForm.cierre} onChange={(e) => setPeriodoForm({...periodoForm, cierre: e.target.value})} required /></label>
               <label className="config-item">{copy.common.status}<select value={periodoForm.activo ? 'true' : 'false'} onChange={(e) => setPeriodoForm({...periodoForm, activo: e.target.value === 'true'})}><option value="true">{copy.common.active}</option><option value="false">{copy.common.inactive}</option></select></label>
-              <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{copy.periods.save}</button></div>
+              <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{periodoEditing ? copy.users.saveChanges : copy.periods.save}</button></div>
             </form>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.periods.period}</th><th>{copy.periods.opening}</th><th>{copy.periods.closing}</th><th>{copy.common.status}</th></tr></thead><tbody>{catalogos.periodos.map((periodo) => <tr key={periodo.id}><td><strong>{periodo.nombre}</strong></td><td>{new Date(periodo.apertura).toLocaleString(copy.locale)}</td><td>{new Date(periodo.cierre).toLocaleString(copy.locale)}</td><td><span className={`estado-badge ${periodo.activo ? 'estado-aceptado' : 'estado-pendiente'}`}>{periodo.activo ? copy.common.active : copy.common.inactive}</span></td></tr>)}</tbody></table></div>
+            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.periods.period}</th><th>{copy.periods.opening}</th><th>{copy.periods.closing}</th><th>{copy.common.status}</th><th>{copy.common.actions}</th></tr></thead><tbody>{catalogos.periodos.length ? catalogos.periodos.map((periodo) => <tr key={periodo.id}><td><strong>{periodo.nombre}</strong></td><td>{new Date(periodo.apertura).toLocaleString(copy.locale)}</td><td>{new Date(periodo.cierre).toLocaleString(copy.locale)}</td><td><span className={`estado-badge ${periodo.activo ? 'estado-aceptado' : 'estado-pendiente'}`}>{periodo.activo ? copy.common.active : copy.common.inactive}</span></td><td><button type="button" className="icon-btn" onClick={() => editarPeriodo(periodo)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="5">{copy.common.noRecords}</td></tr>}</tbody></table></div>
           </div>
         )}
 
         {activeSection === 'audit' && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.audit.traceability}</p><h3>{copy.audit.title}</h3></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.audit.date}</th><th>{copy.audit.user}</th><th>{copy.audit.action}</th><th>{copy.audit.object}</th><th>{copy.audit.ip}</th><th>{copy.audit.changes}</th></tr></thead><tbody>{auditoria.length ? auditoria.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString(copy.locale)}</td><td>{item.usuario}</td><td>{item.accion}</td><td>{item.modelo} #{item.objeto_id}</td><td>{item.ip || '—'}</td><td><small>{JSON.stringify(item.nuevos)}</small></td></tr>) : <tr><td colSpan="6">{copy.messages.noAudit}</td></tr>}</tbody></table></div></div>
+          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.audit.traceability}</p><h3>{copy.audit.title}</h3></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.audit.date}</th><th>{copy.audit.user}</th><th>{copy.audit.action}</th><th>{copy.audit.object}</th><th>{copy.audit.ip}</th><th>{copy.audit.changes}</th></tr></thead><tbody>{auditoria.length ? auditoria.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString(copy.locale)}</td><td>{item.usuario}</td><td>{item.accion}</td><td>{item.modelo} #{item.objeto_id}</td><td>{item.ip || '—'}</td><td><small>{copy.audit.before}: {JSON.stringify(item.anteriores)}<br />{copy.audit.after}: {JSON.stringify(item.nuevos)}</small></td></tr>) : <tr><td colSpan="6">{copy.messages.noAudit}</td></tr>}</tbody></table></div></div>
         )}
 
         {activeSection === 'security' && (
-          <div className="admin-grid-layout"><div className="admin-card"><p className="panel-kicker">{copy.security.title}</p><h3>{copy.security.controls}</h3><ul className="mini-alerts"><li>{copy.security.passwords}</li><li>{copy.security.inactive}</li><li>{copy.security.audit}</li><li>{copy.security.recovery}</li></ul></div><div className="admin-card"><p className="panel-kicker">{copy.security.state}</p><h3>{copy.security.accounts}</h3><div className="report-list"><div><span>{copy.security.active}</span><strong>{reportes?.usuarios_activos || 0}</strong></div><div><span>{copy.security.inactiveBlocked}</span><strong>{reportes?.usuarios_inactivos || 0}</strong></div></div></div></div>
+          <div className="admin-grid-layout"><div className="admin-card"><p className="panel-kicker">{copy.security.title}</p><h3>{copy.security.controls}</h3><ul className="mini-alerts"><li>{copy.security.passwords}</li><li>{copy.security.inactive}</li><li>{copy.security.audit}</li><li>{copy.security.recovery}</li></ul></div><div className="admin-card"><p className="panel-kicker">{copy.security.state}</p><h3>{copy.security.accounts}</h3><div className="report-list"><div><span>{copy.security.active}</span><strong>{reportes?.usuarios_activos || 0}</strong></div><div><span>{copy.security.inactiveBlocked}</span><strong>{reportes?.usuarios_inactivos || 0}</strong></div><div><span>{copy.security.temporaryLocks}</span><strong>{reportes?.cuentas_bloqueadas || 0}</strong></div><div><span>{copy.security.emailNotifications}</span><strong>{String(configuracion.notificaciones_activas).toLowerCase() === 'true' ? copy.common.active : copy.common.inactive}</strong></div></div></div></div>
         )}
 
         {activeSection === 'maintenance' && (
-          <div className="admin-grid-layout"><div className="admin-card"><p className="panel-kicker">{copy.maintenance.title}</p><h3>{copy.maintenance.services}</h3><div className="report-list"><div><span>{copy.maintenance.database}</span><strong>{copy.maintenance.operational}</strong></div><div><span>{copy.maintenance.api}</span><strong>{copy.maintenance.operational}</strong></div><div><span>{copy.maintenance.log}</span><strong>{copy.maintenance.active}</strong></div></div></div><div className="admin-card"><p className="panel-kicker">{copy.maintenance.backup}</p><h3>{copy.maintenance.procedures}</h3><p>{copy.maintenance.backupNote}</p></div></div>
+          <div className="admin-grid-layout"><div className="admin-card"><p className="panel-kicker">{copy.maintenance.title}</p><h3>{copy.maintenance.services}</h3><div className="report-list"><div><span>{copy.maintenance.api}</span><strong>{apiStatus === 'operational' ? copy.maintenance.operational : apiStatus === 'unavailable' ? copy.maintenance.unavailable : copy.maintenance.checking}</strong></div><div><span>{copy.maintenance.auditEvents}</span><strong>{auditoria.length}</strong></div></div></div><div className="admin-card"><p className="panel-kicker">{copy.maintenance.backup}</p><h3>{copy.maintenance.procedures}</h3><p>{copy.maintenance.backupNote}</p></div></div>
         )}
 
         {activeSection === 'config' && (
@@ -972,8 +1028,9 @@ export default function PanelAdministrador({session, onLogout}) {
                 <h3>{copy.config.title}</h3>
               </div>
             </div>
+            <p className="empty-state">{copy.config.persistenceNote}</p>
             <form className="config-grid" onSubmit={guardarConfiguracion}>
-              {Object.entries(configuracion).map(([key, value]) => <label className="config-item" key={key}>{key.replaceAll('_', ' ')}<input value={value} onChange={(e) => setConfiguracion({...configuracion, [key]: e.target.value})} /></label>)}
+              {Object.entries(configuracion).map(([key, value]) => <label className="config-item" key={key}>{key.replaceAll('_', ' ')}{key === 'notificaciones_activas' ? <select value={String(value).toLowerCase()} onChange={(e) => setConfiguracion({...configuracion, [key]: e.target.value})}><option value="true">{copy.common.active}</option><option value="false">{copy.common.inactive}</option></select> : <input type={key === 'bloqueo_intentos' ? 'number' : 'text'} min={key === 'bloqueo_intentos' ? 1 : undefined} max={key === 'bloqueo_intentos' ? 20 : undefined} value={value} onChange={(e) => setConfiguracion({...configuracion, [key]: e.target.value})} />}</label>)}
               <div className="config-item"><span>&nbsp;</span><button type="submit" className="btn-primary">{copy.config.save}</button></div>
             </form>
           </div>
@@ -982,7 +1039,7 @@ export default function PanelAdministrador({session, onLogout}) {
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-card admin-user-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.modal.users}</p>
@@ -1014,7 +1071,6 @@ export default function PanelAdministrador({session, onLogout}) {
                     onChange={handleFormChange}
                     placeholder={editingUser ? copy.users.passwordHintEdit : copy.users.passwordHintCreate}
                     required={!editingUser}
-                    pattern="(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9]).{8,}"
                   />
                 </label>
                 <label>
@@ -1076,7 +1132,6 @@ export default function PanelAdministrador({session, onLogout}) {
                   onChange={event => setDialogValue(event.target.value)}
                   autoComplete="new-password"
                   minLength="8"
-                  pattern="(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9]).{8,}"
                   required
                   autoFocus
                 />

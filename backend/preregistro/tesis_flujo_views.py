@@ -21,6 +21,16 @@ def _es_coordinacion(user):
     return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
 
 
+def tiene_match_tesis(alumno):
+    match_aprobado = SolicitudDireccionTesis.objects.filter(
+        alumno=alumno, estado='aprobada', director_asignado_id=alumno.director_tesis_id,
+    ).exists()
+    return match_aprobado or (
+        alumno.director_tesis_id
+        and not SolicitudDireccionTesis.objects.filter(alumno=alumno).exists()
+    )
+
+
 def _puede_gestionar_planes(user):
     rol = _rol(user)
     return rol in {
@@ -58,6 +68,8 @@ def _solicitud_data(solicitud):
         'alumno': {'id': solicitud.alumno_id, 'nombre': solicitud.alumno.nombre, 'matricula': solicitud.alumno.matricula, 'programa': solicitud.alumno.programa},
         'director_sugerido': {'id': solicitud.director_sugerido_id, 'nombre': solicitud.director_sugerido.nombre} if solicitud.director_sugerido else None,
         'director_asignado': {'id': solicitud.director_asignado_id, 'nombre': solicitud.director_asignado.nombre} if solicitud.director_asignado else None,
+        'alumno_acepto_director': solicitud.alumno_acepto_director,
+        'director_acepto': solicitud.director_acepto,
         'linea_investigacion': solicitud.linea_investigacion,
         'justificacion': solicitud.justificacion,
         'estado': solicitud.estado,
@@ -69,7 +81,7 @@ def _solicitud_data(solicitud):
 
 
 def evaluar_elegibilidad_tesis(alumno):
-    """Calcula requisitos sin usar una fecha fija: sirve tanto semestres como cuatrimestres."""
+    """Determina el inicio del segundo año según la periodicidad del programa."""
     configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
     if not configuracion:
         return {'elegible': False, 'motivos': ['Coordinación Académica aún no configuró el plan de estudios de tu programa.'], 'configuracion': None}
@@ -78,49 +90,36 @@ def evaluar_elegibilidad_tesis(alumno):
     if not plan:
         return {'elegible': False, 'motivos': ['El plan de estudios aún no contiene materias configuradas.'], 'configuracion': _configuracion_data(configuracion)}
 
-    inscripciones = list(Inscripcion.objects.filter(aspirante=alumno).select_related('materia', 'periodo_inscripcion'))
-    aprobadas = {item.materia_id for item in inscripciones if item.calificacion is not None and item.calificacion >= 7}
-    finalizadas = [item for item in inscripciones if item.calificacion is not None]
-    obligatorias = [item for item in plan if item.obligatoria]
-    if not obligatorias:
-        return {
-            'elegible': False,
-            'motivos': ['Coordinación Académica debe configurar al menos una materia obligatoria en el plan.'],
-            'configuracion': _configuracion_data(configuracion),
-        }
-    materias_por_periodo = Counter(item.periodo_sugerido for item in plan)
-    periodos_incompletos = [
-        periodo for periodo in range(1, configuracion.periodos_requeridos + 1)
-        if materias_por_periodo[periodo] < 4
-    ]
-    pendientes = [item for item in obligatorias if item.materia_id not in aprobadas]
-    creditos_aprobados = sum(item.materia.creditos for item in inscripciones if item.materia_id in aprobadas)
-    periodos_cursados = len({item.periodo_inscripcion_id for item in finalizadas if item.periodo_inscripcion_id})
+    periodos_por_anio = 3 if configuracion.periodicidad == 'cuatrimestral' else 2
+    periodo_inicio_tesis = periodos_por_anio + 1
+    periodo_actual = alumno.numero_periodo_actual
+    etapa = (
+        'formacion'
+        if not periodo_actual or periodo_actual < periodo_inicio_tesis - 1
+        else 'por_iniciar'
+        if periodo_actual == periodo_inicio_tesis - 1
+        else 'iniciada'
+    )
     motivos = []
-    if configuracion.creditos_requeridos <= 0:
-        motivos.append('Coordinación Académica debe configurar un mínimo de créditos para el programa.')
-    if configuracion.periodos_requeridos <= 0:
-        motivos.append('Coordinación Académica debe configurar el mínimo de periodos académicos.')
-    if periodos_incompletos:
-        motivos.append('El plan debe ofrecer al menos 4 materias en cada periodo requerido; faltan periodos por configurar.')
-    if pendientes:
-        motivos.append(f'Faltan {len(pendientes)} materia(s) obligatoria(s) por aprobar.')
-    if configuracion.creditos_requeridos and creditos_aprobados < configuracion.creditos_requeridos:
-        motivos.append(f'Faltan {configuracion.creditos_requeridos - creditos_aprobados} crédito(s) para completar el programa.')
-    if periodos_cursados < configuracion.periodos_requeridos:
-        motivos.append(f'Faltan {configuracion.periodos_requeridos - periodos_cursados} periodo(s) concluido(s) de los {configuracion.periodos_requeridos} requeridos.')
+    if not configuracion.periodos_requeridos:
+        motivos.append('Coordinación Académica debe configurar la duración del plan de estudios.')
+    if not periodo_actual:
+        motivos.append('Coordinación Académica debe asignarte el periodo académico actual.')
+    elif periodo_actual < periodo_inicio_tesis:
+        motivos.append(
+            f'El proyecto de tesis inicia en el segundo año, a partir del periodo {periodo_inicio_tesis}. '
+            f'Tu periodo actual es el {periodo_actual}.'
+        )
     return {
         'elegible': not motivos,
         'motivos': motivos,
         'configuracion': _configuracion_data(configuracion),
         'resumen': {
-            'materias_obligatorias': len(obligatorias),
-            'materias_obligatorias_aprobadas': len(obligatorias) - len(pendientes),
-            'materias_pendientes': [{'clave': item.materia.clave, 'nombre': item.materia.nombre} for item in pendientes],
-            'creditos_aprobados': creditos_aprobados,
-            'creditos_requeridos': configuracion.creditos_requeridos,
-            'periodos_cursados': periodos_cursados,
+            'periodo_actual': periodo_actual,
+            'periodo_inicio_tesis': periodo_inicio_tesis,
+            'periodos_por_anio': periodos_por_anio,
             'periodos_requeridos': configuracion.periodos_requeridos,
+            'etapa': etapa,
         },
     }
 
@@ -164,14 +163,34 @@ class FlujoTesisView(APIView):
             elegibilidad = evaluar_elegibilidad_tesis(request.user)
             if not elegibilidad['elegible']:
                 return Response({'detail': 'Aún no cumples los requisitos para iniciar tesis.', 'elegibilidad': elegibilidad}, status=status.HTTP_400_BAD_REQUEST)
-            if SolicitudDireccionTesis.objects.filter(alumno=request.user, estado='pendiente').exists():
+            if SolicitudDireccionTesis.objects.filter(
+                alumno=request.user,
+                estado__in={'pendiente', 'pendiente_director', 'pendiente_alumno', 'aprobada'},
+            ).exists():
                 return Response({'detail': 'Ya tienes una solicitud de dirección de tesis pendiente.'}, status=status.HTTP_400_BAD_REQUEST)
             director_id = request.data.get('director_sugerido')
             director = Aspirante.objects.filter(pk=director_id, rol__in=['director', 'director de tesis'], is_active=True).first() if director_id else None
             if director_id and not director:
                 return Response({'director_sugerido': 'Selecciona un Director de Tesis activo.'}, status=status.HTTP_400_BAD_REQUEST)
-            solicitud = SolicitudDireccionTesis.objects.create(alumno=request.user, director_sugerido=director, linea_investigacion=str(request.data.get('linea_investigacion') or '')[:180], justificacion=str(request.data.get('justificacion') or ''))
-            _registrar_seguimiento(request.user, 'solicitud_direccion_tesis', 'Tu solicitud de asignación de Director de Tesis fue enviada a Coordinación Académica.', 'Tesis', notificar=False)
+            solicitud = SolicitudDireccionTesis.objects.create(
+                alumno=request.user,
+                director_sugerido=director,
+                director_asignado=director,
+                alumno_acepto_director=bool(director),
+                estado='pendiente_director' if director else 'pendiente',
+                linea_investigacion=str(request.data.get('linea_investigacion') or '')[:180],
+                justificacion=str(request.data.get('justificacion') or ''),
+            )
+            if director:
+                _registrar_seguimiento(
+                    director, 'match_tesis_pendiente',
+                    f'{request.user.nombre} propone un proyecto de tesis para tu revisión.',
+                    'Tesista', notificar=False,
+                )
+                detalle_solicitud = f'Tu propuesta fue enviada a {director.nombre} para confirmar el match.'
+            else:
+                detalle_solicitud = 'Tu solicitud de asignación de Director de Tesis fue enviada a Coordinación Académica.'
+            _registrar_seguimiento(request.user, 'solicitud_direccion_tesis', detalle_solicitud, 'Tesis', notificar=False)
             return Response(_solicitud_data(solicitud), status=status.HTTP_201_CREATED)
         if not _puede_gestionar_planes(request.user):
             return Response({'detail': 'Solo Servicios Escolares puede configurar planes de estudio.'}, status=status.HTTP_403_FORBIDDEN)
@@ -242,8 +261,11 @@ class SolicitudDireccionTesisDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, pk):
-        if not _es_coordinacion(request.user):
-            return Response({'detail': 'Solo Coordinación Académica puede asignar un Director de Tesis.'}, status=status.HTTP_403_FORBIDDEN)
+        rol = _rol(request.user)
+        es_director = rol in {'director', 'director de tesis'}
+        es_alumno = rol == 'alumno'
+        if not (_es_coordinacion(request.user) or es_director or es_alumno):
+            return Response({'detail': 'No tienes permiso para actualizar esta solicitud.'}, status=status.HTTP_403_FORBIDDEN)
         solicitud = SolicitudDireccionTesis.objects.select_related('alumno').filter(pk=pk).first()
         if not solicitud:
             return Response({'detail': 'Solicitud no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
@@ -251,21 +273,100 @@ class SolicitudDireccionTesisDetailView(APIView):
         if estado not in {'aprobada', 'rechazada', 'cancelada'}:
             return Response({'detail': 'Selecciona un dictamen válido.'}, status=status.HTTP_400_BAD_REQUEST)
         director = None
-        if estado == 'aprobada':
+        if estado == 'aprobada' and not (es_director or es_alumno):
             director = Aspirante.objects.filter(pk=request.data.get('director_asignado'), rol__in=['director', 'director de tesis'], is_active=True).first()
             if not director:
                 return Response({'detail': 'Selecciona un Director de Tesis activo.'}, status=status.HTTP_400_BAD_REQUEST)
-        solicitud.estado = estado
-        solicitud.director_asignado = director
-        solicitud.observaciones = str(request.data.get('observaciones') or '')
-        solicitud.revisado_por = request.user
-        solicitud.save()
-        if director:
-            solicitud.alumno.director_tesis = director
-            solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
-            detalle = f'Coordinación Académica asignó a {director.nombre} como tu Director de Tesis.'
-            _registrar_seguimiento(director, 'tesista_asignado', f'Se te asignó como Director de Tesis de {solicitud.alumno.nombre}.', 'Coordinación Académica', notificar=False)
+        if es_director:
+            if solicitud.director_asignado_id != request.user.id:
+                return Response({'detail': 'Esta solicitud no está asignada a tu panel.'}, status=status.HTTP_403_FORBIDDEN)
+            if solicitud.estado != 'pendiente_director' or estado not in {'aprobada', 'rechazada'}:
+                return Response({'detail': 'La solicitud no está pendiente de tu respuesta.'}, status=status.HTTP_409_CONFLICT)
+            solicitud.director_acepto = estado == 'aprobada'
+            solicitud.observaciones = str(request.data.get('observaciones') or '')
+            solicitud.estado = 'aprobada' if solicitud.alumno_acepto_director and solicitud.director_acepto else 'pendiente_alumno' if solicitud.director_acepto else 'rechazada'
+            solicitud.revisado_por = request.user
+            solicitud.save(update_fields=['director_acepto', 'observaciones', 'estado', 'revisado_por', 'updated_at'])
+            if solicitud.estado == 'aprobada':
+                solicitud.alumno.director_tesis = request.user
+                solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+                _registrar_seguimiento(
+                    solicitud.alumno, 'match_tesis', f'{request.user.nombre} aceptó acompañarte en tu proyecto de tesis.',
+                    'Director de Tesis', notificar=False,
+                )
+            else:
+                _registrar_seguimiento(
+                    solicitud.alumno, 'match_tesis', f'{request.user.nombre} respondió a tu propuesta de dirección de tesis.',
+                    'Director de Tesis', notificar=False,
+                )
+            return Response(_solicitud_data(solicitud))
+
+        if es_alumno:
+            if solicitud.alumno_id != request.user.id or solicitud.estado != 'pendiente_alumno':
+                return Response({'detail': 'No tienes una confirmación de dirección pendiente.'}, status=status.HTTP_409_CONFLICT)
+            if estado not in {'aprobada', 'rechazada'}:
+                return Response({'detail': 'Confirma o rechaza al director propuesto.'}, status=status.HTTP_400_BAD_REQUEST)
+            solicitud.alumno_acepto_director = estado == 'aprobada'
+            solicitud.estado = 'aprobada' if solicitud.alumno_acepto_director and solicitud.director_acepto else 'cancelada'
+            solicitud.save(update_fields=['alumno_acepto_director', 'estado', 'updated_at'])
+            if solicitud.estado == 'aprobada':
+                solicitud.alumno.director_tesis = solicitud.director_asignado
+                solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+                _registrar_seguimiento(
+                    solicitud.director_asignado, 'match_tesis',
+                    f'{solicitud.alumno.nombre} confirmó el match para dirigir su proyecto de tesis.',
+                    'Tesista', notificar=False,
+                )
+            _registrar_seguimiento(
+                solicitud.alumno, 'match_tesis',
+                'El match de dirección quedó confirmado.' if solicitud.estado == 'aprobada' else 'Rechazaste la propuesta de dirección.',
+                'Tesis', notificar=False,
+            )
+            return Response(_solicitud_data(solicitud))
+
+        if not _es_coordinacion(request.user):
+            return Response({'detail': 'No tienes permiso para actualizar esta solicitud.'}, status=status.HTTP_403_FORBIDDEN)
+        if estado == 'aprobada':
+            solicitud.director_asignado = director
+            solicitud.alumno_acepto_director = director.id == solicitud.director_sugerido_id
+            solicitud.director_acepto = False
+            solicitud.estado = 'pendiente_director'
+            solicitud.revisado_por = request.user
+            solicitud.observaciones = str(request.data.get('observaciones') or '')
+            solicitud.save(update_fields=[
+                'director_asignado', 'alumno_acepto_director', 'director_acepto', 'estado',
+                'revisado_por', 'observaciones', 'updated_at',
+            ])
+            if solicitud.alumno.director_tesis_id != director.id:
+                solicitud.alumno.director_tesis = None
+                solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+            _registrar_seguimiento(
+                director, 'match_tesis_pendiente',
+                f'{solicitud.alumno.nombre} propone un proyecto de tesis para tu revisión.',
+                'Coordinación Académica', notificar=False,
+            )
+            _registrar_seguimiento(
+                solicitud.alumno, 'match_tesis_pendiente',
+                f'Coordinación propuso a {director.nombre}. El seguimiento iniciará cuando ambos confirmen.',
+                'Coordinación Académica', notificar=False,
+            )
         else:
-            detalle = f'Coordinación Académica actualizó tu solicitud de dirección de tesis a: {solicitud.get_estado_display()}.'
-        _registrar_seguimiento(solicitud.alumno, 'direccion_tesis', detalle, 'Coordinación Académica', notificar=False)
+            if solicitud.director_asignado_id and solicitud.alumno.director_tesis_id == solicitud.director_asignado_id:
+                solicitud.alumno.director_tesis = None
+                solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+            solicitud.estado = estado
+            solicitud.director_asignado = None
+            solicitud.alumno_acepto_director = False
+            solicitud.director_acepto = False
+            solicitud.observaciones = str(request.data.get('observaciones') or '')
+            solicitud.revisado_por = request.user
+            solicitud.save(update_fields=[
+                'estado', 'director_asignado', 'alumno_acepto_director', 'director_acepto',
+                'observaciones', 'revisado_por', 'updated_at',
+            ])
+            _registrar_seguimiento(
+                solicitud.alumno, 'direccion_tesis',
+                f'Coordinación Académica actualizó tu solicitud de dirección de tesis a: {solicitud.get_estado_display()}.',
+                'Coordinación Académica', notificar=False,
+            )
         return Response(_solicitud_data(solicitud))

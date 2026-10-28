@@ -6,9 +6,10 @@ from datetime import timedelta
 from random import choice
 from io import StringIO
 from decimal import Decimal
+from xml.sax.saxutils import escape
 import requests as http
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.core.mail import send_mail
 from django.http import FileResponse
@@ -20,9 +21,10 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, CargaAcademicaMateria, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion, FirmaElectronica
+from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, CargaAcademicaMateria, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, SolicitudDireccionTesis, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion, FirmaElectronica
 from .admin_views import AdminRolePermission
 from .alertas import generar_alertas_automatizadas
+from .configuracion_sistema import email_notifications_enabled, password_meets_policy
 from .serializers import (
     AspiranteRegistroSerializer,
     AspiranteDetalleSerializer,
@@ -187,13 +189,21 @@ class InicioSesionView(TokenObtainPairView):
 
 
 def _enviar_correo_notificacion(aspirante, asunto, mensaje):
+    if not email_notifications_enabled():
+        logger.info('Notificación por correo desactivada; se conserva el aviso interno para %s: %s', aspirante.correo, asunto)
+        return False
     remitente = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or 'no-reply@sinac.local'
     destinatario = [aspirante.correo]
     try:
-        send_mail(asunto, mensaje, remitente, destinatario, fail_silently=True)
+        enviado = send_mail(asunto, mensaje, remitente, destinatario, fail_silently=False)
+        if not enviado:
+            logger.warning('El servidor de correo no confirmó la notificación a %s: %s', aspirante.correo, asunto)
+            return False
         logger.info('Notificación enviada a %s: %s', aspirante.correo, asunto)
+        return True
     except Exception as exc:
         logger.warning('No se pudo enviar email de notificación a %s: %s', aspirante.correo, exc)
+        return False
 
 
 def _registrar_seguimiento(aspirante, estado, detalle, origen, notificar=False, asunto=None):
@@ -373,12 +383,13 @@ class SeguimientoAspiranteView(APIView):
         if request.user.is_staff or getattr(request.user, 'rol', '') not in {'aspirante', 'alumno'}:
             return Response(status=status.HTTP_403_FORBIDDEN)
         aspirante = request.user
-        seguimientos = aspirante.seguimientos.all()
+        seguimientos = aspirante.seguimientos.all()[:50]
         return Response({
             'estado_actual': aspirante.proceso_estado,
             'business_key': aspirante.business_key,
             'camunda_instance_id': aspirante.camunda_instance_id or None,
             'eventos': SeguimientoSolicitudSerializer(seguimientos, many=True).data,
+            'no_leidas': aspirante.seguimientos.filter(leido=False).count(),
         })
 
 
@@ -397,9 +408,32 @@ def _materias_plan_disponibles(alumno, configuracion):
     if not periodo_actual:
         return PlanEstudioMateria.objects.none()
     aprobadas = Inscripcion.objects.filter(aspirante=alumno, calificacion__gte=7).values_list('materia_id', flat=True)
-    return PlanEstudioMateria.objects.filter(configuracion=configuracion).filter(
+    materias = PlanEstudioMateria.objects.filter(configuracion=configuracion).filter(
         Q(periodo_sugerido=periodo_actual) | Q(periodo_sugerido__lt=periodo_actual, obligatoria=True)
-    ).exclude(materia_id__in=aprobadas).select_related('materia').order_by('periodo_sugerido', 'materia__clave')
+    ).exclude(materia_id__in=aprobadas)
+    if not _puede_elegir_seminario(alumno, configuracion):
+        materias = materias.exclude(materia__categoria='seminario')
+    return materias.select_related('materia').order_by('periodo_sugerido', 'materia__clave')
+
+
+def _tiene_match_tesis(alumno):
+    match = SolicitudDireccionTesis.objects.filter(
+        alumno=alumno, estado='aprobada', director_asignado_id=alumno.director_tesis_id,
+    ).exists()
+    return match or (
+        alumno.director_tesis_id
+        and not SolicitudDireccionTesis.objects.filter(alumno=alumno).exists()
+    )
+
+
+def _puede_elegir_seminario(alumno, configuracion):
+    periodos_por_anio = 3 if configuracion.periodicidad == 'cuatrimestral' else 2
+    periodo_inicio_tesis = periodos_por_anio + 1
+    return bool(
+        alumno.numero_periodo_actual
+        and alumno.numero_periodo_actual >= periodo_inicio_tesis
+        and _tiene_match_tesis(alumno)
+    )
 
 
 class MisMateriasDisponiblesView(APIView):
@@ -460,8 +494,7 @@ class PeriodoInscripcionView(APIView):
 
     @staticmethod
     def puede_consultar_todos(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        return PeriodoInscripcionView.puede_gestionar(user) or rol in {'coordinacion', 'coordinador'}
+        return PeriodoInscripcionView.puede_gestionar(user)
 
     @staticmethod
     def serializar(periodo):
@@ -587,6 +620,13 @@ class MisInscripcionesView(APIView):
             if existentes_ids.intersection(materias_ids):
                 return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
 
+            if not _puede_elegir_seminario(request.user, configuracion) and configuracion.materias_plan.filter(
+                materia_id__in=materias_ids, materia__categoria='seminario',
+            ).exists():
+                return Response(
+                    {'detail': 'La materia de Seminario de tesis se habilita cuando tú y tu Director confirmen el match del proyecto.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             plan_ids = set(_materias_plan_disponibles(request.user, configuracion).filter(
                 materia_id__in=materias_ids,
             ).values_list('materia_id', flat=True))
@@ -635,6 +675,245 @@ class MisInscripcionesView(APIView):
         for materia in materias:
             _registrar_seguimiento(request.user, 'pendiente', f'Solicitud de inscripción recibida para {materia.clave} - {materia.nombre}.', 'Alumno', notificar=True, asunto='Solicitud de inscripción recibida')
         return Response(InscripcionSerializer(inscripciones, many=True).data, status=status.HTTP_201_CREATED)
+
+
+class InscripcionCoordinacionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    total_materias_periodo = 4
+
+    @staticmethod
+    def puede_gestionar(user):
+        rol = str(getattr(user, 'rol', '')).strip().lower()
+        if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+            return False
+        return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+
+    @staticmethod
+    def alumno(pk):
+        return Aspirante.objects.filter(pk=pk, rol='alumno', is_staff=False).first()
+
+    def get(self, request, pk):
+        if not self.puede_gestionar(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        alumno = self.alumno(pk)
+        if not alumno:
+            return Response({'detail': 'No se encontró el alumno.'}, status=status.HTTP_404_NOT_FOUND)
+
+        periodo = _periodo_inscripcion_vigente()
+        inscripciones = Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo) if periodo else Inscripcion.objects.none()
+        registradas = inscripciones.count()
+        faltantes = max(0, self.total_materias_periodo - registradas)
+        materias = []
+        configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
+        if periodo and configuracion and alumno.numero_periodo_actual and faltantes:
+            ya_inscritas = set(inscripciones.values_list('materia_id', flat=True))
+            plan_ids = set(_materias_plan_disponibles(alumno, configuracion).values_list('materia_id', flat=True)) - ya_inscritas
+            detalles = CargaAcademicaMateria.objects.filter(
+                carga__estado='publicada',
+                carga__periodo_inscripcion=periodo,
+                materia_id__in=plan_ids,
+            ).select_related('materia').order_by('materia__clave')
+            inscritos = dict(
+                Inscripcion.objects.filter(
+                    periodo_inscripcion=periodo,
+                    materia_id__in=[detalle.materia_id for detalle in detalles],
+                ).values('materia_id').annotate(total=Count('id')).values_list('materia_id', 'total')
+            )
+            materias = [{
+                'id': detalle.materia_id,
+                'clave': detalle.materia.clave,
+                'nombre': detalle.materia.nombre,
+                'creditos': detalle.materia.creditos,
+                'horario': detalle.horario,
+                'capacidad': detalle.capacidad,
+                'inscritos': inscritos.get(detalle.materia_id, 0),
+            } for detalle in detalles]
+
+        return Response({
+            'alumno': {'id': alumno.id, 'nombre': alumno.nombre, 'matricula': alumno.matricula, 'programa': alumno.programa},
+            'periodo': PeriodoInscripcionView.serializar(periodo) if periodo else None,
+            'registradas': registradas,
+            'faltantes': faltantes,
+            'validacion_servicios': list(inscripciones.values_list('validacion_servicios', flat=True)),
+            'materias': materias,
+        })
+
+    def post(self, request, pk):
+        if not self.puede_gestionar(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        alumno = self.alumno(pk)
+        if not alumno:
+            return Response({'detail': 'No se encontró el alumno.'}, status=status.HTTP_404_NOT_FOUND)
+        periodo = _periodo_inscripcion_vigente()
+        if not periodo:
+            return Response({'detail': 'No hay un periodo de inscripción abierto. Servicios Escolares debe habilitarlo.'}, status=status.HTTP_409_CONFLICT)
+        if not alumno.numero_periodo_actual:
+            return Response({'detail': 'Asigna primero el semestre o cuatrimestre actual del alumno.'}, status=status.HTTP_409_CONFLICT)
+        configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
+        if not configuracion:
+            return Response({'detail': 'El programa del alumno no tiene un plan de estudios activo.'}, status=status.HTTP_409_CONFLICT)
+
+        materias_ids = request.data.get('materias')
+        if not isinstance(materias_ids, list) or not materias_ids or not all(str(item).isdigit() for item in materias_ids):
+            return Response({'materias': 'Selecciona las materias pendientes del alumno.'}, status=status.HTTP_400_BAD_REQUEST)
+        materias_ids = [int(item) for item in materias_ids]
+        if len(set(materias_ids)) != len(materias_ids):
+            return Response({'materias': 'No repitas materias en la selección.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                periodo = PeriodoInscripcion.objects.select_for_update().filter(
+                    pk=periodo.pk,
+                    activo=True,
+                    apertura__lte=timezone.now(),
+                    cierre__gte=timezone.now(),
+                ).first()
+                if not periodo:
+                    return Response({'detail': 'El periodo de inscripción se cerró. No se registraron cambios.'}, status=status.HTTP_409_CONFLICT)
+
+                existentes = Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo)
+                registradas = existentes.count()
+                faltantes = self.total_materias_periodo - registradas
+                if faltantes <= 0:
+                    return Response({'detail': 'El alumno ya completó las cuatro materias de este periodo.'}, status=status.HTTP_409_CONFLICT)
+                if len(materias_ids) != faltantes:
+                    return Response(
+                        {'detail': f'Selecciona exactamente las {faltantes} materias que faltan para completar las cuatro del periodo.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                ya_inscritas = set(existentes.values_list('materia_id', flat=True))
+                if ya_inscritas.intersection(materias_ids):
+                    return Response({'detail': 'El alumno ya tiene una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                plan_ids = set(_materias_plan_disponibles(alumno, configuracion).filter(
+                    materia_id__in=materias_ids,
+                ).values_list('materia_id', flat=True))
+                if plan_ids != set(materias_ids):
+                    return Response({'detail': 'Solo puedes inscribir materias del plan correspondiente al periodo académico actual.'}, status=status.HTTP_400_BAD_REQUEST)
+                detalles = list(
+                    CargaAcademicaMateria.objects.select_for_update()
+                    .filter(carga__estado='publicada', carga__periodo_inscripcion=periodo, materia_id__in=materias_ids)
+                    .select_related('materia')
+                    .order_by('materia__clave')
+                )
+                detalles_por_materia = {detalle.materia_id: detalle for detalle in detalles}
+                if set(detalles_por_materia) != set(materias_ids):
+                    return Response({'materias': 'Una o más materias no pertenecen a una carga publicada para el periodo vigente.'}, status=status.HTTP_400_BAD_REQUEST)
+                llenas = [
+                    detalle.materia.clave for detalle in detalles
+                    if Inscripcion.objects.filter(materia_id=detalle.materia_id, periodo_inscripcion=periodo).count() >= detalle.capacidad
+                ]
+                if llenas:
+                    return Response({'detail': f'No hay cupo en: {", ".join(llenas)}.'}, status=status.HTTP_409_CONFLICT)
+
+                materias = [detalles_por_materia[materia_id].materia for materia_id in materias_ids]
+                inscripciones = [
+                    Inscripcion(
+                        aspirante=alumno,
+                        materia=materia,
+                        periodo_inscripcion=periodo,
+                        horario=detalles_por_materia[materia.id].horario,
+                        validacion_servicios='pendiente',
+                        registrada_por=request.user,
+                    )
+                    for materia in materias
+                ]
+                Inscripcion.objects.bulk_create(inscripciones)
+        except IntegrityError:
+            return Response({'detail': 'Una o más materias ya fueron registradas para el alumno en este periodo.'}, status=status.HTTP_409_CONFLICT)
+
+        for materia in materias:
+            _registrar_seguimiento(
+                alumno,
+                'inscripcion_regular_pendiente',
+                f'Coordinación Académica registró {materia.clave} - {materia.nombre} para {periodo.nombre}. La inscripción está pendiente de validación de Servicios Escolares.',
+                'Coordinación Académica',
+                notificar=True,
+                asunto='Inscripción regular registrada',
+            )
+        return Response({
+            'periodo': periodo.nombre,
+            'registradas': InscripcionSerializer(inscripciones, many=True).data,
+            'validacion_servicios': 'pendiente',
+        }, status=status.HTTP_201_CREATED)
+
+
+class BoletaInscripcionCoordinacionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def puede_gestionar(user):
+        rol = str(getattr(user, 'rol', '')).strip().lower()
+        return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'}) and rol not in {
+            'servicios', 'servicios_escolares', 'servicios escolares',
+        }
+
+    def get(self, request, pk):
+        if not self.puede_gestionar(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        alumno = Aspirante.objects.filter(pk=pk, rol='alumno', is_staff=False).first()
+        if not alumno:
+            return Response({'detail': 'No se encontró el alumno.'}, status=status.HTTP_404_NOT_FOUND)
+        periodo_id = request.query_params.get('periodo')
+        try:
+            periodo = PeriodoInscripcion.objects.get(pk=periodo_id)
+        except (PeriodoInscripcion.DoesNotExist, TypeError, ValueError):
+            return Response({'detail': 'Selecciona un periodo válido para descargar la boleta.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        inscripciones = list(
+            Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo)
+            .select_related('materia')
+            .order_by('materia__clave')
+        )
+        if not inscripciones:
+            return Response({'detail': 'No hay inscripciones registradas para este periodo.'}, status=status.HTTP_404_NOT_FOUND)
+        if any(item.validacion_servicios != 'validada' for item in inscripciones):
+            return Response({'detail': 'La boleta estará disponible cuando Servicios Escolares valide todas las materias del periodo.'}, status=status.HTTP_409_CONFLICT)
+
+        folio = f'INS-{periodo.apertura.year}-{alumno.pk:06d}-{periodo.pk:04d}'
+        buffer = BytesIO()
+        document = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=.65 * inch, leftMargin=.65 * inch, topMargin=.65 * inch, bottomMargin=.65 * inch)
+        styles = getSampleStyleSheet()
+        title = ParagraphStyle('BoletaCoordTitle', parent=styles['Title'], alignment=1, textColor=colors.HexColor('#00695c'), fontSize=14)
+        cell = lambda value: Paragraph(escape(str(value or '—')), ParagraphStyle('BoletaCoordCell', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK'))
+        story = [
+            Paragraph('CENTRO DE INVESTIGACIÓN Y DE ESTUDIOS AVANZADOS', title),
+            Paragraph('BOLETA DE INSCRIPCIÓN REGULAR', ParagraphStyle('BoletaCoordSubtitle', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'))),
+            Spacer(1, 12),
+            Paragraph(
+                f'<b>Folio:</b> {escape(folio)}<br/><b>Alumno:</b> {escape(alumno.nombre or "—")}<br/>'
+                f'<b>Matrícula:</b> {escape(alumno.matricula or alumno.usuario or "—")}<br/>'
+                f'<b>Programa:</b> {escape(alumno.programa or "—")}<br/>'
+                f'<b>Periodo escolar:</b> {escape(periodo.nombre)}',
+                styles['BodyText'],
+            ),
+            Spacer(1, 18),
+        ]
+        rows = [[cell('Clave'), cell('Materia'), cell('Horario'), cell('Validación')]]
+        rows.extend([
+            [cell(item.materia.clave), cell(item.materia.nombre), cell(item.horario or item.materia.horario), cell(item.get_validacion_servicios_display())]
+            for item in inscripciones
+        ])
+        table = Table(rows, colWidths=[1.0 * inch, 3.0 * inch, 1.8 * inch, 1.0 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00695c')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#b8c7d1')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f1f5f9')]),
+            ('PADDING', (0, 0), (-1, -1), 7),
+        ]))
+        story.extend([
+            table,
+            Spacer(1, 34),
+            Table([
+                ['________________________________', '________________________________'],
+                ['Coordinación Académica', 'Servicios Escolares'],
+            ], colWidths=[3.5 * inch, 3.5 * inch]),
+        ])
+        document.build(story)
+        buffer.seek(0)
+        return FileResponse(buffer, as_attachment=True, filename=f'{folio}_boleta_inscripcion_regular.pdf', content_type='application/pdf')
 
 
 class InscripcionExtemporaneaView(APIView):
@@ -686,6 +965,12 @@ class InscripcionExtemporaneaView(APIView):
             'periodos': [PeriodoInscripcionView.serializar(periodo) for periodo in periodos],
             'periodo_seleccionado': int(periodo_id) if periodo_id and str(periodo_id).isdigit() else None,
             'materias': materias,
+            'solicitudes': [{
+                'id': solicitud.id,
+                'folio': f'EXT-{solicitud.created_at.year}-{solicitud.id:06d}',
+                'periodo': solicitud.periodo_inscripcion.nombre,
+                'estado': solicitud.estado,
+            } for solicitud in SolicitudInscripcionExtemporanea.objects.filter(alumno=alumno).select_related('periodo_inscripcion').order_by('-created_at')],
             'motivo_requerido': True,
         })
 
@@ -739,53 +1024,131 @@ class InscripcionExtemporaneaView(APIView):
             ]
             if llenas:
                 return Response({'detail': f'No hay cupo en: {", ".join(materia.clave for materia in llenas)}.'}, status=status.HTTP_409_CONFLICT)
-            inscripciones = [
-                Inscripcion(
-                    aspirante=alumno,
-                    materia=detalle.materia,
-                    periodo_inscripcion=periodo,
-                    horario=detalle.horario,
-                    extemporanea=True,
-                    motivo_extemporanea=motivo,
-                    registrada_por=request.user,
+            if SolicitudInscripcionExtemporanea.objects.filter(
+                alumno=alumno, periodo_inscripcion=periodo, estado='pendiente',
+            ).exists():
+                return Response(
+                    {'detail': 'El alumno ya tiene una solicitud extemporánea pendiente para este periodo.'},
+                    status=status.HTTP_409_CONFLICT,
                 )
-                for detalle in detalles
-            ]
-            Inscripcion.objects.bulk_create(inscripciones)
-        for inscripcion in inscripciones:
-            _registrar_seguimiento(
-                alumno,
-                'inscripcion_extemporanea',
-                f'Inscripción extemporánea registrada para {inscripcion.materia.clave}. Motivo: {motivo}',
-                'Coordinación Académica',
+            solicitud = SolicitudInscripcionExtemporanea.objects.create(
+                alumno=alumno,
+                periodo_inscripcion=periodo,
+                solicitante=request.user,
+                motivo=motivo,
             )
-        return Response(InscripcionSerializer(inscripciones, many=True).data, status=status.HTTP_201_CREATED)
+            SolicitudInscripcionExtemporaneaMateria.objects.bulk_create([
+                SolicitudInscripcionExtemporaneaMateria(solicitud=solicitud, carga_materia=detalle)
+                for detalle in detalles
+            ])
+        _registrar_seguimiento(
+            alumno,
+            'inscripcion_extemporanea_pendiente',
+            f'La solicitud de inscripción extemporánea para {periodo.nombre} fue enviada a Servicios Escolares para revisión.',
+            'Coordinación Académica',
+            notificar=True,
+            asunto='Solicitud de inscripción extemporánea recibida',
+        )
+        return Response({
+            'id': solicitud.id,
+            'estado': solicitud.estado,
+            'alumno': {'id': alumno.id, 'nombre': alumno.nombre},
+            'periodo': periodo.nombre,
+            'motivo': solicitud.motivo,
+            'materias': [{'id': detalle.materia_id, 'clave': detalle.materia.clave, 'nombre': detalle.materia.nombre} for detalle in detalles],
+            'created_at': solicitud.created_at,
+        }, status=status.HTTP_201_CREATED)
 
 
 class SolicitudAcademicaView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @staticmethod
+    def tipos_asignados(user):
+        rol = str(getattr(user, 'rol', '')).strip().lower()
+        if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+            return {'historial', 'reinscripcion'}
+        if rol in {'coordinacion', 'coordinador'}:
+            return {'ajuste_materias'}
+        return set()
+
     def get(self, request):
         if request.user.is_staff:
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        solicitudes = request.user.solicitudes_academicas.all()
+            tipos = self.tipos_asignados(request.user)
+            if not tipos:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            solicitudes = SolicitudAcademica.objects.filter(tipo__in=tipos).select_related(
+                'aspirante', 'resuelta_por',
+            )
+        else:
+            solicitudes = request.user.solicitudes_academicas.select_related('aspirante', 'resuelta_por').all()
         return Response(SolicitudAcademicaSerializer(solicitudes, many=True).data)
 
     def post(self, request):
-        if request.user.is_staff:
+        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
             return Response(status=status.HTTP_403_FORBIDDEN)
         tipo = request.data.get('tipo')
         comentario = (request.data.get('comentario') or '').strip()
         if tipo not in dict(SolicitudAcademica.TIPOS).keys():
             return Response({'tipo': 'Selecciona un tipo de solicitud válido.'}, status=status.HTTP_400_BAD_REQUEST)
-        solicitud = SolicitudAcademica.objects.create(
-            aspirante=request.user,
-            tipo=tipo,
-            comentario=comentario,
-        )
+        if len(comentario) < 10:
+            return Response({'comentario': 'Describe el motivo de la solicitud (mínimo 10 caracteres).'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(comentario) > 2000:
+            return Response({'comentario': 'El motivo no puede superar los 2000 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                Aspirante.objects.select_for_update().get(pk=request.user.pk)
+                if SolicitudAcademica.objects.filter(aspirante=request.user, tipo=tipo, estado='pendiente').exists():
+                    return Response({'detail': 'Ya tienes una solicitud de este tipo pendiente de resolución.'}, status=status.HTTP_409_CONFLICT)
+                solicitud = SolicitudAcademica.objects.create(
+                    aspirante=request.user,
+                    tipo=tipo,
+                    comentario=comentario,
+                )
+        except IntegrityError:
+            return Response({'detail': 'Ya tienes una solicitud de este tipo pendiente de resolución.'}, status=status.HTTP_409_CONFLICT)
         detalle = f'Solicitud de {solicitud.get_tipo_display()} recibida.'
         _registrar_seguimiento(request.user, 'pendiente', detalle, 'Aspirante', notificar=True, asunto='Nueva solicitud académica')
         return Response(SolicitudAcademicaSerializer(solicitud).data, status=status.HTTP_201_CREATED)
+
+    def patch(self, request, pk=None):
+        tipos = self.tipos_asignados(request.user)
+        if not request.user.is_staff or not tipos:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        try:
+            solicitud = SolicitudAcademica.objects.select_related('aspirante').get(pk=pk, tipo__in=tipos)
+        except SolicitudAcademica.DoesNotExist:
+            return Response({'detail': 'No se encontró una solicitud que puedas resolver.'}, status=status.HTTP_404_NOT_FOUND)
+        if solicitud.estado != 'pendiente':
+            return Response({'detail': 'Esta solicitud ya fue resuelta.'}, status=status.HTTP_409_CONFLICT)
+
+        estado = request.data.get('estado')
+        respuesta = (request.data.get('respuesta_revision') or '').strip()
+        if estado not in {'aceptado', 'rechazado'}:
+            return Response({'estado': 'Selecciona aceptar o rechazar la solicitud.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(respuesta) < 5:
+            return Response({'respuesta_revision': 'Escribe una respuesta de al menos 5 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(respuesta) > 2000:
+            return Response({'respuesta_revision': 'La respuesta no puede superar los 2000 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        solicitud.estado = estado
+        solicitud.respuesta_revision = respuesta
+        solicitud.resuelta_por = request.user
+        solicitud.save(update_fields=['estado', 'respuesta_revision', 'resuelta_por', 'updated_at'])
+        etiqueta_area = 'Servicios Escolares' if solicitud.tipo in {'historial', 'reinscripcion'} else 'Coordinación Académica'
+        detalle = (
+            f'Tu solicitud de {solicitud.get_tipo_display()} fue '
+            f'{solicitud.get_estado_display().lower()}. Consulta la respuesta en Solicitudes académicas.'
+        )
+        _registrar_seguimiento(
+            solicitud.aspirante,
+            estado,
+            detalle,
+            etiqueta_area,
+            notificar=True,
+            asunto='Respuesta a solicitud académica',
+        )
+        return Response(SolicitudAcademicaSerializer(solicitud).data)
 
 
 class MisEntrevistasView(APIView):
@@ -913,6 +1276,26 @@ class HorarioFormalDescargaView(APIView):
 
     def get(self, request):
         if request.user.is_staff: return Response(status=status.HTTP_403_FORBIDDEN)
+        inscripciones = request.user.inscripciones.select_related('materia', 'periodo_inscripcion')
+        periodo_id = request.query_params.get('periodo')
+        if periodo_id:
+            try:
+                periodo = PeriodoInscripcion.objects.get(pk=periodo_id)
+            except (PeriodoInscripcion.DoesNotExist, TypeError, ValueError):
+                return Response({'detail': 'Selecciona un periodo válido para descargar el horario.'}, status=status.HTTP_400_BAD_REQUEST)
+            inscripciones = inscripciones.filter(periodo_inscripcion=periodo)
+        else:
+            periodo = _periodo_inscripcion_vigente()
+            if not periodo:
+                periodo = request.user.inscripciones.filter(
+                    periodo_inscripcion__isnull=False,
+                ).select_related('periodo_inscripcion').order_by('-periodo_inscripcion__apertura').values_list(
+                    'periodo_inscripcion', flat=True,
+                ).first()
+                periodo = PeriodoInscripcion.objects.filter(pk=periodo).first() if periodo else None
+            if periodo:
+                inscripciones = inscripciones.filter(periodo_inscripcion=periodo)
+        inscripciones = inscripciones.order_by('materia__clave')
         datos_academicos = _datos_academicos_boleta(request.user)
         bio = BytesIO(); doc = SimpleDocTemplate(bio, pagesize=landscape(letter), rightMargin=.45*inch, leftMargin=.45*inch, topMargin=.4*inch, bottomMargin=.5*inch)
         styles = getSampleStyleSheet(); title = ParagraphStyle('HorarioFormalTitle', parent=styles['Title'], alignment=1, fontSize=13, leading=16, textColor=colors.HexColor('#00695c'))
@@ -924,16 +1307,23 @@ class HorarioFormalDescargaView(APIView):
         datos = Table([
             [Paragraph(f'<b>Alumno:</b> {request.user.nombre or "—"}', styles['BodyText']), Paragraph(f'<b>Matrícula:</b> {request.user.matricula or request.user.usuario or "—"}', styles['BodyText'])],
             [Paragraph(f'<b>Programa:</b> {request.user.programa or "—"}', styles['BodyText']), Paragraph(f'<b>Unidad:</b> {request.user.unidad or "—"}', styles['BodyText'])],
-            [Paragraph(f'<b>Ciclo escolar:</b> {datos_academicos["periodo_escolar"]}', styles['BodyText']), Paragraph(f'<b>{datos_academicos["etiqueta_ciclo"]}:</b> {datos_academicos["numero_ciclo"]}', styles['BodyText'])],
+            [Paragraph(f'<b>Ciclo escolar:</b> {escape(periodo.nombre) if periodo else escape(datos_academicos["periodo_escolar"])}', styles['BodyText']), Paragraph(f'<b>{datos_academicos["etiqueta_ciclo"]}:</b> {datos_academicos["numero_ciclo"]}', styles['BodyText'])],
         ], colWidths=[4.5*inch, 3.2*inch]); datos.setStyle(TableStyle([('BOX',(0,0),(-1,-1),.6,colors.HexColor('#00695c')),('INNERGRID',(0,0),(-1,-1),.3,colors.HexColor('#b8c7d1')),('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#f1f8f7')),('PADDING',(0,0),(-1,-1),8)]))
         story = [header, Spacer(1,12), datos, Spacer(1,16)]
         cell = lambda value: Paragraph(str(value), ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK'))
-        rows = [[cell('Clave del curso'),cell('Materia'),cell('Profesor'),cell('Horario'),cell('Salón / lugar'),cell('Estado')]]
-        for ins in request.user.inscripciones.select_related('materia').all(): rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.materia.profesor or 'Por asignar'),cell(ins.horario or ins.materia.horario or 'Por asignar'),cell(ins.materia.get_salon_display() or 'Por asignar'),cell(ins.get_estado_display())])
+        rows = [[cell('Clave del curso'),cell('Materia'),cell('Profesor'),cell('Horario'),cell('Salón / lugar'),cell('Estado'),cell('Validación')]]
+        for ins in inscripciones: rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.materia.profesor or 'Por asignar'),cell(ins.horario or ins.materia.horario or 'Por asignar'),cell(ins.materia.get_salon_display() or 'Por asignar'),cell(ins.get_estado_display()),cell(ins.get_validacion_servicios_display())])
         if len(rows) > 1:
-            table = Table(rows, colWidths=[1.0*inch,2.55*inch,1.7*inch,2.15*inch,1.45*inch,1.2*inch], repeatRows=1)
+            table = Table(rows, colWidths=[.8*inch,2.1*inch,1.45*inch,1.8*inch,1.25*inch,.85*inch,.9*inch], repeatRows=1)
             table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),('FONTSIZE',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f1f5f9')]),('PADDING',(0,0),(-1,-1),6)])); story.append(table)
         else: story.append(Paragraph('No hay materias inscritas para este periodo escolar.', styles['BodyText']))
+        story.extend([
+            Spacer(1, 28),
+            Table([
+                ['________________________________', ''],
+                ['Firma de Servicios Escolares', 'Espacio para sello de Servicios Escolares'],
+            ], colWidths=[3.7*inch,3.2*inch], rowHeights=[.32*inch,.35*inch]),
+        ])
         def pie_pagina(canvas, documento):
             canvas.saveState()
             canvas.setStrokeColor(colors.HexColor('#00695c')); canvas.setLineWidth(.6)
@@ -1399,9 +1789,9 @@ class PanelAdministradorView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if len(password) < 8:
+        if not password_meets_policy(password):
             return Response(
-                {'error': 'La contraseña debe tener al menos 8 caracteres.'},
+                {'error': 'La contraseña no cumple la política configurada.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1492,12 +1882,14 @@ class PanelAdministradorView(APIView):
         if 'password' in request.data:
             password = str(request.data['password']).strip()
             if password:
-                if len(password) < 8:
+                if not password_meets_policy(password):
                     return Response(
-                        {'error': 'La contraseña debe tener al menos 8 caracteres.'},
+                        {'error': 'La contraseña no cumple la política configurada.'},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 aspirante.set_password(password)
+                aspirante.login_failed_attempts = 0
+                aspirante.login_locked_until = None
         if 'status' in request.data:
             status_value = self._normalizar_estado(request.data['status'])
             if status_value is not None:
@@ -1596,7 +1988,7 @@ class EstadoAspiranteCoordinacionView(APIView):
             detalle = 'La solicitud fue marcada en revisión por la Coordinación Académica.'
             asunto = 'Tu solicitud está en revisión'
         elif estado == 'aceptado':
-            detalle = 'La solicitud fue aceptada por la Coordinación Académica.'
+            detalle = 'La solicitud fue aceptada por la Coordinación Académica. Para dar seguimiento a tu inscripción y completar tu alta como alumno, ponte en contacto con Coordinación Académica. Solo Coordinación puede realizar tu alta.'
             asunto = 'Tu solicitud ha sido aceptada'
         else:
             detalle = 'La solicitud fue rechazada. Consulta con la Coordinación Académica para más detalles.'
@@ -1607,6 +1999,146 @@ class EstadoAspiranteCoordinacionView(APIView):
         if expediente:
             respuesta['expediente_digital'] = {'id': expediente.id, 'folio': expediente.folio, 'estado': expediente.estado, 'fecha_creacion': expediente.fecha_creacion}
         return Response(respuesta)
+
+
+class NotificacionMasivaCoordinacionView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    grupos_estado = {
+        'por-revisar': ['pendiente', 'iniciado'],
+        'revision': ['revision'],
+        'aceptado': ['aceptado'],
+        'rechazado': ['rechazado'],
+        'todos': None,
+    }
+    etiquetas_estado = {
+        'pendiente': 'Pendiente',
+        'iniciado': 'Iniciado',
+        'revision': 'En revisión',
+        'aceptado': 'Aceptado',
+        'rechazado': 'Rechazado',
+    }
+    fechas_aviso = (
+        ('fecha_examen_admision', 'Examen de admisión'),
+        ('fecha_entrevista', 'Entrevista'),
+        ('fecha_inicio_curso_propedeutico', 'Inicio del curso propedéutico'),
+    )
+
+    def post(self, request):
+        grupo = request.data.get('grupo')
+        if not isinstance(grupo, str) or grupo not in self.grupos_estado:
+            return Response({'grupo': 'Selecciona un grupo de estatus válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        mensaje_personalizado = request.data.get('mensaje', '')
+        if not isinstance(mensaje_personalizado, str) or len(mensaje_personalizado) > 1000:
+            return Response({'mensaje': 'El mensaje debe tener como máximo 1000 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        incluir_fechas = request.data.get('incluir_fechas', True)
+        if not isinstance(incluir_fechas, bool):
+            return Response({'incluir_fechas': 'Indica verdadero o falso.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ids = request.data.get('ids')
+        if ids is not None and (
+            not isinstance(ids, list)
+            or any(not isinstance(pk, int) or isinstance(pk, bool) for pk in ids)
+            or len(ids) != len(set(ids))
+        ):
+            return Response({'ids': 'La selección de aspirantes no es válida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = Aspirante.objects.filter(rol='aspirante', is_staff=False)
+        estados = self.grupos_estado[grupo]
+        if estados is not None:
+            queryset = queryset.filter(proceso_estado__in=estados)
+        if ids is not None:
+            encontrados = set(queryset.filter(pk__in=ids).values_list('pk', flat=True))
+            if encontrados != set(ids):
+                return Response(
+                    {'ids': 'Uno o más aspirantes ya no pertenecen al grupo seleccionado.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            queryset = queryset.filter(pk__in=ids)
+
+        aspirantes = list(queryset.order_by('pk'))
+        if not aspirantes:
+            return Response({'detail': 'No hay aspirantes para notificar en este grupo.'}, status=status.HTTP_409_CONFLICT)
+
+        fallidos = []
+        sin_correo = []
+        correos_desactivados = 0
+        avisos_internos = 0
+        notificaciones_email_activas = email_notifications_enabled()
+        enviados = 0
+        for aspirante in aspirantes:
+            if not aspirante.correo:
+                sin_correo.append({'id': aspirante.pk, 'nombre': aspirante.nombre})
+                continue
+
+            estado = self.etiquetas_estado.get(aspirante.proceso_estado, aspirante.proceso_estado)
+            asunto = f'Actualización de tu solicitud: {estado}'
+            partes = [
+                f'Hola {aspirante.nombre},',
+                '',
+                f'Te informamos que el estatus actual de tu solicitud es: {estado}.',
+            ]
+            if mensaje_personalizado.strip():
+                partes.extend(['', mensaje_personalizado.strip()])
+            if incluir_fechas:
+                fechas = [
+                    (etiqueta, getattr(aspirante, campo))
+                    for campo, etiqueta in self.fechas_aviso
+                    if getattr(aspirante, campo)
+                ]
+                if fechas:
+                    partes.extend(['', 'Fechas registradas en tu expediente:'])
+                    partes.extend(
+                        f'{etiqueta}: {timezone.localtime(valor).strftime("%d/%m/%Y %H:%M")}'
+                        for etiqueta, valor in fechas
+                    )
+            partes.extend(['', 'Coordinación Académica'])
+            contenido = '\n'.join(partes)
+
+            if notificaciones_email_activas:
+                try:
+                    resultado = send_mail(
+                        asunto,
+                        contenido,
+                        getattr(settings, 'DEFAULT_FROM_EMAIL', None) or 'no-reply@sinac.local',
+                        [aspirante.correo],
+                        fail_silently=False,
+                    )
+                    if not resultado:
+                        raise RuntimeError('El servidor de correo no confirmó el envío.')
+                except Exception:
+                    logger.warning(
+                        'Falló el envío masivo de Coordinación al aspirante id=%s correo=%s',
+                        aspirante.pk,
+                        aspirante.correo,
+                        exc_info=True,
+                    )
+                    fallidos.append({'id': aspirante.pk, 'nombre': aspirante.nombre})
+                    continue
+            else:
+                correos_desactivados += 1
+
+            SeguimientoSolicitud.objects.create(
+                aspirante=aspirante,
+                estado=aspirante.proceso_estado,
+                detalle=f'Notificación de Coordinación Académica { "enviada" if notificaciones_email_activas else "registrada; correo desactivado"}: {estado}.'[:255],
+                origen='Coordinación Académica',
+            )
+            avisos_internos += 1
+            if notificaciones_email_activas:
+                enviados += 1
+
+        return Response({
+            'total': len(aspirantes),
+            'enviados': enviados,
+            'avisos_internos': avisos_internos,
+            'fallidos': fallidos,
+            'sin_correo': sin_correo,
+            'omitidos': len(sin_correo),
+            'correos_desactivados': correos_desactivados,
+        })
 
 
 class DocumentoRevisionCoordinacionView(APIView):
@@ -1654,7 +2186,14 @@ class AspiranteCoordinacionDetailView(APIView):
         expediente = _crear_expediente_si_aceptado(aspirante)
 
         if 'proceso_estado' in cambios:
-            _registrar_seguimiento(aspirante, aspirante.proceso_estado, f'Estado actualizado a {aspirante.proceso_estado}.', 'Coordinación Académica', notificar=True, asunto='Actualización de tu solicitud')
+            detalle_estado = (
+                'Tu solicitud fue aceptada. Para dar seguimiento a tu inscripción y completar tu alta como alumno, '
+                'ponte en contacto con Coordinación Académica. Solo Coordinación puede realizar tu alta.'
+                if aspirante.proceso_estado == 'aceptado'
+                else f'Estado actualizado a {aspirante.proceso_estado}.'
+            )
+            asunto_estado = 'Tu solicitud ha sido aceptada' if aspirante.proceso_estado == 'aceptado' else 'Actualización de tu solicitud'
+            _registrar_seguimiento(aspirante, aspirante.proceso_estado, detalle_estado, 'Coordinación Académica', notificar=True, asunto=asunto_estado)
         avisos = {
             'fecha_examen_admision': ('Fecha y hora del examen de admisión', 'Fecha de examen de admisión programada'),
             'fecha_entrevista': ('Fecha y hora de entrevista', 'Entrevista programada'),
@@ -1676,17 +2215,27 @@ class AspiranteCoordinacionDetailView(APIView):
 
 
 class MateriasListView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        rol = str(getattr(request.user, 'rol', '')).strip().lower()
+        puede_consultar = request.user.is_staff or request.user.is_superuser or rol in {
+            'admin', 'administrador', 'coordinacion', 'coordinador',
+            'servicios', 'servicios_escolares', 'servicios escolares',
+        }
+        if not puede_consultar:
+            return Response(status=status.HTTP_403_FORBIDDEN)
         materias = Materia.objects.all().order_by('clave')
         return Response([MateriaSerializer(m).data for m in materias])
 
 
 class CursosUploadView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        rol = str(getattr(request.user, 'rol', '')).strip().lower()
+        if rol not in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+            return Response({'detail': 'Solo Servicios Escolares puede cargar el catálogo de materias.'}, status=status.HTTP_403_FORBIDDEN)
         archivo = request.FILES.get('file')
         if not archivo:
             return Response({'file': 'Selecciona un archivo CSV.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1722,12 +2271,19 @@ class CargaAcademicaWorkflowView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def _puede_preparar(self, user):
-        return user.is_staff or str(getattr(user, 'rol', '')).strip().lower() in ('docente', 'teacher', 'coordinacion', 'coordinador')
+        role = str(getattr(user, 'rol', '')).strip().lower()
+        return user.is_staff or user.is_superuser or role in (
+            'admin', 'administrador', 'coordinacion', 'coordinador',
+            'servicios', 'servicios_escolares', 'servicios escolares',
+        )
 
     def _puede_revisar(self, user):
-        return user.is_staff or str(getattr(user, 'rol', '')).strip().lower() in ('coordinacion', 'coordinador')
+        role = str(getattr(user, 'rol', '')).strip().lower()
+        return user.is_superuser or role in (
+            'admin', 'administrador', 'servicios', 'servicios_escolares', 'servicios escolares',
+        )
 
-    def _validar_materias(self, items, user):
+    def _validar_materias(self, items):
         if not isinstance(items, list) or not items:
             raise ValueError('Agrega al menos una materia a la carga.')
 
@@ -1751,11 +2307,6 @@ class CargaAcademicaWorkflowView(APIView):
                     docente = Aspirante.objects.get(pk=docente_id, rol__iexact='docente', is_staff=False)
                 except (Aspirante.DoesNotExist, TypeError, ValueError):
                     raise ValueError(f'Selecciona un docente válido en la fila {index}.')
-            if str(getattr(user, 'rol', '')).strip().lower() in ('docente', 'teacher') and (
-                not docente or docente.pk != user.pk
-            ):
-                raise ValueError(f'Como docente, solo puedes asignarte a ti mismo en la fila {index}.')
-
             horario = str(item.get('horario', materia.horario) or '').strip()
             salon = str(item.get('salon', materia.salon) or '')
             modalidad = str(item.get('modalidad', 'presencial') or '')
@@ -1817,10 +2368,19 @@ class CargaAcademicaWorkflowView(APIView):
 
     def get(self, request):
         if not self._puede_preparar(request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {'detail': 'No tienes permisos para consultar las cargas académicas.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         role = str(getattr(request.user, 'rol', '')).strip().lower()
         qs = CargaAcademica.objects.select_related('creador', 'periodo_inscripcion').prefetch_related('materias__materia', 'materias__docente')
-        if not (request.user.is_staff or role in ('coordinacion', 'coordinador')):
+        if not (
+            request.user.is_superuser
+            or role in (
+                'admin', 'administrador', 'coordinacion', 'coordinador',
+                'servicios', 'servicios_escolares', 'servicios escolares',
+            )
+        ):
             qs = qs.filter(creador=request.user)
         materias = Materia.objects.order_by('clave')
         docentes = Aspirante.objects.filter(rol__iexact='docente', is_staff=False, is_active=True).order_by('nombre')
@@ -1834,7 +2394,9 @@ class CargaAcademicaWorkflowView(APIView):
             'periodos_inscripcion': [
                 PeriodoInscripcionView.serializar(periodo)
                 for periodo in PeriodoInscripcion.objects.order_by('-apertura')
-            ] if request.user.is_staff or role in ('coordinacion', 'coordinador') else [],
+            ] if request.user.is_superuser or role in (
+                'admin', 'administrador', 'servicios', 'servicios_escolares', 'servicios escolares',
+            ) else [],
         })
     def post(self, request):
         if not self._puede_preparar(request.user):
@@ -1843,7 +2405,7 @@ class CargaAcademicaWorkflowView(APIView):
         if not periodo:
             return Response({'detail': 'Indica el periodo escolar antes de enviar la carga.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            filas = self._validar_materias(request.data.get('materias'), request.user)
+            filas = self._validar_materias(request.data.get('materias'))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
@@ -1858,7 +2420,10 @@ class CargaAcademicaWorkflowView(APIView):
         es_creador = carga.creador_id == request.user.id
 
         puede_coordinar = role in ('coordinacion', 'coordinador')
-        if carga.estado == 'borrador' and (es_creador or request.user.is_staff or puede_coordinar) and ('periodo' in request.data or 'materias' in request.data):
+        puede_servicios = role in ('servicios', 'servicios_escolares', 'servicios escolares')
+        if carga.estado == 'borrador' and (
+            es_creador or request.user.is_staff or puede_coordinar or puede_servicios or request.user.is_superuser
+        ) and ('periodo' in request.data or 'materias' in request.data):
             if not self._puede_preparar(request.user):
                 return Response(status=status.HTTP_403_FORBIDDEN)
             periodo = str(request.data.get('periodo', carga.periodo) or '').strip()
@@ -1873,7 +2438,7 @@ class CargaAcademicaWorkflowView(APIView):
                     'capacidad': item.capacidad,
                     'modalidad': item.modalidad,
                 } for item in carga.materias.all()]
-                filas = self._validar_materias(request.data.get('materias', filas_actuales), request.user)
+                filas = self._validar_materias(request.data.get('materias', filas_actuales))
             except ValueError as exc:
                 return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
             with transaction.atomic():
@@ -2087,30 +2652,6 @@ class DarBajaView(APIView):
         aspirante.save(update_fields=['is_active', 'proceso_estado', 'updated_at'])
         _registrar_seguimiento(aspirante, 'baja', 'El alumno fue dado de baja por Coordinación Académica.', 'Coordinación Académica')
         return Response({'detail': 'Alumno dado de baja.'})
-
-
-class ConvertirMismaCuentaView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        aspirante = request.user
-        if aspirante.is_staff:
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        if aspirante.rol == 'alumno':
-            return Response({'detail': 'La cuenta ya está convertida a alumno.', 'rol': 'alumno'})
-        if aspirante.rol != 'aspirante' or aspirante.proceso_estado != 'aceptado':
-            return Response({'detail': 'Solo puedes convertir tu cuenta después de que Coordinación Académica acepte tu solicitud.'}, status=status.HTTP_403_FORBIDDEN)
-        aspirante.rol = 'alumno'
-        if not aspirante.matricula:
-            aspirante.matricula = f'CINV-{timezone.now().year}-{Aspirante.objects.filter(matricula__startswith=f"CINV-{timezone.now().year}-").count() + 1:04d}'
-        aspirante.save(update_fields=['rol', 'matricula', 'updated_at'])
-        _registrar_seguimiento(
-            aspirante,
-            'aceptado',
-            'La cuenta del aspirante fue convertida a alumno desde el panel de seguimiento.',
-            'Aspirante',
-        )
-        return Response({'detail': 'Tu cuenta fue convertida a alumno.', 'rol': aspirante.rol, 'matricula': aspirante.matricula})
 
 
 class ConvertirAlumnoView(APIView):

@@ -34,6 +34,8 @@ services:
     environment:
       CAMUNDA_URL: http://camunda:8080
       CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: camunda
@@ -61,13 +63,15 @@ services:
     environment:
       CAMUNDA_URL: http://camunda:8080
       CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: camunda
       DB_USER: camunda
       DB_PASSWORD: camunda
       TZ: America/Mexico_City
-    command: sh -c "while true; do if python manage.py generar_alertas_automatizadas; then sleep 86400; else sleep 60; fi; done"
+    command: sh -c "while true; do if python manage.py generar_alertas_automatizadas; then sleep 3600; else sleep 60; fi; done"
     depends_on:
       backend:
         condition: service_healthy

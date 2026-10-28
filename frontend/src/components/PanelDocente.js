@@ -6,18 +6,10 @@ import {useTeacherCopy} from './teacherPanelTranslations';
 
 const MENU_ITEMS = [
   {label: 'overview', items: [['overview', 'Resumen', '▦']]},
-  {label: 'teaching', items: [['cursos', 'Mis cursos', '▤'], ['carga', 'Mi carga académica', '↗'], ['catalogo', 'Elegir materia', '◫'], ['estudiantes', 'Estudiantes', '♙']]},
+  {label: 'teaching', items: [['cursos', 'Mis cursos', '▤'], ['catalogo', 'Elegir materia', '◫'], ['estudiantes', 'Estudiantes', '♙']]},
   {label: 'evaluation', items: [['calificaciones', 'Calificaciones', '✓'], ['examenes', 'Exámenes', '✦'], ['entrevistas', 'Entrevistas', '◷']]},
   {label: 'followup', items: [['solicitudes', 'Solicitudes', '◈'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
-
-const CARGA_DOCENTE_TEXT = {
-  es: {subject: 'Materia', selectSubject: 'Selecciona una materia', teacher: 'Docente responsable', room: 'Salón', selectRoom: 'Selecciona salón', capacity: 'Cupo', modality: 'Modalidad', remove: 'Quitar', add: 'Agregar materia', save: 'Guardar borrador', update: 'Actualizar borrador', edit: 'Editar', cancel: 'Cancelar edición', count: 'Materias', actions: 'Acciones', saving: 'Guardando...'},
-  en: {subject: 'Subject', selectSubject: 'Select a subject', teacher: 'Instructor', room: 'Room', selectRoom: 'Select a room', capacity: 'Capacity', modality: 'Mode', remove: 'Remove', add: 'Add subject', save: 'Save draft', update: 'Update draft', edit: 'Edit', cancel: 'Cancel editing', count: 'Subjects', actions: 'Actions', saving: 'Saving...'},
-  de: {subject: 'Fach', selectSubject: 'Fach auswählen', teacher: 'Lehrkraft', room: 'Raum', selectRoom: 'Raum auswählen', capacity: 'Kapazität', modality: 'Modus', remove: 'Entfernen', add: 'Fach hinzufügen', save: 'Entwurf speichern', update: 'Entwurf aktualisieren', edit: 'Bearbeiten', cancel: 'Bearbeitung abbrechen', count: 'Fächer', actions: 'Aktionen', saving: 'Wird gespeichert...'},
-  zh: {subject: '课程', selectSubject: '选择课程', teacher: '负责教师', room: '教室', selectRoom: '选择教室', capacity: '容量', modality: '授课方式', remove: '移除', add: '添加课程', save: '保存草稿', update: '更新草稿', edit: '编辑', cancel: '取消编辑', count: '门课程', actions: '操作', saving: '正在保存...'},
-  pt: {subject: 'Disciplina', selectSubject: 'Selecione uma disciplina', teacher: 'Docente responsável', room: 'Sala', selectRoom: 'Selecione uma sala', capacity: 'Vagas', modality: 'Modalidade', remove: 'Remover', add: 'Adicionar disciplina', save: 'Salvar rascunho', update: 'Atualizar rascunho', edit: 'Editar', cancel: 'Cancelar edição', count: 'Disciplinas', actions: 'Ações', saving: 'Salvando...'},
-};
 
 function etiquetaEstado(estado, copy) {
   return copy.status[estado] || estado || copy.common.pending;
@@ -48,7 +40,6 @@ function TablaAlumnosMateria({materia, inscripciones, copy, soloCalificaciones =
 
 export default function PanelDocente({session, onLogout}) {
   const copy = useTeacherCopy();
-  const cargaText = CARGA_DOCENTE_TEXT[(document.documentElement.lang || 'es').slice(0, 2)] || CARGA_DOCENTE_TEXT.es;
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -56,10 +47,22 @@ export default function PanelDocente({session, onLogout}) {
   const [cursoSeleccionado, setCursoSeleccionado] = useState(null);
   const [showCalificacionForm, setShowCalificacionForm] = useState(false);
   const [calificacionForm, setCalificacionForm] = useState({inscripcion_id: '', calificacion: '', parcial: '', numero_parcial: '1'});
+  const [examenCalificar, setExamenCalificar] = useState(null);
+  const [examenCalificacionForm, setExamenCalificacionForm] = useState({calificacion: '', retroalimentacion: ''});
+  const [guardandoExamen, setGuardandoExamen] = useState(false);
+  const [materiaCalificacionId, setMateriaCalificacionId] = useState('');
+  const [materiaEstudiantesFiltro, setMateriaEstudiantesFiltro] = useState('');
+  const [materiaCalificacionesFiltro, setMateriaCalificacionesFiltro] = useState('');
+  const [examenesFiltro, setExamenesFiltro] = useState({aspiranteId: '', tipo: '', estado: ''});
+  const [entrevistasFiltro, setEntrevistasFiltro] = useState({aspiranteId: '', proposito: '', estado: ''});
+  const [solicitudesFiltro, setSolicitudesFiltro] = useState({aspiranteId: '', tipo: '', estado: ''});
+  const [materiaReporteFiltro, setMateriaReporteFiltro] = useState('');
   const [catalogo, setCatalogo] = useState([]);
   const [horarios, setHorarios] = useState({});
   const [salones, setSalones] = useState({});
   const [periodo, setPeriodo] = useState(null);
+  const [cargandoPeriodo, setCargandoPeriodo] = useState(false);
+  const totalEstudiantes = new Set((datos?.inscripciones || []).map(item => item.aspirante?.id).filter(Boolean)).size;
   const [mostrarEntrevistaForm, setMostrarEntrevistaForm] = useState(false);
   const [entrevistaGuardando, setEntrevistaGuardando] = useState(false);
   const [entrevistaForm, setEntrevistaForm] = useState({
@@ -70,115 +73,60 @@ export default function PanelDocente({session, onLogout}) {
     fecha_programada: '',
     duracion_minutos: 30,
   });
+  const materiasEstudiantesFiltradas = (datos?.materias || []).filter(
+    materia => !materiaEstudiantesFiltro || String(materia.id) === materiaEstudiantesFiltro,
+  );
+  const materiasCalificacionesFiltradas = (datos?.materias || []).filter(
+    materia => !materiaCalificacionesFiltro || String(materia.id) === materiaCalificacionesFiltro,
+  );
+  const inscripcionesFiltradasCalificacion = (datos?.inscripciones || []).filter(
+    inscripcion => !materiaCalificacionId || String(inscripcion.materia) === materiaCalificacionId,
+  );
+  const examenesFiltrados = (datos?.examenes || []).filter(examen => (
+    (!examenesFiltro.aspiranteId || String(examen.aspirante?.id) === examenesFiltro.aspiranteId)
+    && (!examenesFiltro.tipo || examen.tipo === examenesFiltro.tipo)
+    && (!examenesFiltro.estado || examen.estado === examenesFiltro.estado)
+  ));
+  const entrevistasFiltradas = (datos?.entrevistas || []).filter(entrevista => (
+    (!entrevistasFiltro.aspiranteId || String(entrevista.aspirante?.id) === entrevistasFiltro.aspiranteId)
+    && (!entrevistasFiltro.proposito || entrevista.proposito === entrevistasFiltro.proposito)
+    && (!entrevistasFiltro.estado || entrevista.estado === entrevistasFiltro.estado)
+  ));
+  const solicitudesFiltradas = (datos?.solicitudes || []).filter(solicitud => (
+    (!solicitudesFiltro.aspiranteId || String(solicitud.aspirante?.id) === solicitudesFiltro.aspiranteId)
+    && (!solicitudesFiltro.tipo || solicitud.tipo === solicitudesFiltro.tipo)
+    && (!solicitudesFiltro.estado || solicitud.estado === solicitudesFiltro.estado)
+  ));
+  const estudiantesDocente = Array.from(new Map(
+    (datos?.inscripciones || [])
+      .filter(item => item.aspirante?.id)
+      .map(item => [String(item.aspirante.id), item.aspirante]),
+  ).values());
+  const solicitudesTipos = Array.from(new Map(
+    (datos?.solicitudes || []).map(item => [item.tipo, item.tipo_label || item.tipo]),
+  ).entries());
+  const examenesTipos = Array.from(new Map(
+    (datos?.examenes || []).map(item => [item.tipo, item.tipo_label || item.tipo]),
+  ).entries());
+  const entrevistasPropositos = Array.from(new Map(
+    (datos?.entrevistas || []).map(item => [item.proposito, item.proposito_label || item.proposito]),
+  ).entries());
+  const reporteInscripciones = (datos?.inscripciones || []).filter(
+    item => !materiaReporteFiltro || String(item.materia) === materiaReporteFiltro,
+  );
+  const reporteEstudianteIds = new Set(reporteInscripciones.map(item => item.aspirante?.id).filter(Boolean));
+  const reporteExamenes = (datos?.examenes || []).filter(examen => (
+    !materiaReporteFiltro || reporteEstudianteIds.has(examen.aspirante?.id)
+  ));
+  const reporteEntrevistas = (datos?.entrevistas || []).filter(entrevista => (
+    !materiaReporteFiltro || reporteEstudianteIds.has(entrevista.aspirante?.id)
+  ));
+  const reporteAprobados = reporteInscripciones.filter(item => item.estado === 'aprobada').length;
+  const reporteReprobados = reporteInscripciones.filter(item => item.estado === 'reprobada').length;
+  const inscripcionesFiltradasExportacion = (datos?.inscripciones || []).filter(
+    item => !materiaCalificacionesFiltro || String(item.materia) === materiaCalificacionesFiltro,
+  );
   async function leerJson(response, mensaje) { const tipo=response.headers.get('content-type')||''; if (!response.ok || !tipo.includes('application/json')) throw new Error(mensaje); return response.json(); }
-  const [cargas, setCargas] = useState([]);
-  const [periodoCarga, setPeriodoCarga] = useState('');
-  const [catalogoCarga, setCatalogoCarga] = useState({materias: [], docentes: [], salones: [], modalidades: [], docente_propio_id: null});
-  const [materiasCarga, setMateriasCarga] = useState([]);
-  const [cargaEditando, setCargaEditando] = useState(null);
-  const [guardandoCarga, setGuardandoCarga] = useState(false);
-
-  async function cargarCargas() {
-    try {
-      const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`} });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.detail || copy.load.loadError);
-      setCargas(body.cargas || []);
-      setCatalogoCarga({
-        materias: body.materias_catalogo || [],
-        docentes: body.docentes_catalogo || [],
-        salones: body.salones || [],
-        modalidades: body.modalidades || [],
-        docente_propio_id: body.docente_propio_id,
-      });
-    } catch (e) { setError(e.message || copy.load.loadError); }
-  }
-  useEffect(() => { if (activeSection === 'carga') cargarCargas(); }, [activeSection]);
-  async function enviarCarga() {
-    try {
-      const r = await fetch('/api/cargas-academicas/', {method:'POST', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({periodo: periodoCarga})});
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
-      setPeriodoCarga(''); setError(''); cargarCargas();
-    } catch (e) { setError(e.message || copy.load.sendError); }
-  }
-
-  function agregarMateriaCargaDocente() {
-    setMateriasCarga(items => [...items, {
-      materia: '',
-      docente: catalogoCarga.docente_propio_id ? String(catalogoCarga.docente_propio_id) : '',
-      horario: '',
-      salon: '',
-      capacidad: 42,
-      modalidad: 'presencial',
-    }]);
-  }
-
-  function editarCargaDocente(carga) {
-    setCargaEditando(carga.id);
-    setPeriodoCarga(carga.periodo);
-    setMateriasCarga(carga.materias.map(item => ({
-      materia: String(item.materia),
-      docente: String(catalogoCarga.docente_propio_id || item.docente || ''),
-      horario: item.horario,
-      salon: item.salon,
-      capacidad: item.capacidad,
-      modalidad: item.modalidad,
-    })));
-  }
-
-  function cancelarCargaDocente() {
-    setCargaEditando(null);
-    setPeriodoCarga('');
-    setMateriasCarga([]);
-  }
-
-  async function guardarCargaDocente(event) {
-    event.preventDefault();
-    setError('');
-    setGuardandoCarga(true);
-    try {
-      const url = cargaEditando ? `/api/cargas-academicas/${cargaEditando}/` : '/api/cargas-academicas/';
-      const r = await fetch(url, {
-        method: cargaEditando ? 'PATCH' : 'POST',
-        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          periodo: periodoCarga.trim(),
-          materias: materiasCarga.map(item => ({
-            ...item,
-            materia: item.materia ? Number(item.materia) : null,
-            docente: item.docente ? Number(item.docente) : null,
-            capacidad: Number(item.capacidad),
-          })),
-        }),
-      });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
-      cancelarCargaDocente();
-      await cargarCargas();
-    } catch (e) {
-      setError(e.message || copy.load.sendError);
-    } finally {
-      setGuardandoCarga(false);
-    }
-  }
-
-  async function enviarBorradorCarga(id) {
-    setError('');
-    try {
-      const r = await fetch(`/api/cargas-academicas/${id}/`, {
-        method: 'PATCH',
-        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
-        body: JSON.stringify({estado: 'en_revision'}),
-      });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.detail || copy.load.sendError);
-      await cargarCargas();
-    } catch (e) {
-      setError(e.message || copy.load.sendError);
-    }
-  }
-
   const cargarPanel = useCallback(async (signal) => {
     setCargando(true);
     setError('');
@@ -219,7 +167,32 @@ export default function PanelDocente({session, onLogout}) {
         .then(response => response.ok ? response.json() : Promise.reject(new Error(copy.messages.noCatalog)))
       .then(setCatalogo).catch(err => setError(err.message));
       }, [activeSection, copy, session.access]);
-  useEffect(() => { fetch('/api/periodos-inscripcion/', {headers:{Authorization:`Bearer ${session.access}`}}).then(r=>r.ok && (r.headers.get('content-type')||'').includes('application/json') ? r.json() : null).then(setPeriodo).catch(()=>setPeriodo(null)); }, [session.access]);
+  useEffect(() => {
+    if (activeSection !== 'catalogo') return undefined;
+    const controller = new AbortController();
+    setCargandoPeriodo(true);
+    fetch('/api/periodos-inscripcion/', {
+      headers: {Authorization: `Bearer ${session.access}`},
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (response.status === 401) {
+          onLogout(copy.messages.expired);
+          return null;
+        }
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.detail || copy.messages.periodError);
+        return body;
+      })
+      .then(setPeriodo)
+      .catch(err => {
+        if (err.name !== 'AbortError') setError(err.message || copy.messages.periodError);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCargandoPeriodo(false);
+      });
+    return () => controller.abort();
+  }, [activeSection, copy.messages.expired, copy.messages.periodError, onLogout, session.access]);
 
   async function seleccionarMateria(materia) {
     const horario = (horarios[materia.id] || '').trim();
@@ -242,7 +215,14 @@ export default function PanelDocente({session, onLogout}) {
 
   const handleCalificacionSubmit = async (event) => {
     event.preventDefault();
-    if (!calificacionForm.inscripcion_id || !calificacionForm.calificacion) {
+    if (!materiaCalificacionId || !calificacionForm.inscripcion_id || !calificacionForm.calificacion) {
+      setError(copy.grading.studentRequired);
+      return;
+    }
+    const inscripcionSeleccionada = inscripcionesFiltradasCalificacion.find(
+      inscripcion => String(inscripcion.id) === String(calificacionForm.inscripcion_id),
+    );
+    if (!inscripcionSeleccionada) {
       setError(copy.grading.studentRequired);
       return;
     }
@@ -282,6 +262,19 @@ export default function PanelDocente({session, onLogout}) {
       setError(err.message || copy.grading.saveError);
     }
   };
+
+  function abrirFormularioCalificacion() {
+    setMateriaCalificacionId('');
+    setCalificacionForm({inscripcion_id: '', calificacion: '', parcial: '', numero_parcial: '1'});
+    setError('');
+    setShowCalificacionForm(true);
+  }
+
+  function cerrarFormularioCalificacion() {
+    setShowCalificacionForm(false);
+    setMateriaCalificacionId('');
+    setCalificacionForm({inscripcion_id: '', calificacion: '', parcial: '', numero_parcial: '1'});
+  }
 
   async function programarEntrevista(event) {
     event.preventDefault();
@@ -343,18 +336,39 @@ export default function PanelDocente({session, onLogout}) {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || body.detail || copy.exams.updateError);
       await cargarPanel(new AbortController().signal);
-    } catch (err) { setError(err.message || copy.exams.updateError); }
+      return true;
+    } catch (err) {
+      setError(err.message || copy.exams.updateError);
+      return false;
+    }
   }
 
   function calificarExamen(examen) {
-    const valor = window.prompt(copy.exams.gradePrompt, examen.calificacion ?? '');
-    if (valor === null) return;
-    const calificacion = Number(valor);
+    setExamenCalificar(examen);
+    setExamenCalificacionForm({
+      calificacion: examen.calificacion ?? '',
+      retroalimentacion: examen.retroalimentacion || '',
+    });
+    setError('');
+  }
+
+  async function guardarCalificacionExamen(event) {
+    event.preventDefault();
+    const calificacion = Number(examenCalificacionForm.calificacion);
     if (!Number.isFinite(calificacion) || calificacion < 0 || calificacion > 10) {
       setError(copy.exams.gradeRange);
       return;
     }
-    actualizarExamen(examen.id, {calificacion});
+    setGuardandoExamen(true);
+    try {
+      const actualizado = await actualizarExamen(examenCalificar.id, {
+        calificacion,
+        retroalimentacion: examenCalificacionForm.retroalimentacion,
+      });
+      if (actualizado) setExamenCalificar(null);
+    } finally {
+      setGuardandoExamen(false);
+    }
   }
 
   function cambiarEstadoEntrevista(entrevista, estado) {
@@ -368,13 +382,13 @@ export default function PanelDocente({session, onLogout}) {
   }
 
   function exportarCalificaciones() {
-    if (!datos?.inscripciones?.length) {
+    if (!inscripcionesFiltradasExportacion.length) {
       setError(copy.grading.courseLoad);
       return;
     }
     const encabezados = copy.grading.exportHeaders;
     const escapar = valor => `"${String(valor ?? '').replace(/"/g, '""')}"`;
-    const filas = datos.inscripciones.map(item => [
+    const filas = inscripcionesFiltradasExportacion.map(item => [
       item.aspirante?.nombre,
       item.aspirante?.usuario,
       item.materia_clave,
@@ -389,9 +403,11 @@ export default function PanelDocente({session, onLogout}) {
     const url = URL.createObjectURL(new Blob([`\ufeff${contenido}`], {type: 'text/csv;charset=utf-8'}));
     const enlace = document.createElement('a');
     enlace.href = url;
-    enlace.download = 'calificaciones_docente.csv';
+    const materia = datos.materias.find(item => String(item.id) === materiaCalificacionesFiltro);
+    const claveArchivo = materia?.clave.replace(/[<>:"/\\|?*]/g, '-');
+    enlace.download = materia ? `calificaciones_${claveArchivo}.csv` : 'calificaciones_docente.csv';
     enlace.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
     setError('');
   }
 
@@ -408,13 +424,13 @@ export default function PanelDocente({session, onLogout}) {
         </div>
 
         <nav className="admin-menu" aria-label={copy.panel}>
-          {MENU_ITEMS.map(group => <div className="docente-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button key={id} type="button" className={`admin-menu-item ${activeSection === id ? 'is-active' : ''}`} onClick={() => setActiveSection(id)}><i aria-hidden="true">{icon}</i><span>{copy.menu[id]}</span><small>{id === 'cursos' && (datos?.resumen?.total_materias || 0)}{id === 'estudiantes' && (datos?.resumen?.total_inscripciones || 0)}{id === 'calificaciones' && (datos?.resumen?.total_inscripciones || 0)}{id === 'examenes' && (datos?.resumen?.examenes_total || 0)}{id === 'solicitudes' && (datos?.resumen?.solicitudes_pendientes || 0)}{id === 'reportes' && '3'}</small></button>)}</div>)}
+          {MENU_ITEMS.map(group => <div className="docente-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button key={id} type="button" className={`admin-menu-item ${activeSection === id ? 'is-active' : ''}`} onClick={() => setActiveSection(id)}><i aria-hidden="true">{icon}</i><span>{copy.menu[id]}</span><small>{id === 'cursos' && (datos?.resumen?.total_materias || 0)}{id === 'estudiantes' && totalEstudiantes}{id === 'calificaciones' && (datos?.resumen?.total_inscripciones || 0)}{id === 'examenes' && (datos?.resumen?.examenes_total || 0)}{id === 'solicitudes' && (datos?.resumen?.solicitudes_pendientes || 0)}</small></button>)}</div>)}
         </nav>
 
         <div className="admin-side-card">
           <p>{copy.reports.kicker}</p>
-          <strong>92.5%</strong>
-          <span>{copy.grading.lastUpdate}</span>
+          <strong>{datos?.resumen?.total_materias || 0}</strong>
+          <span>{copy.overview.assigned}</span>
         </div>
 
         <button type="button" className="admin-logout" onClick={() => onLogout(copy.logout)}>{copy.logout}</button>
@@ -427,17 +443,14 @@ export default function PanelDocente({session, onLogout}) {
             <h1>{copy.panel}</h1>
           </div>
           <div className="admin-top-actions">
-            <button type="button" className="btn-secondary" onClick={exportarCalificaciones}>{copy.common.export}</button>
-            <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ {copy.common.registerGrade}</button>
+            <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={abrirFormularioCalificacion}>+ {copy.common.registerGrade}</button>
           </div>
         </header>
-
-        {periodo && <div className={`periodo-banner ${periodo.activo ? 'is-open' : ''}`}><strong>{periodo.activo ? copy.load.open : copy.load.closed}: {periodo.nombre}</strong><span>{periodo.apertura ? new Date(periodo.apertura).toLocaleString(copy.locale) : copy.common.pending} — {periodo.cierre ? new Date(periodo.cierre).toLocaleString(copy.locale) : copy.common.pending}</span></div>}
 
         {error && <div className="api-error" role="alert">{error}</div>}
         {cargando && !datos && <div className="panel-card">{copy.loading}</div>}
 
-        {activeSection !== 'overview' && (!datos || cargando) && (
+        {activeSection !== 'overview' && !datos && cargando && (
           <div className="panel-card">{copy.loadingData}</div>
         )}
 
@@ -451,13 +464,13 @@ export default function PanelDocente({session, onLogout}) {
               </div>
               <div className="admin-stat-card">
                 <span>{copy.overview.students}</span>
-                <strong>{datos.resumen.total_inscripciones}</strong>
-                <small>{copy.overview.enrolled}</small>
+                <strong>{totalEstudiantes}</strong>
+                <small>{copy.reports.totalStudents}</small>
               </div>
               <div className="admin-stat-card">
                 <span>{copy.overview.passed}</span>
                 <strong>{datos.resumen.inscripciones_aprobadas}</strong>
-                <small>{copy.overview.recent}</small>
+                <small>{copy.common.academicStatus}</small>
               </div>
               <div className="admin-stat-card">
                 <span>{copy.overview.exams}</span>
@@ -467,7 +480,7 @@ export default function PanelDocente({session, onLogout}) {
               <div className="admin-stat-card">
                 <span>{copy.overview.interviews}</span>
                 <strong>{datos.resumen.entrevistas_total || 0}</strong>
-                <small>{copy.overview.scheduled}</small>
+                <small>{copy.reports.allInterviews}</small>
               </div>
               <div className="admin-stat-card">
                 <span>{copy.overview.requests}</span>
@@ -487,11 +500,11 @@ export default function PanelDocente({session, onLogout}) {
                 {datos.materias.length ? (
                   <div className="materias-grid">
                     {datos.materias.map((materia) => (
-                      <div key={materia.id} className="materia-card" onClick={() => {setCursoSeleccionado(materia); setActiveSection('cursos');}}>
+                      <button key={materia.id} type="button" className="materia-card docente-course-link" onClick={() => {setCursoSeleccionado(materia); setActiveSection('cursos');}}>
                         <h4>{materia.clave}</h4>
                         <p>{materia.nombre}</p>
                         <small>{copy.common.schedule}: {materia.horario || '—'}</small>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
@@ -509,54 +522,23 @@ export default function PanelDocente({session, onLogout}) {
                 <ul className="activity-list">
                   {datos.solicitudes.slice(0, 3).map((solicitud) => (
                     <li key={solicitud.id}>
-                      <strong>{solicitud.get_tipo_display || solicitud.tipo}</strong>
+                      <strong>{solicitud.tipo_label || solicitud.tipo}</strong>
                       <span>{etiquetaEstado(solicitud.estado, copy)}</span>
-                      <button type="button" className="icon-btn">{copy.common.view}</button>
+                      <button type="button" className="icon-btn" onClick={() => {
+                        setSolicitudesFiltro({
+                          aspiranteId: solicitud.aspirante?.id ? String(solicitud.aspirante.id) : '',
+                          tipo: solicitud.tipo || '',
+                          estado: solicitud.estado || '',
+                        });
+                        setActiveSection('solicitudes');
+                      }}>{copy.common.view}</button>
                     </li>
                   ))}
-                  {datos.solicitudes.length === 0 && <li><strong>{copy.common.noRequests}</strong><span>{copy.common.allResolved}</span><button type="button" className="icon-btn">OK</button></li>}
+                  {datos.solicitudes.length === 0 && <li><strong>{copy.common.noRequests}</strong><span>{copy.common.allResolved}</span></li>}
                 </ul>
               </div>
             </div>
           </>
-        )}
-
-        {activeSection === 'carga' && (
-          <div className="admin-card">
-            <div className="admin-card-head"><div><p className="panel-kicker">{copy.load.kicker}</p><h3>{copy.load.title}</h3></div><button type="button" className="btn-secondary" onClick={cargarCargas}>{copy.load.refresh}</button></div>
-            <p>{copy.load.intro}</p>
-            <form className="coord-carga-form" onSubmit={guardarCargaDocente}>
-              <label><span>{copy.load.period}</span><input className="coord-search" required placeholder={copy.load.periodPlaceholder} value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /></label>
-              <div className="coord-carga-rows">
-                {materiasCarga.map((item, index) => <div className="coord-carga-row" key={`docente-carga-${index}`}>
-                  <label><span>{cargaText.subject}</span><select required value={item.materia} onChange={e => {
-                    const materia = catalogoCarga.materias.find(m => String(m.id) === e.target.value);
-                    setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, materia: e.target.value, horario: materia?.horario || '', salon: materia?.salon || catalogoCarga.salones[0]?.id || '', capacidad: materia?.capacidad || 42} : row));
-                  }}>
-                    <option value="">{cargaText.selectSubject}</option>{catalogoCarga.materias.map(m => <option key={m.id} value={m.id}>{m.clave} · {m.nombre}</option>)}
-                  </select></label>
-                  <label><span>{cargaText.teacher}</span><input readOnly value={catalogoCarga.docentes.find(d => d.id === catalogoCarga.docente_propio_id)?.nombre || ''} required /></label>
-                  <label><span>{copy.common.schedule}</span><input required maxLength="120" value={item.horario} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, horario: e.target.value} : row))}/></label>
-                  <label><span>{cargaText.room}</span><select required value={item.salon} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, salon: e.target.value} : row))}>
-                    <option value="">{cargaText.selectRoom}</option>{catalogoCarga.salones.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                  </select></label>
-                  <label><span>{cargaText.capacity}</span><input type="number" min="1" max="32767" required value={item.capacidad} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, capacidad: e.target.value} : row))}/></label>
-                  <label><span>{cargaText.modality}</span><select required value={item.modalidad} onChange={e => setMateriasCarga(rows => rows.map((row, rowIndex) => rowIndex === index ? {...row, modalidad: e.target.value} : row))}>
-                    {catalogoCarga.modalidades.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-                  </select></label>
-                  <button type="button" className="btn-secondary" onClick={() => setMateriasCarga(rows => rows.filter((_, rowIndex) => rowIndex !== index))}>{cargaText.remove}</button>
-                </div>)}
-              </div>
-              <div className="coord-action-row">
-                <button type="button" className="btn-secondary" disabled={!catalogoCarga.materias.length} onClick={agregarMateriaCargaDocente}>{cargaText.add}</button>
-                <button type="submit" className="btn-primary" disabled={guardandoCarga || !periodoCarga.trim() || !materiasCarga.length}>{guardandoCarga ? cargaText.saving : cargaEditando ? cargaText.update : cargaText.save}</button>
-                {cargaEditando && <button type="button" className="btn-secondary" onClick={cancelarCargaDocente}>{cargaText.cancel}</button>}
-              </div>
-            </form>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.load.period}</th><th>{copy.common.status}</th><th>{cargaText.count}</th><th>{cargaText.actions}</th></tr></thead><tbody>
-              {cargas.length ? cargas.map(c => <tr key={c.id}><td>{c.periodo || copy.load.noPeriod}</td><td><span className={`estado-badge estado-${c.estado}`}>{etiquetaEstado(c.estado, copy)}</span></td><td>{c.materias.length}</td><td>{c.estado === 'borrador' && <div className="coord-action-row"><button type="button" className="btn-secondary" onClick={() => editarCargaDocente(c)}>{cargaText.edit}</button><button type="button" className="btn-primary" onClick={() => enviarBorradorCarga(c.id)}>{copy.load.send}</button></div>}</td></tr>) : <tr><td colSpan="4">{copy.load.noLoads}</td></tr>}
-            </tbody></table></div>
-          </div>
         )}
 
         {activeSection === 'cursos' && datos && (
@@ -616,7 +598,43 @@ export default function PanelDocente({session, onLogout}) {
         )}
 
         {activeSection === 'catalogo' && datos && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.courses.selectTitle}</p><h3>{copy.courses.choose}</h3></div></div><p className="panel-sub">{copy.courses.intro}</p><div className="materias-grid">{catalogo.map(materia => { const propia = materia.profesor && materia.profesor.toLowerCase() === datos.docente.nombre.toLowerCase(); const ocupada = Boolean(materia.profesor) && !propia; return <div key={materia.id} className={`materia-card ${propia ? 'is-selected' : ''}`}><span className="materia-card-clave">{materia.clave}</span><strong className="materia-card-nombre">{materia.nombre}</strong><small>{copy.courses.professor}: {materia.profesor || copy.courses.available} · {materia.inscritos || 0} {copy.courses.of} {materia.capacidad || 42} {copy.courses.students}</small><input className="calificacion-form-input" disabled={ocupada} placeholder={copy.courses.schedulePlaceholder} value={horarios[materia.id] ?? materia.horario ?? ''} onChange={event => setHorarios(previous => ({...previous, [materia.id]: event.target.value}))}/><select className="calificacion-form-input" disabled={ocupada} value={salones[materia.id] ?? materia.salon ?? ''} onChange={event => setSalones(previous => ({...previous, [materia.id]: event.target.value}))}><option value="">{copy.courses.selectRoom}</option><option value="salon_1">{copy.courses.roomOne}</option><option value="laboratorio_harold">{copy.courses.roomLab}</option><option value="sala_juntas">{copy.courses.meetingRoom}</option></select><button type="button" className="btn-primary" disabled={ocupada} onClick={() => seleccionarMateria(materia)}>{ocupada ? copy.courses.assignedElsewhere : propia ? copy.courses.updateSchedule : copy.courses.selectSubject}</button></div>; })}</div>{!catalogo.length && <p className="empty-state">{copy.courses.catalogEmpty}</p>}</div>
+          <div className="admin-card">
+            <div className="admin-card-head">
+              <div>
+                <p className="panel-kicker">{copy.courses.selectTitle}</p>
+                <h3>{copy.courses.choose}</h3>
+              </div>
+            </div>
+            <p className="panel-sub">{copy.courses.intro}</p>
+            <p className="panel-sub">
+              <strong>{copy.courses.currentPeriod}:</strong>{' '}
+              {cargandoPeriodo ? copy.courses.loadingPeriod : periodo?.nombre || copy.courses.periodNotConfigured}
+            </p>
+            <div className="materias-grid">
+              {catalogo.map(materia => {
+                const propia = materia.profesor && materia.profesor.toLowerCase() === datos.docente.nombre.toLowerCase();
+                const ocupada = Boolean(materia.profesor) && !propia;
+                return (
+                  <div key={materia.id} className={`materia-card ${propia ? 'is-selected' : ''}`}>
+                    <span className="materia-card-clave">{materia.clave}</span>
+                    <strong className="materia-card-nombre">{materia.nombre}</strong>
+                    <small>{copy.courses.professor}: {materia.profesor || copy.courses.available} · {materia.inscritos || 0} {copy.courses.of} {materia.capacidad || 42} {copy.courses.students}</small>
+                    <input className="calificacion-form-input" disabled={ocupada} placeholder={copy.courses.schedulePlaceholder} value={horarios[materia.id] ?? materia.horario ?? ''} onChange={event => setHorarios(previous => ({...previous, [materia.id]: event.target.value}))}/>
+                    <select className="calificacion-form-input" disabled={ocupada} value={salones[materia.id] ?? materia.salon ?? ''} onChange={event => setSalones(previous => ({...previous, [materia.id]: event.target.value}))}>
+                      <option value="">{copy.courses.selectRoom}</option>
+                      <option value="salon_1">{copy.courses.roomOne}</option>
+                      <option value="laboratorio_harold">{copy.courses.roomLab}</option>
+                      <option value="sala_juntas">{copy.courses.meetingRoom}</option>
+                    </select>
+                    <button type="button" className="btn-primary" disabled={ocupada} onClick={() => seleccionarMateria(materia)}>
+                      {ocupada ? copy.courses.assignedElsewhere : propia ? copy.courses.updateSchedule : copy.courses.selectSubject}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {!catalogo.length && <p className="empty-state">{copy.courses.catalogEmpty}</p>}
+          </div>
         )}
 
         {activeSection === 'estudiantes' && datos && (
@@ -624,7 +642,15 @@ export default function PanelDocente({session, onLogout}) {
             <div className="admin-card-head">
               <div><p className="panel-kicker">{copy.courses.kicker}</p><h3>{copy.menu.estudiantes}</h3><p className="panel-sub">{copy.courses.intro}</p></div>
             </div>
-            <div className="docente-materias-sections">{datos.materias.length ? datos.materias.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
+            <div className="docente-filter-bar">
+              <label><span>{copy.filters.subject}</span>
+                <select value={materiaEstudiantesFiltro} onChange={event => setMateriaEstudiantesFiltro(event.target.value)}>
+                  <option value="">{copy.filters.allSubjects}</option>
+                  {datos.materias.map(materia => <option key={materia.id} value={materia.id}>{materia.clave} - {materia.nombre}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="docente-materias-sections">{materiasEstudiantesFiltradas.length ? materiasEstudiantesFiltradas.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
           </div>
         )}
 
@@ -632,9 +658,17 @@ export default function PanelDocente({session, onLogout}) {
           <div className="admin-card">
             <div className="admin-card-head">
               <div><p className="panel-kicker">{copy.grading.kicker}</p><h3>{copy.grading.title}</h3><p className="panel-sub">{copy.grading.intro}</p></div>
-              <button type="button" className="btn-primary" disabled={!datos?.inscripciones?.length} onClick={() => setShowCalificacionForm(true)}>+ {copy.common.newGrade}</button>
+              <button type="button" className="btn-secondary" disabled={!inscripcionesFiltradasExportacion.length} onClick={exportarCalificaciones}>{copy.common.export}</button>
             </div>
-            <div className="docente-materias-sections">{datos.materias.length ? datos.materias.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} soloCalificaciones />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
+            <div className="docente-filter-bar">
+              <label><span>{copy.filters.subject}</span>
+                <select value={materiaCalificacionesFiltro} onChange={event => setMateriaCalificacionesFiltro(event.target.value)}>
+                  <option value="">{copy.filters.allSubjects}</option>
+                  {datos.materias.map(materia => <option key={materia.id} value={materia.id}>{materia.clave} - {materia.nombre}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="docente-materias-sections">{materiasCalificacionesFiltradas.length ? materiasCalificacionesFiltradas.map(materia => <TablaAlumnosMateria key={materia.id} materia={materia} inscripciones={datos.inscripciones} copy={copy} soloCalificaciones />) : <p className="empty-state">{copy.common.noSubjects}</p>}</div>
           </div>
         )}
 
@@ -647,6 +681,26 @@ export default function PanelDocente({session, onLogout}) {
               </div>
             </div>
 
+            <div className="docente-filter-bar">
+              <label><span>{copy.filters.student}</span>
+                <select value={examenesFiltro.aspiranteId} onChange={event => setExamenesFiltro(previous => ({...previous, aspiranteId: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {estudiantesDocente.map(estudiante => <option key={estudiante.id} value={estudiante.id}>{estudiante.nombre} ({estudiante.usuario})</option>)}
+                </select>
+              </label>
+              <label><span>{copy.filters.type}</span>
+                <select value={examenesFiltro.tipo} onChange={event => setExamenesFiltro(previous => ({...previous, tipo: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {examenesTipos.map(([tipo, label]) => <option key={tipo} value={tipo}>{label}</option>)}
+                </select>
+              </label>
+              <label><span>{copy.filters.status}</span>
+                <select value={examenesFiltro.estado} onChange={event => setExamenesFiltro(previous => ({...previous, estado: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {['programado', 'iniciado', 'completado', 'aprobado', 'reprobado', 'cancelado'].map(estado => <option key={estado} value={estado}>{etiquetaEstado(estado, copy)}</option>)}
+                </select>
+              </label>
+            </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
@@ -661,8 +715,8 @@ export default function PanelDocente({session, onLogout}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {datos.examenes && datos.examenes.length > 0 ? (
-                    datos.examenes.map((examen) => (
+                  {examenesFiltrados.length > 0 ? (
+                    examenesFiltrados.map((examen) => (
                       <tr key={examen.id}>
                         <td><strong>{examen.aspirante?.nombre || 'N/A'}</strong></td>
                         <td>{examen.tipo_label || examen.tipo}</td>
@@ -670,11 +724,11 @@ export default function PanelDocente({session, onLogout}) {
                         <td><span className={`estado-badge estado-${examen.estado}`}>{etiquetaEstado(examen.estado, copy)}</span></td>
                         <td><strong>{examen.calificacion !== null ? examen.calificacion : '-'}</strong></td>
                         <td>{examen.intentos}/{examen.max_intentos}</td>
-                        <td><div className="table-action-group">{examen.estado === 'programado' && <button type="button" className="link-btn" onClick={() => actualizarExamen(examen.id, {estado: 'iniciado'})}>{copy.exams.start}</button>}{examen.estado === 'iniciado' && <button type="button" className="link-btn" onClick={() => actualizarExamen(examen.id, {estado: 'completado'})}>{copy.exams.finish}</button>}{!['cancelado', 'aprobado', 'reprobado'].includes(examen.estado) && <button type="button" className="link-btn" onClick={() => calificarExamen(examen)}>{copy.exams.gradeAction}</button>}</div></td>
+                        <td><div className="table-action-group">{examen.tipo !== 'predoctoral' && ['aprobado', 'reprobado'].includes(examen.estado) && <button type="button" className="link-btn" onClick={() => calificarExamen(examen)}>{copy.exams.gradeAction}</button>}</div></td>
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{copy.exams.none}</td></tr>
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{datos.examenes?.length ? copy.filters.noResults : copy.exams.none}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -734,6 +788,26 @@ export default function PanelDocente({session, onLogout}) {
               </form>
             )}
 
+            <div className="docente-filter-bar">
+              <label><span>{copy.filters.student}</span>
+                <select value={entrevistasFiltro.aspiranteId} onChange={event => setEntrevistasFiltro(previous => ({...previous, aspiranteId: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {estudiantesDocente.map(estudiante => <option key={estudiante.id} value={estudiante.id}>{estudiante.nombre} ({estudiante.usuario})</option>)}
+                </select>
+              </label>
+              <label><span>{copy.filters.purpose}</span>
+                <select value={entrevistasFiltro.proposito} onChange={event => setEntrevistasFiltro(previous => ({...previous, proposito: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {entrevistasPropositos.map(([proposito, label]) => <option key={proposito} value={proposito}>{label}</option>)}
+                </select>
+              </label>
+              <label><span>{copy.filters.status}</span>
+                <select value={entrevistasFiltro.estado} onChange={event => setEntrevistasFiltro(previous => ({...previous, estado: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {['programada', 'iniciada', 'completada', 'cancelada'].map(estado => <option key={estado} value={estado}>{etiquetaEstado(estado, copy)}</option>)}
+                </select>
+              </label>
+            </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
@@ -748,8 +822,8 @@ export default function PanelDocente({session, onLogout}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {datos.entrevistas && datos.entrevistas.length > 0 ? (
-                    datos.entrevistas.map((entrevista) => (
+                  {entrevistasFiltradas.length > 0 ? (
+                    entrevistasFiltradas.map((entrevista) => (
                       <tr key={entrevista.id}>
                         <td><strong>{entrevista.aspirante?.nombre || 'N/A'}</strong></td>
                         <td>{entrevista.proposito_label || entrevista.proposito}</td>
@@ -768,7 +842,7 @@ export default function PanelDocente({session, onLogout}) {
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{copy.interviews.none}</td></tr>
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>{datos.entrevistas?.length ? copy.filters.noResults : copy.interviews.none}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -785,6 +859,28 @@ export default function PanelDocente({session, onLogout}) {
               </div>
             </div>
 
+            <div className="docente-filter-bar">
+              <label><span>{copy.filters.student}</span>
+                <select value={solicitudesFiltro.aspiranteId} onChange={event => setSolicitudesFiltro(previous => ({...previous, aspiranteId: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {Array.from(new Map((datos.solicitudes || []).filter(item => item.aspirante?.id).map(item => [String(item.aspirante.id), item.aspirante])).values()).map(estudiante => (
+                    <option key={estudiante.id} value={estudiante.id}>{estudiante.nombre} ({estudiante.usuario})</option>
+                  ))}
+                </select>
+              </label>
+              <label><span>{copy.filters.type}</span>
+                <select value={solicitudesFiltro.tipo} onChange={event => setSolicitudesFiltro(previous => ({...previous, tipo: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {solicitudesTipos.map(([tipo, label]) => <option key={tipo} value={tipo}>{label}</option>)}
+                </select>
+              </label>
+              <label><span>{copy.filters.status}</span>
+                <select value={solicitudesFiltro.estado} onChange={event => setSolicitudesFiltro(previous => ({...previous, estado: event.target.value}))}>
+                  <option value="">{copy.filters.all}</option>
+                  {['pendiente', 'aceptado', 'rechazado'].map(estado => <option key={estado} value={estado}>{etiquetaEstado(estado, copy)}</option>)}
+                </select>
+              </label>
+            </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
@@ -797,7 +893,7 @@ export default function PanelDocente({session, onLogout}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {datos.solicitudes.map((solicitud) => (
+                  {solicitudesFiltradas.map((solicitud) => (
                     <tr key={solicitud.id}>
                       <td><strong>{solicitud.aspirante?.nombre || 'N/A'}</strong></td>
                       <td>{solicitud.tipo_label || solicitud.tipo}</td>
@@ -806,18 +902,56 @@ export default function PanelDocente({session, onLogout}) {
                       <td>{new Intl.DateTimeFormat(copy.locale, {dateStyle: 'medium'}).format(new Date(solicitud.created_at))}</td>
                     </tr>
                   ))}
+                  {!solicitudesFiltradas.length && <tr><td colSpan="5" style={{textAlign: 'center', padding: '20px'}}>{datos.solicitudes?.length ? copy.filters.noResults : copy.common.noRequests}</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        {activeSection === 'perfil' && datos && <MiPerfilAcademico session={session} docenteId={datos.docente.id} onLogout={onLogout} />}
-        {activeSection === 'perfil' && datos && <PerfilAspirante perfil={{...datos.docente, telefono: datos.docente.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, docente: {...actual.docente, ...actualizado}}))} />}
+        {activeSection === 'perfil' && datos && (
+          <section className="docente-profile-layout">
+            <header className="docente-profile-hero">
+              <div className="docente-profile-avatar">
+                {datos.docente.profile_photo
+                  ? <img src={fotoUrl(datos.docente.profile_photo)} alt={datos.docente.nombre || copy.brand}/>
+                  : <span>{(datos.docente.nombre || copy.brand).charAt(0).toUpperCase()}</span>}
+              </div>
+              <div className="docente-profile-identity">
+                <p className="panel-kicker">{copy.menu.perfil}</p>
+                <h2>{datos.docente.nombre}</h2>
+                <p>{copy.brandSubtitle}</p>
+              </div>
+              <div className="docente-profile-details">
+                <div><span>{copy.common.user}</span><strong>{datos.docente.usuario || '—'}</strong></div>
+                <div><span>{copy.common.program}</span><strong>{datos.docente.programa || '—'}</strong></div>
+                <div><span>{copy.reports.unit}</span><strong>{datos.docente.unidad || '—'}</strong></div>
+              </div>
+            </header>
+            <div className="docente-profile-sections">
+              <MiPerfilAcademico session={session} docenteId={datos.docente.id} onLogout={onLogout} />
+              <PerfilAspirante perfil={{...datos.docente, telefono: datos.docente.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, docente: {...actual.docente, ...actualizado}}))} />
+            </div>
+          </section>
+        )}
 
         {activeSection === 'reportes' && datos && (
-          <div className="admin-grid-layout">
-            <DashboardAnalitico title={copy.reports.analytics} description={copy.reports.description} metrics={[{label:copy.reports.courses, value:datos.resumen.total_materias}, {label:copy.reports.students, value:datos.resumen.total_inscripciones}, {label:copy.reports.exams, value:datos.resumen.examenes_total}, {label:copy.reports.interviews, value:datos.resumen.entrevistas_total}]} distribution={[{label:copy.reports.passed, value:datos.resumen.inscripciones_aprobadas}, {label:copy.reports.failed, value:datos.resumen.inscripciones_reprobadas}, {label:copy.reports.completedExams, value:datos.resumen.examenes_completados}, {label:copy.reports.completedInterviews, value:datos.resumen.entrevistas_completadas}]} />
+          <section className="docente-report-layout">
+            <header className="docente-report-heading">
+              <div><p className="panel-kicker">{copy.reports.kicker}</p><h2>{copy.reports.title}</h2><p>{copy.reports.description}</p></div>
+            </header>
+            <div className="admin-card docente-report-filter">
+              <div className="docente-filter-bar">
+                <label><span>{copy.filters.subject}</span>
+                  <select value={materiaReporteFiltro} onChange={event => setMateriaReporteFiltro(event.target.value)}>
+                    <option value="">{copy.filters.allSubjects}</option>
+                    {datos.materias.map(materia => <option key={materia.id} value={materia.id}>{materia.clave} - {materia.nombre}</option>)}
+                  </select>
+                </label>
+              </div>
+              <p className="docente-report-filter-note">{copy.filters.cohortNote}</p>
+            </div>
+            <DashboardAnalitico title={copy.reports.analytics} description={copy.reports.description} metrics={[{label:copy.reports.courses, value:materiaReporteFiltro ? 1 : datos.resumen.total_materias}, {label:copy.reports.students, value:reporteEstudianteIds.size}, {label:copy.reports.exams, value:reporteExamenes.length}, {label:copy.reports.interviews, value:reporteEntrevistas.length}]} distribution={[{label:copy.reports.passed, value:reporteAprobados}, {label:copy.reports.failed, value:reporteReprobados}]} />
             <div className="admin-card">
               <div className="admin-card-head">
                 <div>
@@ -826,9 +960,9 @@ export default function PanelDocente({session, onLogout}) {
                 </div>
               </div>
               <div className="report-list">
-                <div><span>{copy.reports.totalStudents}</span><strong>{datos.resumen.total_inscripciones}</strong></div>
-                <div><span>{copy.reports.passed}</span><strong>{datos.resumen.inscripciones_aprobadas}</strong></div>
-                <div><span>{copy.reports.failed}</span><strong>{datos.resumen.inscripciones_reprobadas}</strong></div>
+                <div><span>{copy.reports.totalStudents}</span><strong>{reporteEstudianteIds.size}</strong></div>
+                <div><span>{copy.reports.passed}</span><strong>{reporteAprobados}</strong></div>
+                <div><span>{copy.reports.failed}</span><strong>{reporteReprobados}</strong></div>
               </div>
             </div>
 
@@ -839,59 +973,105 @@ export default function PanelDocente({session, onLogout}) {
                   <h3>{copy.brand}</h3>
                 </div>
               </div>
-              <div style={{padding: '16px'}}>
+              <div className="docente-report-identity">
                 <div><strong>{copy.courses.name}:</strong> {datos.docente.nombre}</div>
                 <div><strong>{copy.common.user}:</strong> {datos.docente.usuario}</div>
                 <div><strong>{copy.common.program}:</strong> {datos.docente.programa}</div>
                 <div><strong>{copy.reports.unit}:</strong> {datos.docente.unidad}</div>
               </div>
             </div>
-          </div>
+          </section>
         )}
       </main>
 
       {showCalificacionForm && (
-        <div className="modal-backdrop" onClick={() => setShowCalificacionForm(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-backdrop" onClick={cerrarFormularioCalificacion}>
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-grade-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.menu.calificaciones}</p>
-                <h3>{copy.grading.registration}</h3>
+                <h3 id="docente-grade-title">{copy.grading.registration}</h3>
               </div>
-              <button type="button" className="close-btn" onClick={() => setShowCalificacionForm(false)}>×</button>
+              <button type="button" className="close-btn" aria-label={copy.grading.cancel} onClick={cerrarFormularioCalificacion}>×</button>
             </div>
 
-            <form onSubmit={handleCalificacionSubmit} className="modal-form"><label>{copy.grading.number}<select name="numero_parcial" value={calificacionForm.numero_parcial} onChange={handleCalificacionChange}><option value="1">{copy.common.partials} 1</option><option value="2">{copy.common.partials} 2</option><option value="3">{copy.common.partials} 3</option><option value="final">{copy.grading.final}</option></select></label>
+            <form onSubmit={handleCalificacionSubmit} className="modal-form">
+              <label>{copy.filters.subject}
+                <select value={materiaCalificacionId} onChange={event => {setMateriaCalificacionId(event.target.value); setCalificacionForm(previous => ({...previous, inscripcion_id: ''}));}} required>
+                  <option value="">{copy.filters.selectSubject}</option>
+                  {datos?.materias?.map(materia => <option key={materia.id} value={materia.id}>{materia.clave} - {materia.nombre}</option>)}
+                </select>
+              </label>
+              <label>{copy.grading.number}<select name="numero_parcial" value={calificacionForm.numero_parcial} onChange={handleCalificacionChange}><option value="1">{copy.common.partials} 1</option><option value="2">{copy.common.partials} 2</option><option value="3">{copy.common.partials} 3</option><option value="final">{copy.grading.final}</option></select></label>
               <div className="form-grid">
                 <label>
                   {copy.interviews.student}
-                  <select name="inscripcion_id" value={calificacionForm.inscripcion_id} onChange={handleCalificacionChange}>
+                  <select name="inscripcion_id" value={calificacionForm.inscripcion_id} onChange={handleCalificacionChange} disabled={!materiaCalificacionId} required>
                     <option value="">{copy.common.selectStudent}</option>
-                    {datos?.inscripciones?.map((inscripcion) => (
+                    {inscripcionesFiltradasCalificacion.map((inscripcion) => (
                       <option key={inscripcion.id} value={inscripcion.id}>
-                        {inscripcion.aspirante.nombre} - {inscripcion.materia_clave}
+                        {inscripcion.aspirante?.nombre || inscripcion.aspirante?.usuario} ({inscripcion.aspirante?.usuario})
                       </option>
                     ))}
                   </select>
                 </label>
                 <label>
                   {copy.common.grade} (0-10)
-                  <input 
-                    type="number" 
-                    name="calificacion" 
-                    value={calificacionForm.calificacion} 
-                    onChange={handleCalificacionChange} 
+                  <input
+                    type="number"
+                    name="calificacion"
+                    value={calificacionForm.calificacion}
+                    onChange={handleCalificacionChange}
                     placeholder="8.5"
                     min="0"
                     max="10"
-                    step="0.5"
+                    step="0.1"
                   />
                 </label>
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowCalificacionForm(false)}>{copy.grading.cancel}</button>
+                <button type="button" className="btn-secondary" onClick={cerrarFormularioCalificacion}>{copy.grading.cancel}</button>
                 <button type="submit" className="btn-primary">{copy.common.registerGrade}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {examenCalificar && (
+        <div className="modal-backdrop" onClick={() => !guardandoExamen && setExamenCalificar(null)}>
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-exam-grade-title" onClick={event => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <p className="panel-kicker">{copy.exams.title}</p>
+                <h3 id="docente-exam-grade-title">{copy.exams.gradeAction}</h3>
+                <p className="panel-sub">{examenCalificar.aspirante?.nombre} · {examenCalificar.tipo_label || examenCalificar.tipo}</p>
+              </div>
+              <button type="button" className="close-btn" aria-label={copy.grading.cancel} disabled={guardandoExamen} onClick={() => setExamenCalificar(null)}>×</button>
+            </div>
+            <form className="modal-form" onSubmit={guardarCalificacionExamen}>
+              <label>{copy.common.grade} (0-10)
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.01"
+                  required
+                  value={examenCalificacionForm.calificacion}
+                  onChange={event => setExamenCalificacionForm(previous => ({...previous, calificacion: event.target.value}))}
+                />
+              </label>
+              <label>{copy.filters.feedback}
+                <textarea
+                  rows="3"
+                  value={examenCalificacionForm.retroalimentacion}
+                  onChange={event => setExamenCalificacionForm(previous => ({...previous, retroalimentacion: event.target.value}))}
+                />
+              </label>
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" disabled={guardandoExamen} onClick={() => setExamenCalificar(null)}>{copy.grading.cancel}</button>
+                <button type="submit" className="btn-primary" disabled={guardandoExamen}>{guardandoExamen ? copy.interviews.saving : copy.common.registerGrade}</button>
               </div>
             </form>
           </div>

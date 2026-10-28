@@ -3,6 +3,9 @@ import re
 import uuid
 import unicodedata
 from datetime import timedelta
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import transaction
 from django.db.models import Count, Avg, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
@@ -26,6 +29,7 @@ from .models import (
     Aspirante, Materia, PeriodoInscripcion, Inscripcion,
     DocumentoAspirante, AuditoriaSistema, ConfiguracionSistema,
 )
+from .configuracion_sistema import DEFAULTS as SYSTEM_CONFIG_DEFAULTS, parse_password_policy, password_meets_policy
 
 
 ROLE_ALIASES = {
@@ -58,9 +62,49 @@ def normalizar_rol(value):
     return ROLE_ALIASES.get(raw, ROLE_ALIASES.get(normalized, 'aspirante'))
 
 
+def rol_es_valido(value):
+    raw = str(value or '').strip().lower()
+    normalized = ''.join(ch for ch in unicodedata.normalize('NFKD', raw) if not unicodedata.combining(ch))
+    return raw in ROLE_ALIASES or normalized in ROLE_ALIASES
+
+
 def validar_password(password):
-    value = str(password or '')
-    return len(value) >= 8 and bool(re.search(r'[A-Z]', value)) and bool(re.search(r'[a-z]', value)) and bool(re.search(r'[0-9]', value))
+    return password_meets_policy(str(password or ''))
+
+
+def validar_correo(correo):
+    if len(correo) > 254:
+        return False
+    try:
+        validate_email(correo)
+    except ValidationError:
+        return False
+    return True
+
+
+def normalizar_estado_activo(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or '').strip().lower()
+    if normalized in ('activo', 'active', 'true', '1'):
+        return True
+    if normalized in ('inactivo', 'inactive', 'false', '0'):
+        return False
+    return None
+
+
+def usuario_es_admin_activo(user):
+    return user.is_active and (user.is_superuser or normalizar_rol(user.rol) == 'admin')
+
+
+def evitar_desactivar_ultimo_admin(user, activo, rol):
+    actual = Aspirante.objects.only('is_active', 'is_superuser', 'rol').get(pk=user.pk)
+    if usuario_es_admin_activo(actual) and (not activo or (not actual.is_superuser and normalizar_rol(rol) != 'admin')):
+        admins_activos = Aspirante.objects.filter(is_active=True).filter(
+            Q(is_superuser=True) | Q(rol='admin')
+        ).count()
+        return admins_activos <= 1
+    return False
 
 
 def ip_cliente(request):
@@ -69,6 +113,7 @@ def ip_cliente(request):
 
 
 def serializar_usuario(user):
+    locked_until = user.login_locked_until
     return {
         'id': user.id, 'nombre': user.nombre, 'usuario': user.usuario,
         'correo': user.correo, 'rol': user.rol, 'programa': user.programa,
@@ -78,6 +123,8 @@ def serializar_usuario(user):
         'created_at': user.created_at.isoformat() if user.created_at else None,
         'updated_at': user.updated_at.isoformat() if user.updated_at else None,
         'proceso_estado': user.proceso_estado,
+        'login_locked_until': locked_until.isoformat() if locked_until else None,
+        'is_locked': bool(locked_until and locked_until > timezone.now()),
     }
 
 
@@ -96,7 +143,7 @@ def _admin_report_rows(data):
         'usuarios_total', 'usuarios_activos', 'usuarios_inactivos', 'usuarios_activos_pct',
         'alumnos', 'docentes', 'aspirantes', 'inscripciones', 'documentos',
         'documentos_pendientes', 'promedio_general', 'registros_mes_actual',
-        'registros_mes_anterior', 'usuarios_variacion_pct', 'aceptadas_ultimos_30_dias',
+        'registros_mes_anterior', 'usuarios_variacion_pct', 'aspirantes_aceptados',
         'auditoria_ultimos_30_dias',
     )
     return [[key.replace('_', ' ').title(), data.get(key, 0)] for key in keys]
@@ -174,11 +221,23 @@ class AdminUsuariosView(APIView):
         usuario = str(data.get('usuario') or '').strip()
         correo = str(data.get('correo') or data.get('email') or '').strip().lower()
         password = str(data.get('password') or '').strip()
-        rol = normalizar_rol(data.get('rol') or data.get('role'))
+        rol_solicitado = data.get('rol') or data.get('role') or 'aspirante'
+        rol = normalizar_rol(rol_solicitado)
         if not nombre or not usuario or not correo or not password:
             return Response({'error': 'Nombre, usuario, correo y contraseña son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(nombre) > 180:
+            return Response({'error': 'El nombre no puede superar 180 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not 3 <= len(usuario) <= 20:
+            return Response({'error': 'El nombre de usuario debe tener entre 3 y 20 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not validar_correo(correo):
+            return Response({'error': 'Ingresa un correo electrónico válido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not rol_es_valido(rol_solicitado):
+            return Response({'error': 'El rol seleccionado no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
         if not validar_password(password):
-            return Response({'error': 'La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'La contraseña no cumple la política configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+        estado_activo = normalizar_estado_activo(data.get('is_active', data.get('status', 'Activo')))
+        if estado_activo is None:
+            return Response({'error': 'El estado de la cuenta no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
         if Aspirante.objects.filter(usuario__iexact=usuario).exists():
             return Response({'error': 'El nombre de usuario ya está registrado.'}, status=status.HTTP_400_BAD_REQUEST)
         if Aspirante.objects.filter(correo__iexact=correo).exists():
@@ -196,7 +255,7 @@ class AdminUsuariosView(APIView):
             nombre_familiar='No aplica', parentesco='No aplica', telefono_familiar='0000000000',
             ultimo_grado='No aplica', institucion='Cinvestav', business_key=f'ADMIN-{uuid.uuid4().hex.upper()}',
             rol=rol, is_staff=rol in ('admin', 'coordinacion'),
-            is_active=data.get('is_active', data.get('status', 'Activo') != 'Inactivo'),
+            is_active=estado_activo,
         )
         registrar_auditoria(request, 'alta_usuario', 'Aspirante', user.id, nuevos=serializar_usuario(user))
         return Response(serializar_usuario(user), status=status.HTTP_201_CREATED)
@@ -218,31 +277,61 @@ class AdminUsuarioDetailView(APIView):
         antes = serializar_usuario(user)
         data = request.data
         if 'nombre' in data or 'name' in data:
-            user.nombre = str(data.get('nombre', data.get('name'))).strip() or user.nombre
+            nombre = str(data.get('nombre', data.get('name'))).strip()
+            if not nombre:
+                return Response({'error': 'El nombre no puede estar vacío.'}, status=status.HTTP_400_BAD_REQUEST)
+            if len(nombre) > 180:
+                return Response({'error': 'El nombre no puede superar 180 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.nombre = nombre
         if 'correo' in data or 'email' in data:
             correo = str(data.get('correo', data.get('email'))).strip().lower()
+            if not validar_correo(correo):
+                return Response({'error': 'Ingresa un correo electrónico válido.'}, status=status.HTTP_400_BAD_REQUEST)
             if Aspirante.objects.exclude(pk=user.pk).filter(correo__iexact=correo).exists():
                 return Response({'error': 'El correo ya está registrado.'}, status=status.HTTP_400_BAD_REQUEST)
             user.correo = correo
         if 'usuario' in data:
             usuario = str(data.get('usuario')).strip()
+            if not 3 <= len(usuario) <= 20:
+                return Response({'error': 'El nombre de usuario debe tener entre 3 y 20 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
             if Aspirante.objects.exclude(pk=user.pk).filter(usuario__iexact=usuario).exists():
                 return Response({'error': 'El usuario ya está registrado.'}, status=status.HTTP_400_BAD_REQUEST)
             user.usuario = usuario
+        rol_nuevo = user.rol
         if 'rol' in data or 'role' in data:
-            user.rol = normalizar_rol(data.get('rol', data.get('role')))
+            rol_solicitado = data.get('rol', data.get('role'))
+            rol_nuevo = normalizar_rol(rol_solicitado)
+            if not rol_es_valido(rol_solicitado):
+                return Response({'error': 'El rol seleccionado no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.rol = rol_nuevo
             user.is_staff = user.rol in ('admin', 'coordinacion')
+        if 'area' in data:
+            area = str(data.get('area') or '').strip()
+            user.programa = area
+            user.departamento = area
         for field in ('unidad', 'departamento', 'seccion', 'programa', 'matricula', 'proceso_estado'):
             if field in data:
                 setattr(user, field, str(data.get(field) or ''))
+        activo_actual = user.is_active
+        activo_nuevo = activo_actual
         if 'is_active' in data or 'status' in data:
-            value = data.get('is_active', data.get('status') not in ('Inactivo', 'inactive', False))
-            user.is_active = value if isinstance(value, bool) else str(value).lower() not in ('false', 'inactivo', 'inactive', '0')
+            value = data.get('is_active') if 'is_active' in data else data.get('status')
+            activo_nuevo = normalizar_estado_activo(value)
+            if activo_nuevo is None:
+                return Response({'error': 'El estado de la cuenta no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.is_active = activo_nuevo
+        if evitar_desactivar_ultimo_admin(user, activo_nuevo, rol_nuevo):
+            return Response({'error': 'No se puede desactivar o cambiar el rol del último administrador activo.'}, status=status.HTTP_409_CONFLICT)
         if data.get('password'):
             password = str(data['password'])
             if not validar_password(password):
-                return Response({'error': 'La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': 'La contraseña no cumple la política configurada.'}, status=status.HTTP_400_BAD_REQUEST)
             user.set_password(password)
+            user.login_failed_attempts = 0
+            user.login_locked_until = None
+        elif activo_nuevo and not activo_actual:
+            user.login_failed_attempts = 0
+            user.login_locked_until = None
         user.save()
         despues = serializar_usuario(user)
         registrar_auditoria(request, 'actualizacion_usuario', 'Aspirante', user.id, antes, despues)
@@ -252,6 +341,8 @@ class AdminUsuarioDetailView(APIView):
         user = self.get_object(pk)
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        if evitar_desactivar_ultimo_admin(user, False, user.rol):
+            return Response({'error': 'No se puede desactivar al último administrador activo.'}, status=status.HTTP_409_CONFLICT)
         antes = serializar_usuario(user)
         user.is_active = False
         user.save(update_fields=['is_active', 'updated_at'])
@@ -279,12 +370,18 @@ class AdminCatalogosView(APIView):
             nombre = str(request.data.get('nombre') or '').strip()
             if not clave or not nombre:
                 return Response({'error': 'Clave y nombre son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+            if len(clave) > 40 or len(nombre) > 200:
+                return Response({'error': 'La clave admite hasta 40 caracteres y el nombre hasta 200.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 creditos = int(request.data.get('creditos') or 4)
                 capacidad = int(request.data.get('capacidad') or 42)
             except (TypeError, ValueError):
                 return Response({'error': 'Créditos y capacidad deben ser números válidos.'}, status=status.HTTP_400_BAD_REQUEST)
             salon = str(request.data.get('salon') or 'salon_1').strip()
+            profesor = str(request.data.get('profesor') or '').strip()
+            horario = str(request.data.get('horario') or '').strip()
+            if len(profesor) > 180 or len(horario) > 120:
+                return Response({'error': 'El profesor admite hasta 180 caracteres y el horario hasta 120.'}, status=status.HTTP_400_BAD_REQUEST)
             if creditos not in (4, 5, 7):
                 return Response({'error': 'Los créditos deben ser 4, 5 o 7.'}, status=status.HTTP_400_BAD_REQUEST)
             if not 1 <= capacidad <= 32767:
@@ -293,7 +390,7 @@ class AdminCatalogosView(APIView):
                 return Response({'error': 'Selecciona un salón válido.'}, status=status.HTTP_400_BAD_REQUEST)
             materia, _ = Materia.objects.update_or_create(clave=clave, defaults={
                 'nombre': nombre, 'creditos': creditos, 'salon': salon, 'capacidad': capacidad,
-                'profesor': str(request.data.get('profesor') or ''), 'horario': str(request.data.get('horario') or ''),
+                'profesor': profesor, 'horario': horario,
             })
             registrar_auditoria(request, 'actualizacion_catalogo', 'Materia', materia.id, nuevos={'clave': materia.clave, 'nombre': materia.nombre})
             return Response({'id': materia.id, 'clave': materia.clave, 'nombre': materia.nombre, 'creditos': materia.creditos, 'salon': materia.salon, 'capacidad': materia.capacidad})
@@ -303,6 +400,8 @@ class AdminCatalogosView(APIView):
             cierre = parse_datetime(str(request.data.get('cierre') or ''))
             if not nombre or not apertura or not cierre:
                 return Response({'error': 'Nombre, apertura y cierre son obligatorios y deben ser fechas válidas.'}, status=status.HTTP_400_BAD_REQUEST)
+            if len(nombre) > 40:
+                return Response({'error': 'El nombre del periodo no puede superar 40 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
             if timezone.is_naive(apertura): apertura = timezone.make_aware(apertura)
             if timezone.is_naive(cierre): cierre = timezone.make_aware(cierre)
             if apertura >= cierre:
@@ -374,12 +473,24 @@ class AdminAlumnosView(APIView):
         if not alumno:
             return Response({'error': 'Alumno no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         antes = resumen_alumno(alumno)
+        if 'matricula' in request.data:
+            matricula = str(request.data.get('matricula') or '').strip()
+            if len(matricula) > 30:
+                return Response({'error': 'La matrícula no puede superar 30 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+            if matricula and Aspirante.objects.exclude(pk=alumno.pk).filter(matricula__iexact=matricula).exists():
+                return Response({'error': 'La matrícula ya está asignada a otra cuenta.'}, status=status.HTTP_400_BAD_REQUEST)
         for field in ('programa', 'departamento', 'unidad', 'matricula', 'proceso_estado'):
             if field in request.data:
-                setattr(alumno, field, str(request.data.get(field) or ''))
+                value = matricula if field == 'matricula' else str(request.data.get(field) or '')
+                setattr(alumno, field, value)
         if 'is_active' in request.data:
-            active_value = request.data.get('is_active')
-            alumno.is_active = active_value if isinstance(active_value, bool) else str(active_value).lower() not in ('false', '0', 'inactivo', 'inactive')
+            active_value = normalizar_estado_activo(request.data.get('is_active'))
+            if active_value is None:
+                return Response({'error': 'El estado de la cuenta no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
+            alumno.is_active = active_value
+            if active_value:
+                alumno.login_failed_attempts = 0
+                alumno.login_locked_until = None
         alumno.save()
         despues = resumen_alumno(alumno)
         registrar_auditoria(request, 'actualizacion_alumno', 'Aspirante', alumno.id, antes, despues)
@@ -407,6 +518,7 @@ class AdminReportesView(APIView):
         data = {
             'usuarios_total': users.count(), 'usuarios_activos': users.filter(is_active=True).count(),
             'usuarios_inactivos': users.filter(is_active=False).count(), 'alumnos': alumnos.count(),
+            'cuentas_bloqueadas': users.filter(login_locked_until__gt=ahora, is_active=True).count(),
             'docentes': docentes.count(), 'aspirantes': users.filter(rol='aspirante').count(),
             'inscripciones': Inscripcion.objects.count(), 'documentos': DocumentoAspirante.objects.count(),
             'promedio_general': float(Inscripcion.objects.filter(calificacion__isnull=False).aggregate(v=Avg('calificacion'))['v'] or 0),
@@ -417,7 +529,7 @@ class AdminReportesView(APIView):
             'registros_mes_actual': registros_mes_actual,
             'registros_mes_anterior': registros_mes_anterior,
             'usuarios_variacion_pct': variacion,
-            'aceptadas_ultimos_30_dias': users.filter(proceso_estado='aceptado', created_at__gte=inicio_30_dias).count(),
+            'aspirantes_aceptados': users.filter(rol='aspirante', proceso_estado='aceptado', is_active=True).count(),
             'documentos_pendientes': DocumentoAspirante.objects.filter(lida_notificado=False).count(),
             'auditoria_ultimos_30_dias': AuditoriaSistema.objects.filter(created_at__gte=inicio_30_dias).count(),
             'actividad_mensual': actividad_mensual,
@@ -433,7 +545,7 @@ class AdminReportesView(APIView):
             response['Content-Disposition'] = 'attachment; filename="reporte_sinac.csv"'
             writer = csv.writer(response)
             writer.writerow(['Indicador', 'Valor'])
-            for key in ('usuarios_total', 'usuarios_activos', 'usuarios_inactivos', 'usuarios_activos_pct', 'alumnos', 'docentes', 'aspirantes', 'inscripciones', 'documentos', 'documentos_pendientes', 'promedio_general', 'registros_mes_actual', 'registros_mes_anterior', 'usuarios_variacion_pct', 'aceptadas_ultimos_30_dias', 'auditoria_ultimos_30_dias'):
+            for key in ('usuarios_total', 'usuarios_activos', 'usuarios_inactivos', 'usuarios_activos_pct', 'alumnos', 'docentes', 'aspirantes', 'inscripciones', 'documentos', 'documentos_pendientes', 'promedio_general', 'registros_mes_actual', 'registros_mes_anterior', 'usuarios_variacion_pct', 'aspirantes_aceptados', 'auditoria_ultimos_30_dias'):
                 writer.writerow([key, data[key]])
             return response
         return Response(data)
@@ -484,24 +596,64 @@ class AdminAuditoriaView(APIView):
 
 class AdminConfiguracionView(APIView):
     permission_classes = [AdminRolePermission]
-    defaults = {
-        'nombre_sistema': 'SINAC NEXT', 'campus': 'Cinvestav Unidad Zacatenco',
-        'correo_soporte': 'unidaddeenlace@cinvestav.mx', 'zona_horaria': 'America/Mexico_City',
-        'politica_password': '8 caracteres, mayúscula, minúscula y número',
-        'bloqueo_intentos': '5', 'notificaciones_activas': 'true',
-    }
+    defaults = SYSTEM_CONFIG_DEFAULTS
 
     def get(self, request):
         values = dict(self.defaults)
-        values.update({c.clave: c.valor for c in ConfiguracionSistema.objects.all()})
+        values.update({
+            c.clave: c.valor for c in ConfiguracionSistema.objects.filter(clave__in=self.defaults)
+        })
         return Response(values)
 
     def put(self, request):
+        unknown = set(request.data) - set(self.defaults)
+        if unknown:
+            return Response({'error': 'La configuración contiene campos no permitidos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.data:
+            return Response({'error': 'Envía al menos un valor para actualizar.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        values = {}
+        for key, raw_value in request.data.items():
+            value = str(raw_value).strip()
+            if key == 'politica_password':
+                policy = parse_password_policy(value)
+                if policy is None:
+                    return Response({
+                        key: 'Usa el formato «8 caracteres, mayúscula, minúscula y número» (mínimo 8, máximo 128).'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                if not any((policy['uppercase'], policy['lowercase'], policy['number'])):
+                    return Response({key: 'La política debe exigir al menos un tipo de carácter.'}, status=status.HTTP_400_BAD_REQUEST)
+            elif key == 'bloqueo_intentos':
+                try:
+                    attempts = int(value)
+                except ValueError:
+                    return Response({key: 'Debe ser un número entero entre 1 y 20.'}, status=status.HTTP_400_BAD_REQUEST)
+                if not 1 <= attempts <= 20:
+                    return Response({key: 'Debe ser un número entero entre 1 y 20.'}, status=status.HTTP_400_BAD_REQUEST)
+                value = str(attempts)
+            elif key == 'notificaciones_activas':
+                normalized = value.casefold()
+                if normalized not in ('true', 'false', '1', '0', 'yes', 'no', 'si', 'sí', 'on', 'off'):
+                    return Response({key: 'Envía verdadero o falso.'}, status=status.HTTP_400_BAD_REQUEST)
+                value = 'true' if normalized in ('true', '1', 'yes', 'si', 'sí', 'on') else 'false'
+            values[key] = value
+
         updated = {}
-        for key, value in request.data.items():
-            if key not in self.defaults:
-                continue
-            config, _ = ConfiguracionSistema.objects.update_or_create(clave=key, defaults={'valor': str(value), 'actualizado_por': request.user})
-            updated[key] = config.valor
-            registrar_auditoria(request, 'actualizacion_configuracion', 'ConfiguracionSistema', config.id, nuevos={key: config.valor})
+        with transaction.atomic():
+            for key, value in values.items():
+                config, created = ConfiguracionSistema.objects.get_or_create(
+                    clave=key,
+                    defaults={'valor': value, 'actualizado_por': request.user},
+                )
+                previous_value = config.valor
+                if not created:
+                    config.valor = value
+                    config.actualizado_por = request.user
+                    config.save(update_fields=['valor', 'actualizado_por', 'updated_at'])
+                updated[key] = config.valor
+                registrar_auditoria(
+                    request, 'actualizacion_configuracion', 'ConfiguracionSistema', config.id,
+                    anteriores={key: previous_value} if not created else {},
+                    nuevos={key: config.valor},
+                )
         return Response(updated)

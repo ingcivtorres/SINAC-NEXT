@@ -4,6 +4,7 @@ import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import EgresadosPanel from './EgresadosPanel';
 import HistoricoPanel from './HistoricoPanel';
 import ExamenesGestionPanel from './ExamenesGestionPanel';
+import SolicitudesAcademicasReview from './SolicitudesAcademicasReview';
 import {useCoordinationCopy} from './coordinationPanelTranslations';
 import './PanelCoordinacion.css';
 
@@ -12,11 +13,12 @@ const FILTROS = [
   {id: 'por-revisar', key: 'review'},
   {id: 'revision', key: 'inReview'},
   {id: 'aceptado', key: 'accepted'},
+  {id: 'rechazado', key: 'rejected'},
 ];
 
 const COORDINATION_NAV = [
   {label: 'overview', items: [['resumen', 'Resumen', '▦'], ['bandeja', 'Bandeja de solicitudes', '◷'], ['detalle', 'Detalle de expediente', '◉']]},
-  {label: 'academic', items: [['materias', 'Materias y cursos', '▤'], ['cargas', 'Aprobación de carga', '↗'], ['extemporanea', 'Inscripción extemporánea', '＋'], ['examenes', 'Exámenes en línea', '✎']]},
+  {label: 'academic', items: [['materias', 'Materias y cursos', '▤'], ['cargas', 'Preparar carga académica', '↗'], ['solicitudesAcademicas', 'Solicitudes académicas', '✉'], ['inscripciones', 'Inscripciones regulares', '✓'], ['extemporanea', 'Inscripción extemporánea', '＋'], ['examenes', 'Exámenes en línea', '✎']]},
   {label: 'research', items: [['tesis', 'Proyectos de tesis', '◆'], ['asignaciones', 'Asignación de directores', '↔'], ['predoctoral', 'Examen predoctoral', '✦'], ['colegio', 'Colegio de Profesores', '◈']]},
   {label: 'community', items: [['alumnos', 'Alumnos', '♙'], ['aspirantes', 'Aspirantes', '◎'], ['egresados', 'Egresados', '♛'], ['historico', 'Histórico', '⟲'], ['personal', 'Docentes y Directores', '◇'], ['reportes', 'Reportes', '▥'], ['perfil', 'Mi perfil', '●']]},
 ];
@@ -52,11 +54,19 @@ const CARGA_FORM_TEXT = {
 };
 
 const EXTEMPORANEO_TEXT = {
-  es: {student:'Alumno', chooseStudent:'Selecciona un alumno', period:'Periodo de inscripción', choosePeriod:'Selecciona un periodo', subjects:'Materias disponibles', reason:'Motivo obligatorio', reasonHint:'Explica por qué se realiza fuera del periodo regular.', submit:'Registrar inscripción', saving:'Registrando...', saved:'Inscripción extemporánea registrada.', loadError:'No se pudieron cargar los datos para la inscripción.', saveError:'No se pudo registrar la inscripción.', noStudents:'No hay alumnos disponibles.', noSubjects:'No hay materias disponibles en una carga publicada para ese periodo.', capacity:'Cupo', full:'Sin cupo', loading:'Cargando materias...'},
-  en: {student:'Student', chooseStudent:'Select a student', period:'Enrollment period', choosePeriod:'Select a period', subjects:'Available subjects', reason:'Required reason', reasonHint:'Explain why this is outside the regular enrollment period.', submit:'Register enrollment', saving:'Registering...', saved:'Late enrollment registered.', loadError:'Could not load enrollment data.', saveError:'Could not register the enrollment.', noStudents:'There are no students available.', noSubjects:'No subjects are available in a published course load for this period.', capacity:'Seats', full:'Full', loading:'Loading subjects...'},
-  de: {student:'Studierende', chooseStudent:'Studierende auswählen', period:'Einschreibungszeitraum', choosePeriod:'Zeitraum auswählen', subjects:'Verfügbare Fächer', reason:'Begründung erforderlich', reasonHint:'Erläutern Sie die Einschreibung außerhalb des regulären Zeitraums.', submit:'Einschreibung registrieren', saving:'Wird registriert...', saved:'Nachträgliche Einschreibung registriert.', loadError:'Einschreibungsdaten konnten nicht geladen werden.', saveError:'Einschreibung konnte nicht registriert werden.', noStudents:'Keine Studierenden verfügbar.', noSubjects:'Keine Fächer in einem veröffentlichten Angebot verfügbar.', capacity:'Plätze', full:'Voll', loading:'Fächer werden geladen...'},
-  zh: {student:'学生', chooseStudent:'选择学生', period:'注册学期', choosePeriod:'选择学期', subjects:'可选课程', reason:'必须填写原因', reasonHint:'说明为何在常规注册期外办理。', submit:'登记注册', saving:'正在登记...', saved:'已登记逾期注册。', loadError:'无法加载注册数据。', saveError:'无法登记注册。', noStudents:'没有可用学生。', noSubjects:'该学期没有已发布课程。', capacity:'名额', full:'已满', loading:'正在加载课程...'},
-  pt: {student:'Aluno', chooseStudent:'Selecione um aluno', period:'Período de inscrição', choosePeriod:'Selecione um período', subjects:'Disciplinas disponíveis', reason:'Motivo obrigatório', reasonHint:'Explique por que a inscrição ocorre fora do prazo regular.', submit:'Registrar inscrição', saving:'Registrando...', saved:'Inscrição fora do prazo registrada.', loadError:'Não foi possível carregar os dados da inscrição.', saveError:'Não foi possível registrar a inscrição.', noStudents:'Não há alunos disponíveis.', noSubjects:'Não há disciplinas em uma oferta publicada para esse período.', capacity:'Vagas', full:'Sem vagas', loading:'Carregando disciplinas...'},
+  es: {student:'Alumno', chooseStudent:'Selecciona un alumno', period:'Periodo de inscripción', choosePeriod:'Selecciona un periodo', subjects:'Materias disponibles', reason:'Motivo obligatorio', reasonHint:'Explica por qué se realiza fuera del periodo regular o la situación excepcional.', intro:'Para inscripciones fuera de plazo o por una situación excepcional, envía la solicitud a Servicios Escolares. Requiere autorización para hacerse efectiva.', submit:'Enviar solicitud a Servicios Escolares', saving:'Enviando solicitud...', saved:'Solicitud enviada a Servicios Escolares. La inscripción y el oficio estarán disponibles cuando sea aprobada.', loadError:'No se pudieron cargar los datos para la inscripción.', saveError:'No se pudo enviar la solicitud.', noStudents:'No hay alumnos disponibles.', noSubjects:'No hay materias disponibles en una carga publicada para ese periodo.', capacity:'Cupo', full:'Sin cupo', loading:'Cargando materias...', stepStudent:'Alumno y periodo', stepSubjects:'Materias', stepReason:'Motivo y envío', selected:'seleccionadas', credits:'créditos', available:'disponibles'},
+  en: {student:'Student', chooseStudent:'Select a student', period:'Enrollment period', choosePeriod:'Select a period', subjects:'Available subjects', reason:'Required reason', reasonHint:'Explain why this is outside the regular enrollment period or describe the exceptional situation.', intro:'For late enrollment or an exceptional situation, send a request to School Services. Approval is required for it to take effect.', submit:'Send request to School Services', saving:'Sending request...', saved:'Request sent to School Services. Enrollment and the formal letter will be available after approval.', loadError:'Could not load enrollment data.', saveError:'Could not send the request.', noStudents:'There are no students available.', noSubjects:'No subjects are available in a published course load for this period.', capacity:'Seats', full:'Full', loading:'Loading subjects...', stepStudent:'Student and period', stepSubjects:'Subjects', stepReason:'Reason and submission', selected:'selected', credits:'credits', available:'available'},
+  de: {student:'Studierende', chooseStudent:'Studierende auswählen', period:'Einschreibungszeitraum', choosePeriod:'Zeitraum auswählen', subjects:'Verfügbare Fächer', reason:'Begründung erforderlich', reasonHint:'Erläutern Sie die Einschreibung außerhalb des regulären Zeitraums oder beschreiben Sie die Ausnahmesituation.', intro:'Senden Sie den Antrag an die Studienverwaltung. Die Einschreibung wird erst nach Genehmigung wirksam.', submit:'Antrag an die Studienverwaltung senden', saving:'Antrag wird gesendet...', saved:'Der Antrag wurde an die Studienverwaltung gesendet. Einschreibung und Schreiben sind nach Genehmigung verfügbar.', loadError:'Einschreibungsdaten konnten nicht geladen werden.', saveError:'Der Antrag konnte nicht gesendet werden.', noStudents:'Keine Studierenden verfügbar.', noSubjects:'Keine Fächer in einem veröffentlichten Angebot verfügbar.', capacity:'Plätze', full:'Voll', loading:'Fächer werden geladen...', stepStudent:'Studierende und Zeitraum', stepSubjects:'Fächer', stepReason:'Begründung und Versand', selected:'ausgewählt', credits:'Credits', available:'verfügbar'},
+  zh: {student:'学生', chooseStudent:'选择学生', period:'注册学期', choosePeriod:'选择学期', subjects:'可选课程', reason:'必须填写原因', reasonHint:'说明为何在常规注册期外办理，或描述特殊情况。', intro:'将申请发送给学务处。只有获批后才会正式注册课程。', submit:'发送给学务处审批', saving:'正在发送申请...', saved:'申请已发送给学务处。获批后可完成注册并下载正式文件。', loadError:'无法加载注册数据。', saveError:'无法发送申请。', noStudents:'没有可用学生。', noSubjects:'该学期没有已发布课程。', capacity:'名额', full:'已满', loading:'正在加载课程...', stepStudent:'学生和学期', stepSubjects:'课程', stepReason:'原因和提交', selected:'已选', credits:'学分', available:'可用'},
+  pt: {student:'Aluno', chooseStudent:'Selecione um aluno', period:'Período de inscrição', choosePeriod:'Selecione um período', subjects:'Disciplinas disponíveis', reason:'Motivo obrigatório', reasonHint:'Explique por que a inscrição ocorre fora do prazo regular ou descreva a situação excepcional.', intro:'Envie a solicitação aos Serviços Escolares. A inscrição só será efetivada após aprovação.', submit:'Enviar solicitação aos Serviços Escolares', saving:'Enviando solicitação...', saved:'Solicitação enviada aos Serviços Escolares. A inscrição e o ofício estarão disponíveis após aprovação.', loadError:'Não foi possível carregar os dados da inscrição.', saveError:'Não foi possível enviar a solicitação.', noStudents:'Não há alunos disponíveis.', noSubjects:'Não há disciplinas em uma oferta publicada para esse período.', capacity:'Vagas', full:'Sem vagas', loading:'Carregando disciplinas...', stepStudent:'Aluno e período', stepSubjects:'Disciplinas', stepReason:'Motivo e envio', selected:'selecionadas', credits:'créditos', available:'disponíveis'},
+};
+
+const INSCRIPCION_REGULAR_TEXT = {
+  es: {intro:'Registra la carga regular del alumno mientras Servicios Escolares mantenga abierto el periodo. La inscripción quedará pendiente de validación administrativa.', noPeriod:'No hay un periodo abierto. Solicita a Servicios Escolares que habilite el periodo de inscripción.', student:'Alumno', chooseStudent:'Selecciona un alumno', period:'Periodo vigente', subjects:'Materias disponibles', chooseStudentFirst:'Selecciona un alumno para consultar sus materias.', noSubjects:'No hay materias disponibles en la carga publicada de este periodo.', completed:'El alumno ya completó las cuatro materias de este periodo.', remaining:'materias por seleccionar para completar las 4 del periodo', submit:'Registrar inscripción regular', saving:'Registrando inscripción...', saved:'Inscripción registrada. Está pendiente de validación de Servicios Escolares.', loadError:'No se pudo cargar la información de inscripción.', saveError:'No se pudo registrar la inscripción.', noStudents:'No hay alumnos disponibles.', capacity:'Cupo', full:'Sin cupo', selected:'seleccionadas', credits:'créditos', available:'disponibles', pendingValidation:'La boleta formal estará disponible cuando Servicios Escolares valide todas las materias.', downloadSlip:'Descargar boleta formal', downloadError:'No se pudo descargar la boleta formal.', extRequests:'Solicitudes extemporáneas del alumno', pending:'Pendiente de autorización', approved:'Aprobada', rejected:'Rechazada', downloadOffice:'Descargar oficio formal'},
+  en: {intro:'Register the student’s regular course load while School Services keeps enrollment open. The enrollment will remain pending administrative validation.', noPeriod:'There is no open enrollment period. Ask School Services to open one.', student:'Student', chooseStudent:'Select a student', period:'Current period', subjects:'Available subjects', chooseStudentFirst:'Select a student to view available subjects.', noSubjects:'No subjects are available in the published course load for this period.', completed:'The student has completed the four subjects for this period.', remaining:'subjects left to complete the 4 for this period', submit:'Register regular enrollment', saving:'Registering enrollment...', saved:'Enrollment registered. It is pending School Services validation.', loadError:'Could not load enrollment information.', saveError:'Could not register the enrollment.', noStudents:'There are no students available.', capacity:'Capacity', full:'Full', selected:'selected', credits:'credits', available:'available', pendingValidation:'The formal enrollment slip will be available after School Services validates all subjects.', downloadSlip:'Download formal enrollment slip', downloadError:'Could not download the formal enrollment slip.', extRequests:'Student late-enrollment requests', pending:'Pending approval', approved:'Approved', rejected:'Rejected', downloadOffice:'Download formal letter'},
+  de: {intro:'Registrieren Sie die reguläre Kursbelegung, solange die Einschreibung durch die Studienverwaltung geöffnet ist. Die Einschreibung bleibt bis zur administrativen Prüfung ausstehend.', noPeriod:'Es gibt keinen offenen Einschreibungszeitraum. Bitten Sie die Studienverwaltung, einen Zeitraum zu öffnen.', student:'Studierende', chooseStudent:'Studierende auswählen', period:'Aktueller Zeitraum', subjects:'Verfügbare Fächer', chooseStudentFirst:'Wählen Sie Studierende aus, um verfügbare Fächer anzuzeigen.', noSubjects:'Im veröffentlichten Lehrangebot dieses Zeitraums sind keine Fächer verfügbar.', completed:'Die vier Fächer dieses Zeitraums wurden bereits abgeschlossen.', remaining:'Fächer fehlen, um die 4 für diesen Zeitraum zu vervollständigen', submit:'Reguläre Einschreibung registrieren', saving:'Einschreibung wird registriert...', saved:'Einschreibung registriert. Die administrative Prüfung durch die Studienverwaltung steht noch aus.', loadError:'Einschreibungsdaten konnten nicht geladen werden.', saveError:'Einschreibung konnte nicht registriert werden.', noStudents:'Keine Studierenden verfügbar.', capacity:'Kapazität', full:'Voll', selected:'ausgewählt', credits:'Credits', available:'verfügbar', pendingValidation:'Die formelle Einschreibebescheinigung ist nach der Prüfung aller Fächer durch die Studienverwaltung verfügbar.', downloadSlip:'Formelle Einschreibebescheinigung herunterladen', downloadError:'Die Bescheinigung konnte nicht heruntergeladen werden.', extRequests:'Anträge auf nachträgliche Einschreibung', pending:'Genehmigung ausstehend', approved:'Genehmigt', rejected:'Abgelehnt', downloadOffice:'Formelles Schreiben herunterladen'},
+  zh: {intro:'在学务处开放注册期间，为学生登记常规课程。注册记录将等待学务处行政审核。', noPeriod:'当前没有开放的注册学期。请联系学务处开放注册。', student:'学生', chooseStudent:'选择学生', period:'当前学期', subjects:'可选课程', chooseStudentFirst:'选择学生以查看可选课程。', noSubjects:'本学期已发布的课程安排中没有可选课程。', completed:'该学生已完成本学期四门课程。', remaining:'门课程待选，以完成本学期4门课程', submit:'登记常规注册', saving:'正在登记...', saved:'注册已登记，等待学务处行政审核。', loadError:'无法加载注册信息。', saveError:'无法登记注册。', noStudents:'没有可用学生。', capacity:'名额', full:'已满', selected:'已选', credits:'学分', available:'可用', pendingValidation:'学务处审核全部课程后，可下载正式注册证明。', downloadSlip:'下载正式注册证明', downloadError:'无法下载正式注册证明。', extRequests:'学生的逾期注册申请', pending:'等待批准', approved:'已批准', rejected:'已拒绝', downloadOffice:'下载正式函件'},
+  pt: {intro:'Registre a carga regular do aluno enquanto os Serviços Escolares mantiverem o período aberto. A inscrição ficará pendente de validação administrativa.', noPeriod:'Não há período de inscrição aberto. Solicite aos Serviços Escolares que o habilitem.', student:'Aluno', chooseStudent:'Selecione um aluno', period:'Período vigente', subjects:'Disciplinas disponíveis', chooseStudentFirst:'Selecione um aluno para consultar as disciplinas disponíveis.', noSubjects:'Não há disciplinas disponíveis na carga publicada deste período.', completed:'O aluno já completou as quatro disciplinas deste período.', remaining:'disciplinas restantes para completar as 4 do período', submit:'Registrar inscrição regular', saving:'Registrando inscrição...', saved:'Inscrição registrada. Está pendente de validação dos Serviços Escolares.', loadError:'Não foi possível carregar os dados da inscrição.', saveError:'Não foi possível registrar a inscrição.', noStudents:'Não há alunos disponíveis.', capacity:'Vagas', full:'Sem vagas', selected:'selecionadas', credits:'créditos', available:'disponíveis', pendingValidation:'O comprovante formal ficará disponível quando os Serviços Escolares validarem todas as disciplinas.', downloadSlip:'Baixar comprovante formal', downloadError:'Não foi possível baixar o comprovante formal.', extRequests:'Solicitações extemporâneas do aluno', pending:'Aguardando aprovação', approved:'Aprovada', rejected:'Rejeitada', downloadOffice:'Baixar ofício formal'},
 };
 
 export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
@@ -65,11 +75,19 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const onLogout = useCallback((...args) => onLogoutRef.current?.(...args), []);
   const copy = useCoordinationCopy();
   const extText = EXTEMPORANEO_TEXT[copy.locale.slice(0, 2)] || EXTEMPORANEO_TEXT.es;
+  const regularText = INSCRIPCION_REGULAR_TEXT[copy.locale.slice(0, 2)] || INSCRIPCION_REGULAR_TEXT.es;
   const cargaText = CARGA_FORM_TEXT[(document.documentElement.lang || 'es').slice(0, 2)] || CARGA_FORM_TEXT.es;
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState('por-revisar');
+  const [notificacionGrupo, setNotificacionGrupo] = useState('por-revisar');
+  const [notificacionSeleccionados, setNotificacionSeleccionados] = useState(null);
+  const [notificacionMensaje, setNotificacionMensaje] = useState('');
+  const [notificacionIncluirFechas, setNotificacionIncluirFechas] = useState(true);
+  const [notificacionEnviando, setNotificacionEnviando] = useState(false);
+  const [notificacionError, setNotificacionError] = useState('');
+  const [notificacionResultado, setNotificacionResultado] = useState(null);
   const [seleccionado, setSeleccionado] = useState(null);
   const [detalle, setDetalle] = useState(null);
   const [detalleCargando, setDetalleCargando] = useState(false);
@@ -79,7 +97,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const [saveSuccess, setSaveSuccess] = useState('');
   const [materias, setMaterias] = useState(null);
   const [materiasCargando, setMateriasCargando] = useState(false);
-  const fileInputRef = useRef(null);
+  const [materiasError, setMateriasError] = useState('');
   const [actualizando, setActualizando] = useState(false);
   const [activeSection, setActiveSection] = useState('bandeja');
   const [evaluacionesColegio, setEvaluacionesColegio] = useState([]);
@@ -92,15 +110,17 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const [cargaEditando, setCargaEditando] = useState(null);
   const [materiasCarga, setMateriasCarga] = useState([]);
   const [guardandoCarga, setGuardandoCarga] = useState(false);
-  const [cargaDetalleId, setCargaDetalleId] = useState(null);
-  const [comentarioRevision, setComentarioRevision] = useState('');
-  const [cargaRevisionGuardando, setCargaRevisionGuardando] = useState(false);
-  const [periodosPublicacionCarga, setPeriodosPublicacionCarga] = useState({});
-  const [periodosInscripcion, setPeriodosInscripcion] = useState([]);
+  const [alumnoRegularId, setAlumnoRegularId] = useState('');
+  const [inscripcionRegular, setInscripcionRegular] = useState(null);
+  const [materiasRegularesSeleccionadas, setMateriasRegularesSeleccionadas] = useState([]);
+  const [cargandoRegular, setCargandoRegular] = useState(false);
+  const [guardandoRegular, setGuardandoRegular] = useState(false);
+  const [recargaRegular, setRecargaRegular] = useState(0);
   const [alumnoExtemporaneoId, setAlumnoExtemporaneoId] = useState('');
   const [periodoExtemporaneoId, setPeriodoExtemporaneoId] = useState('');
   const [periodosExtemporaneos, setPeriodosExtemporaneos] = useState([]);
   const [materiasExtemporaneas, setMateriasExtemporaneas] = useState([]);
+  const [solicitudesExtemporaneasAlumno, setSolicitudesExtemporaneasAlumno] = useState([]);
   const [materiasExtemporaneasSeleccionadas, setMateriasExtemporaneasSeleccionadas] = useState([]);
   const [motivoExtemporaneo, setMotivoExtemporaneo] = useState('');
   const [guardandoExtemporanea, setGuardandoExtemporanea] = useState(false);
@@ -117,8 +137,8 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     try {
       const r = await fetch('/api/cargas-academicas/', {headers: {Authorization: `Bearer ${session.access}`}});
       if (r.status === 401) return onLogout(copy.messages.expired);
-      if (!r.ok) throw new Error(copy.messages.loadCharges);
-      const data = await r.json();
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || `${copy.messages.loadCharges} (HTTP ${r.status})`);
       setCargas(data.cargas || []);
       setCatalogoCarga({
         materias: data.materias_catalogo || [],
@@ -188,30 +208,25 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     }
   }
 
-  async function crearCargaRevision() {
-    try {
-      const r = await fetch('/api/cargas-academicas/', {method: 'POST', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({periodo: periodoCarga})});
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || copy.loads.sendError);
-      setSaveSuccess(copy.loads.sent); setPeriodoCarga(''); cargarFlujoCargas();
-    } catch (e) { setError(e.message || copy.loads.sendError); }
-  }
-
-  async function actualizarEstadoCarga(id, estado, comentario = '', periodoInscripcion = null) {
+  async function enviarCargaRevision(id) {
     setError('');
     setSaveSuccess('');
-    setCargaRevisionGuardando(true);
     try {
-      const r = await fetch(`/api/cargas-academicas/${id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({estado, comentario, ...(estado === 'publicada' ? {periodo_inscripcion: Number(periodoInscripcion)} : {})})});
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || copy.loads.updateError);
-      setSaveSuccess(`${copy.loads.updated} ${etiquetaEstado(estado, copy)}.`);
-      setComentarioRevision('');
-      setCargaDetalleId(null);
+      const response = await fetch(`/api/cargas-academicas/${id}/`, {
+        method: 'PATCH',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({estado: 'en_revision'}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      if (!response.ok) throw new Error(data.detail || copy.loads.updateError);
+      setSaveSuccess(copy.loads.sent);
       await cargarFlujoCargas();
-    } catch (e) { setError(e.message || copy.loads.updateError); }
-    finally { setCargaRevisionGuardando(false); }
+    } catch (error) {
+      setError(error.message || copy.loads.updateError);
+    }
   }
+
   const cargarProyectosTesis = useCallback(async () => {
     try {
       const r = await fetch('/api/proyectos-tesis/', {headers: {Authorization: `Bearer ${session.access}`}});
@@ -293,6 +308,36 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   }, [copy, datos, session.access]);
 
   useEffect(() => { if (['cargas', 'materias'].includes(activeSection)) cargarFlujoCargas(); }, [activeSection, cargarFlujoCargas]);
+  useEffect(() => {
+    if (activeSection !== 'inscripciones') return undefined;
+    const controller = new AbortController();
+    setCargandoRegular(true);
+    setError('');
+    const endpoint = alumnoRegularId
+      ? `/api/coordinacion/alumnos/${alumnoRegularId}/inscripciones-regulares/`
+      : '/api/periodos-inscripcion/';
+    fetch(endpoint, {headers: {Authorization: `Bearer ${session.access}`}, signal: controller.signal})
+      .then(async response => {
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          onLogout(copy.messages.expired);
+          throw Object.assign(new Error(), {name: 'AbortError'});
+        }
+        if (!response.ok) throw new Error(body.detail || regularText.loadError);
+        return body;
+      })
+      .then(body => {
+        if (alumnoRegularId) {
+          setInscripcionRegular(body);
+        } else {
+          setInscripcionRegular({periodo: body?.activo ? body : null, materias: [], faltantes: 0, registradas: 0});
+        }
+        setMateriasRegularesSeleccionadas([]);
+      })
+      .catch(err => { if (err.name !== 'AbortError') setError(err.message || regularText.loadError); })
+      .finally(() => { if (!controller.signal.aborted) setCargandoRegular(false); });
+    return () => controller.abort();
+  }, [activeSection, alumnoRegularId, recargaRegular, session.access, onLogout, copy.messages.expired, regularText.loadError]);
   useEffect(() => { if (activeSection === 'tesis') cargarProyectosTesis(); }, [activeSection, cargarProyectosTesis]);
   useEffect(() => {
     if (activeSection !== 'asignaciones') return;
@@ -311,28 +356,10 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     setSaveSuccess(`${solicitud.alumno?.nombre || copy.thesis.student}: ${copy.loads.updated}`);
   }
   useEffect(() => {
-    if (!['cargas', 'materias'].includes(activeSection)) return;
-    const controller = new AbortController();
-    fetch('/api/periodos-inscripcion/?todos=1', {headers:{Authorization:`Bearer ${session.access}`}, signal:controller.signal})
-      .then(response => {
-        if (response.status === 401) {
-          onLogout(copy.messages.expired);
-          return Promise.reject(Object.assign(new Error(), {name:'AbortError'}));
-        }
-        return response.ok ? response.json() : Promise.reject(new Error(copy.periods.createError));
-      })
-      .then(data => {
-        const periodos = Array.isArray(data) ? data : [];
-        setPeriodosInscripcion(periodos);
-      })
-      .catch(error => { if (error.name !== 'AbortError') setError(error.message); });
-    return () => controller.abort();
-  }, [activeSection, copy.messages.expired, copy.periods.createError, onLogout, session.access]);
-
-  useEffect(() => {
     if (activeSection !== 'extemporanea' || !alumnoExtemporaneoId) {
       setMateriasExtemporaneas([]);
       setPeriodosExtemporaneos([]);
+      setSolicitudesExtemporaneasAlumno([]);
       return undefined;
     }
     const controller = new AbortController();
@@ -355,6 +382,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       .then(body => {
         const listaPeriodos = body.periodos || [];
         setPeriodosExtemporaneos(listaPeriodos);
+        setSolicitudesExtemporaneasAlumno(body.solicitudes || []);
         if (!periodoExtemporaneoId && listaPeriodos.length) {
           const periodoPreferido = listaPeriodos.find(periodo => periodo.activo || periodo.habilitado) || listaPeriodos[0];
           setPeriodoExtemporaneoId(String(periodoPreferido.id));
@@ -366,6 +394,35 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       .finally(() => { if (!controller.signal.aborted) setCargandoExtemporanea(false); });
     return () => controller.abort();
   }, [activeSection, alumnoExtemporaneoId, periodoExtemporaneoId, session.access, onLogout, copy.messages.expired, extText.loadError]);
+
+  async function registrarInscripcionRegular(event) {
+    event.preventDefault();
+    const faltantes = inscripcionRegular?.faltantes || 0;
+    if (!alumnoRegularId || !inscripcionRegular?.periodo?.activo || !faltantes || materiasRegularesSeleccionadas.length !== faltantes) {
+      setError(regularText.saveError);
+      return;
+    }
+    setGuardandoRegular(true);
+    setError('');
+    setSaveSuccess('');
+    try {
+      const response = await fetch(`/api/coordinacion/alumnos/${alumnoRegularId}/inscripciones-regulares/`, {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({materias: materiasRegularesSeleccionadas}),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      if (!response.ok) throw new Error(body.detail || body.materias || regularText.saveError);
+      setMateriasRegularesSeleccionadas([]);
+      setSaveSuccess(regularText.saved);
+      setRecargaRegular(value => value + 1);
+    } catch (err) {
+      setError(err.message || regularText.saveError);
+    } finally {
+      setGuardandoRegular(false);
+    }
+  }
 
   async function registrarInscripcionExtemporanea(event) {
     event.preventDefault();
@@ -392,11 +449,6 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       setMateriasExtemporaneasSeleccionadas([]);
       setMotivoExtemporaneo('');
       setSaveSuccess(extText.saved);
-      setMateriasExtemporaneas(current => current.map(materia => (
-        materiasExtemporaneasSeleccionadas.includes(materia.id)
-          ? {...materia, inscritos: materia.inscritos + 1}
-          : materia
-      )));
     } catch (err) {
       setError(err.message || extText.saveError);
     } finally {
@@ -456,12 +508,64 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     if (filtro === 'por-revisar') return ['pendiente', 'iniciado'].includes(aspirante.proceso_estado);
     return filtro === 'todos' || aspirante.proceso_estado === filtro;
   }), [aspirantesRegistrados, filtro]);
+  const aspirantesNotificables = useMemo(() => aspirantesRegistrados.filter(aspirante => {
+    if (notificacionGrupo === 'por-revisar') return ['pendiente', 'iniciado'].includes(aspirante.proceso_estado);
+    return notificacionGrupo === 'todos' || aspirante.proceso_estado === notificacionGrupo;
+  }), [aspirantesRegistrados, notificacionGrupo]);
+  const notificacionDestinatarios = useMemo(() => notificacionSeleccionados === null
+    ? aspirantesNotificables
+    : aspirantesNotificables.filter(aspirante => notificacionSeleccionados.includes(aspirante.id)),
+  [aspirantesNotificables, notificacionSeleccionados]);
+  const notificacionConCorreo = useMemo(
+    () => notificacionDestinatarios.filter(aspirante => Boolean(aspirante.correo?.trim())),
+    [notificacionDestinatarios],
+  );
+  const notificacionSinCorreo = notificacionDestinatarios.length - notificacionConCorreo.length;
   const alumnos = useMemo(() => (datos?.personas || []).filter(a => a.rol === 'alumno'), [datos]);
   const docentes = useMemo(() => (datos?.personas || []).filter(a => ['docente','director'].includes(a.rol)), [datos]);
   const directores = useMemo(() => (datos?.personas || []).filter(a => a.rol === 'director' && a.is_active !== false), [datos]);
   const filtrarPersonas = (lista) => lista.filter(a => !busqueda.trim() || `${a.nombre} ${a.usuario} ${a.correo}`.toLowerCase().includes(busqueda.toLowerCase()));
   const analitica = useMemo(() => { const lista=datos?.personas||[]; const total=lista.length||1; const estados=['pendiente','revision','aceptado','rechazado']; return {total:lista.length, aspirantes:lista.filter(a=>a.rol==='aspirante').length, alumnos:lista.filter(a=>a.rol==='alumno').length, personal:lista.filter(a=>['docente','director'].includes(a.rol)).length, estados:estados.map(e=>({key:e,label:etiquetaEstado(e, copy),count:lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length,pct:Math.round(lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length*100/Math.max(1,lista.filter(a=>a.rol==='aspirante').length))}))}; }, [copy, datos]);
   const evaluacionesVisibles = useMemo(() => evaluacionFiltro === 'todas' ? evaluacionesColegio : evaluacionesColegio.filter(e => e.estado === evaluacionFiltro), [evaluacionesColegio, evaluacionFiltro]);
+
+  async function enviarNotificacionesMasivas() {
+    if (!notificacionConCorreo.length) {
+      setNotificacionError(copy.notifications.selectRecipients);
+      return;
+    }
+    const confirmar = `${copy.notifications.confirm} ${notificacionConCorreo.length} ${copy.notifications.recipients}?`;
+    if (!window.confirm(confirmar)) return;
+
+    setNotificacionEnviando(true);
+    setNotificacionError('');
+    setNotificacionResultado(null);
+    try {
+      const response = await fetch('/api/coordinacion/notificaciones-masivas/', {
+        method: 'POST',
+        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          grupo: notificacionGrupo,
+          ids: notificacionConCorreo.map(aspirante => aspirante.id),
+          mensaje: notificacionMensaje,
+          incluir_fechas: notificacionIncluirFechas,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || body.ids || body.grupo || copy.notifications.sendError);
+      setNotificacionResultado({
+        ...body,
+        sin_correo_seleccionados: notificacionDestinatarios
+          .filter(aspirante => !aspirante.correo?.trim())
+          .map(aspirante => ({id: aspirante.id, nombre: aspirante.nombre})),
+      });
+      setNotificacionSeleccionados(null);
+      setNotificacionMensaje('');
+    } catch (err) {
+      setNotificacionError(err.message || copy.notifications.sendError);
+    } finally {
+      setNotificacionEnviando(false);
+    }
+  }
 
   const CAMPOS_EDITABLES = [
     'fecha_examen_admision', 'fecha_entrevista', 'fecha_inicio_curso_propedeutico',
@@ -582,10 +686,13 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   }
 
   // Helper to download generated PDF/XLSX files
-  async function downloadBlob(url, filename) {
+  async function downloadBlob(url, filename, errorMessage = copy.detail.downloadError) {
     try {
       const resp = await fetch(url, {headers: {Authorization: `Bearer ${session.access}`}});
-      if (!resp.ok) throw new Error(copy.detail.downloadError);
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail || errorMessage);
+      }
       const blob = await resp.blob();
       const urlBlob = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -596,8 +703,26 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       a.remove();
       window.URL.revokeObjectURL(urlBlob);
     } catch (err) {
-      setError(err.message || copy.detail.downloadError);
+      setError(err.message || errorMessage);
     }
+  }
+
+  async function descargarBoletaRegular() {
+    if (!alumnoRegularId || !inscripcionRegular?.periodo?.id) return;
+    const persona = (datos.personas || []).find(item => String(item.id) === String(alumnoRegularId));
+    await downloadBlob(
+      `/api/coordinacion/alumnos/${alumnoRegularId}/inscripciones-regulares/boleta/?periodo=${inscripcionRegular.periodo.id}`,
+      `${persona?.matricula || persona?.usuario || alumnoRegularId}_boleta_inscripcion_regular.pdf`,
+      regularText.downloadError,
+    );
+  }
+
+  async function descargarOficioExtemporaneo(solicitud) {
+    await downloadBlob(
+      `/api/coordinacion/solicitudes-extemporaneas/${solicitud.id}/oficio/`,
+      `${solicitud.folio}_oficio_inscripcion_extemporanea.pdf`,
+      regularText.downloadError,
+    );
   }
 
   async function handleDescargarCalificaciones() {
@@ -640,40 +765,41 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     }
   }
 
-  function handleCargarCursosClick() {
-    fileInputRef.current?.click();
-  }
-
-  async function handleCargarCursosFile(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const form = new FormData();
-    form.append('file', file);
-    try {
-      const resp = await fetch('/api/coordinacion/cursos/upload/', {method: 'POST', headers: {Authorization: `Bearer ${session.access}`}, body: form});
-      if (!resp.ok) throw new Error(copy.subjects.uploadError);
-      const data = await resp.json();
-      setSaveSuccess(data.detail || copy.subjects.uploaded);
-      cargarMateriasDisponibles();
-    } catch (err) {
-      setError(err.message || copy.subjects.uploadError);
-    } finally {
-      event.target.value = '';
-    }
-  }
-
-  async function cargarMateriasDisponibles() {
+  const cargarMateriasDisponibles = useCallback(async () => {
     setMateriasCargando(true);
+    setMateriasError('');
     try {
       const resp = await fetch('/api/coordinacion/materias/', {headers: {Authorization: `Bearer ${session.access}`}});
-      if (!resp.ok) throw new Error(copy.subjects.noSubjects);
-      setMaterias(await resp.json());
+      if (resp.status === 401) {
+        onLogout(copy.messages.expired);
+        return;
+      }
+      if (!resp.ok) {
+        let detail = '';
+        if (resp.headers.get('content-type')?.includes('application/json')) {
+          try {
+            const body = await resp.json();
+            detail = body.detail || '';
+          } catch {
+            detail = '';
+          }
+        }
+        throw new Error(`${copy.subjects.noSubjects} (HTTP ${resp.status})${detail ? `: ${detail}` : ''}`);
+      }
+      const data = await resp.json();
+      if (!Array.isArray(data)) throw new Error(copy.subjects.noSubjects);
+      setMaterias(data);
     } catch (err) {
-      setError(err.message || copy.subjects.noSubjects);
+      setMaterias(null);
+      setMateriasError(err.message || copy.subjects.noSubjects);
     } finally {
       setMateriasCargando(false);
     }
-  }
+  }, [copy.messages.expired, copy.subjects.noSubjects, onLogout, session.access]);
+
+  useEffect(() => {
+    if (activeSection === 'materias') cargarMateriasDisponibles();
+  }, [activeSection, cargarMateriasDisponibles]);
 
   return (
     <section className="panel-section" aria-label={copy.panel}>
@@ -713,14 +839,99 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   </div>
                   </>)}
 
-            {activeSection === 'extemporanea' && (
-              <section className="panel-card coord-plan-panel">
-                <header className="admin-card-head">
-                  <div><p className="panel-kicker">{copy.groups.academic}</p><h3>{copy.nav.extemporanea}</h3><p>{extText.intro}</p></div>
+            {activeSection === 'inscripciones' && (
+              <section className="panel-card coord-plan-panel coord-inscripciones-regulares">
+                <header className="admin-card-head coord-extemporanea-header">
+                  <div><p className="panel-kicker">{copy.groups.academic}</p><h3>{copy.nav.inscripciones}</h3><p>{regularText.intro}</p></div>
                 </header>
-                <form className="coord-plan-form" onSubmit={registrarInscripcionExtemporanea}>
-                  <div className="coord-plan-fields">
-                    <label><span>{extText.student}</span>
+                {error && <div className="api-error" role="alert">{error}</div>}
+                {saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}
+                <form className="coord-plan-form" onSubmit={registrarInscripcionRegular}>
+                  <div className="coord-plan-fields coord-extemporanea-fields">
+                    <label className="coord-extemporanea-field"><span>{regularText.student}</span>
+                      <select value={alumnoRegularId} onChange={event => {
+                        setAlumnoRegularId(event.target.value);
+                        setMateriasRegularesSeleccionadas([]);
+                        setSaveSuccess('');
+                      }} required>
+                        <option value="">{regularText.chooseStudent}</option>
+                        {(datos.personas || []).filter(persona => persona.rol === 'alumno').map(persona => (
+                          <option key={persona.id} value={persona.id}>{persona.nombre} · {persona.matricula || persona.programa || ''}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="coord-regular-period">
+                      <span>{regularText.period}</span>
+                      {inscripcionRegular?.periodo?.activo
+                        ? <strong>{inscripcionRegular.periodo.nombre} · {formatearFecha(inscripcionRegular.periodo.apertura, copy.locale)} – {formatearFecha(inscripcionRegular.periodo.cierre, copy.locale)}</strong>
+                        : <strong>{regularText.noPeriod}</strong>}
+                    </div>
+                  </div>
+                  {cargandoRegular ? <p className="coord-plan-notice">{extText.loading}</p> : !inscripcionRegular?.periodo?.activo ? (
+                    <p className="coord-plan-notice" role="status">{regularText.noPeriod}</p>
+                  ) : !alumnoRegularId ? (
+                    <p className="coord-plan-notice">{regularText.chooseStudentFirst}</p>
+                  ) : inscripcionRegular.faltantes === 0 ? (
+                    <p className="coord-regular-complete" role="status">{regularText.completed}</p>
+                  ) : inscripcionRegular.materias.length ? (
+                    <section className="coord-extemporanea-subjects" aria-labelledby="coord-regular-subjects-title">
+                      <div className="coord-plan-course-heading coord-extemporanea-subject-heading">
+                        <div><h4 id="coord-regular-subjects-title">{regularText.subjects}</h4><p>{inscripcionRegular.faltantes} {regularText.remaining}</p></div>
+                        <span className="coord-extemporanea-count">{materiasRegularesSeleccionadas.length}/{inscripcionRegular.faltantes} {regularText.selected}</span>
+                      </div>
+                      <div className="coord-plan-course-list coord-extemporanea-course-list">
+                        {inscripcionRegular.materias.map(materia => {
+                          const sinCupo = materia.inscritos >= materia.capacidad;
+                          const marcada = materiasRegularesSeleccionadas.includes(materia.id);
+                          const bloqueadaPorLimite = materiasRegularesSeleccionadas.length >= inscripcionRegular.faltantes && !marcada;
+                          const lugaresDisponibles = Math.max(0, materia.capacidad - materia.inscritos);
+                          return (
+                            <label className={`coord-plan-course-row coord-extemporanea-course${marcada ? ' is-selected' : ''}${sinCupo ? ' is-full' : ''}`} key={materia.id}>
+                              <input type="checkbox" checked={marcada} disabled={sinCupo || bloqueadaPorLimite} onChange={event => setMateriasRegularesSeleccionadas(current => (
+                                event.target.checked ? [...current, materia.id] : current.filter(id => id !== materia.id)
+                              ))}/>
+                              <span className="coord-extemporanea-course-info"><strong>{materia.clave} · {materia.nombre}</strong><small>{materia.creditos} {copy.plans.credits} · {materia.horario || copy.subjects.define}</small></span>
+                              <span className="coord-extemporanea-capacity"><span><strong>{lugaresDisponibles}</strong> {regularText.available} · {regularText.capacity} {materia.inscritos}/{materia.capacidad}{sinCupo ? ` · ${regularText.full}` : ''}</span></span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ) : <p className="coord-plan-notice">{regularText.noSubjects}</p>}
+                  {datos && !(datos.personas || []).some(persona => persona.rol === 'alumno') && <p className="coord-plan-notice">{regularText.noStudents}</p>}
+                  <div className="coord-extemporanea-footer">
+                    <p>{materiasRegularesSeleccionadas.length}/{inscripcionRegular?.faltantes || 0} {regularText.selected}</p>
+                    <button type="submit" className="qa-btn" disabled={guardandoRegular || cargandoRegular || !alumnoRegularId || !inscripcionRegular?.periodo?.activo || !inscripcionRegular.faltantes || materiasRegularesSeleccionadas.length !== inscripcionRegular.faltantes}>{guardandoRegular ? regularText.saving : regularText.submit}</button>
+                  </div>
+                </form>
+                {alumnoRegularId && inscripcionRegular?.periodo?.id && (inscripcionRegular.validacion_servicios || []).length > 0 && (
+                  <div className="coord-enrollment-document">
+                    {(inscripcionRegular.validacion_servicios || []).every(value => value === 'validada')
+                      ? <button type="button" className="qa-btn" onClick={descargarBoletaRegular}>{regularText.downloadSlip}</button>
+                      : <p role="status">{regularText.pendingValidation}</p>}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeSection === 'solicitudesAcademicas' && <SolicitudesAcademicasReview session={session} onLogout={onLogout}/>}
+
+            {activeSection === 'extemporanea' && (
+              <section className="panel-card coord-plan-panel coord-extemporanea">
+                <header className="admin-card-head coord-extemporanea-header">
+                  <div><p className="panel-kicker">{copy.groups.academic}</p><h3>{copy.nav.extemporanea}</h3><p>{extText.intro}</p></div>
+                  <span className="coord-extemporanea-badge">{extText.stepReason}</span>
+                </header>
+                <ol className="coord-extemporanea-steps" aria-label={copy.nav.extemporanea}>
+                  {[extText.stepStudent, extText.stepSubjects, extText.stepReason].map((step, index) => (
+                    <li className={`coord-extemporanea-step${index === 0 && alumnoExtemporaneoId || index === 1 && materiasExtemporaneasSeleccionadas.length || index === 2 && motivoExtemporaneo.trim() ? ' is-complete' : ''}`} key={step}>
+                      <span>{index + 1}</span><strong>{step}</strong>
+                    </li>
+                  ))}
+                </ol>
+                <form className="coord-plan-form coord-extemporanea-form" onSubmit={registrarInscripcionExtemporanea}>
+                  <div className="coord-plan-fields coord-extemporanea-fields">
+                    <label className="coord-extemporanea-field"><span>{extText.student}</span>
                       <select value={alumnoExtemporaneoId} onChange={event => {
                         setAlumnoExtemporaneoId(event.target.value);
                         setPeriodoExtemporaneoId('');
@@ -734,7 +945,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                         ))}
                       </select>
                     </label>
-                    <label><span>{extText.period}</span>
+                    <label className="coord-extemporanea-field"><span>{extText.period}</span>
                       <select value={periodoExtemporaneoId} disabled={!alumnoExtemporaneoId || !periodosExtemporaneos.length} onChange={event => {
                         setPeriodoExtemporaneoId(event.target.value);
                         setMateriasExtemporaneasSeleccionadas([]);
@@ -745,66 +956,90 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                       </select>
                     </label>
                   </div>
-                  <div className="coord-plan-course-heading"><div><h4>{extText.subjects}</h4></div></div>
-                  {cargandoExtemporanea ? <p className="coord-plan-notice">{extText.loading}</p> : materiasExtemporaneas.length ? (
-                    <div className="coord-plan-course-list">
+                  <section className="coord-extemporanea-subjects" aria-labelledby="coord-extemporanea-subjects-title">
+                    <div className="coord-plan-course-heading coord-extemporanea-subject-heading">
+                      <div><h4 id="coord-extemporanea-subjects-title">{extText.subjects}</h4><p>{extText.capacity} {extText.available}</p></div>
+                      <span className="coord-extemporanea-count">{materiasExtemporaneasSeleccionadas.length} {extText.selected}</span>
+                    </div>
+                    {cargandoExtemporanea ? <p className="coord-plan-notice">{extText.loading}</p> : materiasExtemporaneas.length ? (
+                    <div className="coord-plan-course-list coord-extemporanea-course-list">
                       {materiasExtemporaneas.map(materia => {
                         const sinCupo = materia.inscritos >= materia.capacidad;
                         const marcada = materiasExtemporaneasSeleccionadas.includes(materia.id);
+                        const lugaresDisponibles = Math.max(0, materia.capacidad - materia.inscritos);
+                        const porcentajeOcupacion = materia.capacidad > 0 ? Math.min(100, Math.round(materia.inscritos * 100 / materia.capacidad)) : 100;
                         return (
-                          <label className="coord-plan-course-row" key={materia.id}>
+                          <label className={`coord-plan-course-row coord-extemporanea-course${marcada ? ' is-selected' : ''}${sinCupo ? ' is-full' : ''}`} key={materia.id}>
                             <input type="checkbox" checked={marcada} disabled={sinCupo} onChange={event => setMateriasExtemporaneasSeleccionadas(current => (
                               event.target.checked
                                 ? [...current, materia.id]
                                 : current.filter(id => id !== materia.id)
                             ))}/>
-                            <span><strong>{materia.clave} · {materia.nombre}</strong><small>{materia.creditos} {copy.plans.credits} · {materia.horario || copy.subjects.define}</small></span>
-                            <span>{extText.capacity}: {Math.max(0, materia.capacidad - materia.inscritos)} / {materia.capacidad}{sinCupo ? ` · ${extText.full}` : ''}</span>
+                            <span className="coord-extemporanea-course-info"><strong>{materia.clave} · {materia.nombre}</strong><small>{materia.creditos} {copy.plans.credits} · {materia.horario || copy.subjects.define}</small></span>
+                            <span className="coord-extemporanea-capacity">
+                              <span><strong>{lugaresDisponibles}</strong> {extText.available} · {extText.capacity} {materia.inscritos}/{materia.capacidad}{sinCupo ? ` · ${extText.full}` : ''}</span>
+                              <span className="coord-extemporanea-capacity-track" role="progressbar" aria-label={`${extText.capacity}: ${materia.inscritos}/${materia.capacidad}`} aria-valuemin="0" aria-valuemax={materia.capacidad} aria-valuenow={Math.min(materia.inscritos, materia.capacidad)}><i style={{width: `${porcentajeOcupacion}%`}}/></span>
+                            </span>
                           </label>
                         );
                       })}
                     </div>
-                  ) : <p className="coord-plan-notice">{alumnoExtemporaneoId && periodoExtemporaneoId ? extText.noSubjects : extText.chooseStudent}</p>}
-                  <label className="coord-plan-reason"><span>{extText.reason}</span>
-                    <textarea rows="4" value={motivoExtemporaneo} onChange={event => setMotivoExtemporaneo(event.target.value)} placeholder={extText.reasonHint} required maxLength="2000"/>
+                    ) : <p className="coord-plan-notice">{alumnoExtemporaneoId && periodoExtemporaneoId ? extText.noSubjects : extText.chooseStudent}</p>}
+                  </section>
+                  <label className="coord-plan-reason coord-extemporanea-reason"><span>{extText.reason}</span>
+                    <textarea rows="4" value={motivoExtemporaneo} onChange={event => setMotivoExtemporaneo(event.target.value)} placeholder={extText.reasonHint} required maxLength="2000" aria-describedby="coord-extemporanea-reason-count"/>
+                    <small id="coord-extemporanea-reason-count" className="coord-extemporanea-character-count">{motivoExtemporaneo.length}/2000</small>
                   </label>
-                  <div className="periodo-form-actions">
+                  <div className="coord-extemporanea-footer">
+                    <p>{materiasExtemporaneasSeleccionadas.length} {extText.selected}</p>
                     <button type="submit" className="qa-btn" disabled={guardandoExtemporanea || !alumnoExtemporaneoId || !periodoExtemporaneoId || !materiasExtemporaneasSeleccionadas.length || !motivoExtemporaneo.trim()}>{guardandoExtemporanea ? extText.saving : extText.submit}</button>
                   </div>
                   {error && <div className="api-error" role="alert">{error}</div>}
                   {saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}
                   {!alumnoExtemporaneoId && !(datos.personas || []).some(persona => persona.rol === 'alumno') && <p className="coord-plan-notice">{extText.noStudents}</p>}
                 </form>
+                {alumnoExtemporaneoId && solicitudesExtemporaneasAlumno.length > 0 && (
+                  <section className="coord-extemporanea-documents" aria-label={regularText.extRequests}>
+                    <h4>{regularText.extRequests}</h4>
+                    {solicitudesExtemporaneasAlumno.map(solicitud => (
+                      <div className="coord-extemporanea-document-row" key={solicitud.id}>
+                        <span><strong>{solicitud.folio}</strong><small>{solicitud.periodo}</small></span>
+                        <span className={`estado-badge estado-${solicitud.estado}`}>{regularText[solicitud.estado] || solicitud.estado}</span>
+                        {solicitud.estado === 'aprobada' && <button type="button" className="qa-btn" onClick={() => descargarOficioExtemporaneo(solicitud)}>{regularText.downloadOffice}</button>}
+                      </div>
+                    ))}
+                  </section>
+                )}
               </section>
             )}
 
-            {activeSection === 'materias' && <div className="panel-card coord-directory coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.subjects.kicker}</p><h3>{copy.subjects.title}</h3><p>{copy.subjects.intro}</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={handleCargarCursosClick}>{copy.subjects.upload}</button><input ref={fileInputRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleCargarCursosFile}/><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : copy.subjects.query}</button></div></div>{materias ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead><tbody>{materias.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || copy.subjects.assign}</td><td>{m.horario || copy.subjects.define}</td></tr>)}</tbody></table></div> : <p className="empty-state">{copy.subjects.noCatalog}</p>}</div>}
+            {activeSection === 'materias' && <div className="panel-card coord-directory coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.subjects.kicker}</p><h3>{copy.subjects.title}</h3><p>{copy.subjects.intro}</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : materiasError ? copy.retry : copy.subjects.query}</button></div></div>{materiasError && <div className="api-error coord-catalog-error" role="alert">{materiasError}</div>}{materiasCargando ? <p className="empty-state" role="status">{copy.subjects.loading}</p> : materias !== null ? materias.length ? <><div className="coord-catalog-summary"><span>{materias.length} {copy.directory.subjects}</span><span>{copy.subjects.readOnly}</span></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead><tbody>{materias.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || copy.subjects.assign}</td><td>{m.horario || copy.subjects.define}</td></tr>)}</tbody></table></div></> : <p className="empty-state">{copy.detail.noSubjects}</p> : !materiasError && <p className="empty-state">{copy.subjects.noCatalog}</p>}</div>}
             {activeSection === 'cargas' && <div className="panel-card coord-directory">
               <div className="admin-card-head"><div><p className="panel-kicker">{copy.loads.kicker}</p><h3>{copy.loads.title}</h3><p>{copy.loads.intro}</p></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>{copy.refresh}</button></div>
               <form className="coord-carga-form" onSubmit={guardarCargaBorrador}>
-                <label><span>{copy.loads.period}</span><input className="coord-search" required placeholder={copy.loads.example} value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /></label>
+                <label><span>{copy.loads.period}</span><input className="coord-search" required placeholder={copy.loads.example} value={periodoCarga} onChange={event => setPeriodoCarga(event.target.value)} /></label>
                 <div className="coord-carga-rows">
                   {materiasCarga.map((item, index) => {
                     const usada = materiasCarga.some((otra, otroIndex) => otroIndex !== index && String(otra.materia) === String(item.materia));
                     return <div className="coord-carga-row" key={`carga-${index}`}>
-                      <label><span>{copy.subjects.subject}</span><select required value={item.materia} onChange={e => {
-                        const materia = catalogoCarga.materias.find(m => String(m.id) === e.target.value);
-                        const docente = materia?.profesor ? catalogoCarga.docentes.find(d => d.nombre.toLowerCase() === materia.profesor.toLowerCase()) : null;
-                        setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, materia: e.target.value, docente: docente ? String(docente.id) : '', horario: materia?.horario || '', salon: materia?.salon || catalogoCarga.salones[0]?.id || '', capacidad: materia?.capacidad || 42} : row));
+                      <label><span>{copy.subjects.subject}</span><select required value={item.materia} onChange={event => {
+                        const materia = catalogoCarga.materias.find(subject => String(subject.id) === event.target.value);
+                        const docente = materia?.profesor ? catalogoCarga.docentes.find(teacher => teacher.nombre.toLowerCase() === materia.profesor.toLowerCase()) : null;
+                        setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, materia: event.target.value, docente: docente ? String(docente.id) : '', horario: materia?.horario || '', salon: materia?.salon || catalogoCarga.salones[0]?.id || '', capacidad: materia?.capacidad || 42} : row));
                       }}>
                         <option value="">{cargaText.subject}</option>
-                        {catalogoCarga.materias.map(m => <option key={m.id} value={m.id} disabled={usada && String(item.materia) !== String(m.id)}>{m.clave} · {m.nombre} ({m.creditos} {copy.plans.credits})</option>)}
+                        {catalogoCarga.materias.map(subject => <option key={subject.id} value={subject.id} disabled={usada && String(item.materia) !== String(subject.id)}>{subject.clave} - {subject.nombre} ({subject.creditos} {copy.plans.credits})</option>)}
                       </select></label>
-                      <label><span>{copy.subjects.teacher}</span><select required value={item.docente} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, docente: e.target.value} : row))}>
-                        <option value="">{cargaText.teacher}</option>{catalogoCarga.docentes.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                      <label><span>{copy.subjects.teacher}</span><select required value={item.docente} onChange={event => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, docente: event.target.value} : row))}>
+                        <option value="">{cargaText.teacher}</option>{catalogoCarga.docentes.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.nombre}</option>)}
                       </select></label>
-                      <label><span>{copy.subjects.schedule}</span><input required maxLength="120" value={item.horario} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, horario: e.target.value} : row))}/></label>
-                      <label><span>{cargaText.room}</span><select required value={item.salon} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, salon: e.target.value} : row))}>
-                        <option value="">{copy.detail.unassigned}</option>{catalogoCarga.salones.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                      <label><span>{copy.subjects.schedule}</span><input required maxLength="120" value={item.horario} onChange={event => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, horario: event.target.value} : row))}/></label>
+                      <label><span>{cargaText.room}</span><select required value={item.salon} onChange={event => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, salon: event.target.value} : row))}>
+                        <option value="">{copy.detail.unassigned}</option>{catalogoCarga.salones.map(room => <option key={room.id} value={room.id}>{room.nombre}</option>)}
                       </select></label>
-                      <label><span>{cargaText.capacity}</span><input type="number" min="1" max="32767" required value={item.capacidad} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, capacidad: e.target.value} : row))}/></label>
-                      <label><span>{copy.detail.modality}</span><select required value={item.modalidad} onChange={e => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, modalidad: e.target.value} : row))}>
-                        {catalogoCarga.modalidades.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                      <label><span>{cargaText.capacity}</span><input type="number" min="1" max="32767" required value={item.capacidad} onChange={event => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, capacidad: event.target.value} : row))}/></label>
+                      <label><span>{copy.detail.modality}</span><select required value={item.modalidad} onChange={event => setMateriasCarga(items => items.map((row, rowIndex) => rowIndex === index ? {...row, modalidad: event.target.value} : row))}>
+                        {catalogoCarga.modalidades.map(modality => <option key={modality.id} value={modality.id}>{modality.nombre}</option>)}
                       </select></label>
                       <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setMateriasCarga(items => items.filter((_, rowIndex) => rowIndex !== index))}>{cargaText.remove}</button>
                     </div>;
@@ -816,47 +1051,12 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   {cargaEditando && <button type="button" className="qa-btn qa-btn-secondary" onClick={cancelarEdicionCarga}>{cargaText.cancel}</button>}
                 </div>
               </form>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{cargaText.count}</th><th>{copy.loads.created}</th><th>{copy.loads.camunda}</th><th>{copy.loads.actions}</th></tr></thead><tbody>
-                {cargas.length ? cargas.map(c => <React.Fragment key={c.id}>
-                  <tr><td>{c.periodo || '—'}<small>{c.creador_nombre}</small></td><td><span className={`estado-badge estado-${c.estado}`}>{etiquetaEstado(c.estado, copy)}</span></td><td>{c.materias.length}</td><td>{formatearFecha(c.created_at, copy.locale)}</td><td>{c.camunda_instance_id ? copy.loads.connected : copy.loads.pending}</td><td><div className="coord-action-row">
-                    <button type="button" className="qa-btn qa-btn-secondary" onClick={() => {setCargaDetalleId(cargaDetalleId === c.id ? null : c.id); setComentarioRevision('');}}>{cargaDetalleId === c.id ? cargaText.hide : cargaText.detail}</button>
-                    {c.estado === 'borrador' && <><button type="button" className="qa-btn qa-btn-secondary" onClick={() => editarCarga(c)}>{cargaText.edit}</button><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id, 'en_revision')}>{cargaText.submit}</button></>}
-                    {c.estado === 'aprobada' && <div className="coord-carga-publicacion">
-                      <label><span>{copy.periods.title}</span><select value={periodosPublicacionCarga[c.id] || ''} onChange={event => setPeriodosPublicacionCarga(current => ({...current, [c.id]: event.target.value}))}>
-                        <option value="">—</option>{periodosInscripcion.filter(periodo => periodo.habilitado).map(periodo => <option key={periodo.id} value={periodo.id}>{periodo.nombre} · {formatearFecha(periodo.apertura, copy.locale)}</option>)}
-                      </select></label>
-                      <button type="button" className="qa-btn" disabled={!periodosPublicacionCarga[c.id] || cargaRevisionGuardando} onClick={() => actualizarEstadoCarga(c.id, 'publicada', '', periodosPublicacionCarga[c.id])}>{copy.loads.publish}</button>
-                    </div>}
-                    {c.estado === 'publicada' && <small>{c.periodo_inscripcion_nombre || c.periodo}</small>}
-                  </div></td></tr>
-                  {cargaDetalleId === c.id && <tr><td colSpan="6">
-                    <div className="coord-carga-review">
-                      <h4>{copy.loads.period}: {c.periodo} · {cargaText.count}: {c.materias.length}</h4>
-                      {c.materias.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.plans.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th><th>{cargaText.room}</th><th>{cargaText.capacity}</th><th>{copy.detail.modality}</th></tr></thead><tbody>
-                        {c.materias.map(m => <tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos}</td><td>{m.docente_nombre || '—'}</td><td>{m.horario || '—'}</td><td>{m.salon_label}</td><td>{m.capacidad}</td><td>{m.modalidad_label}</td></tr>)}
-                      </tbody></table></div> : <p className="form-hint">{cargaText.noCourses}</p>}
-                      {c.comentario && c.estado !== 'en_revision' && <p className="api-success"><strong>{cargaText.reviewComment}:</strong> {c.comentario}</p>}
-                      {c.estado === 'en_revision' && <>
-                        <label className="coord-carga-comment"><span>{cargaText.reviewComment}</span><textarea rows="3" maxLength="2000" value={comentarioRevision} placeholder={cargaText.reviewCommentHint} onChange={e => setComentarioRevision(e.target.value)}/></label>
-                        <div className="coord-action-row">
-                          <button type="button" className="qa-btn" disabled={cargaRevisionGuardando || !comentarioRevision.trim()} onClick={() => actualizarEstadoCarga(c.id, 'aprobada', comentarioRevision)}>{cargaText.approveComment}</button>
-                          <button type="button" className="qa-btn qa-btn-secondary" disabled={cargaRevisionGuardando || !comentarioRevision.trim()} onClick={() => actualizarEstadoCarga(c.id, 'rechazada', comentarioRevision)}>{cargaText.rejectComment}</button>
-                        </div>
-                      </>}
-                    </div>
-                  </td></tr>}
-                </React.Fragment>) : <tr><td colSpan="6">{copy.loads.noLoads}</td></tr>}
+              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{cargaText.count}</th><th>{copy.loads.created}</th><th>{copy.loads.actions}</th></tr></thead><tbody>
+                {cargas.length ? cargas.map(carga => <tr key={carga.id}><td>{carga.periodo || '-'}<small>{carga.creador_nombre}</small></td><td><span className={`estado-badge estado-${carga.estado}`}>{etiquetaEstado(carga.estado, copy)}</span></td><td>{carga.materias.length}</td><td>{formatearFecha(carga.created_at, copy.locale)}</td><td><div className="coord-action-row">
+                  {carga.estado === 'borrador' && <><button type="button" className="qa-btn qa-btn-secondary" onClick={() => editarCarga(carga)}>{cargaText.edit}</button><button type="button" className="qa-btn" disabled={!carga.materias.length} onClick={() => enviarCargaRevision(carga.id)}>{cargaText.submit}</button></>}
+                </div></td></tr>) : <tr><td colSpan="5">{copy.loads.noLoads}</td></tr>}
               </tbody></table></div>
             </div>}
-            {false && (
-              <div className="panel-card coord-directory">
-                <div className="admin-card-head"><div><p className="panel-kicker">Flujo multietapa</p><h3>Aprobación de carga académica</h3></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>Actualizar</button></div>
-                <div className="coord-action-row"><input className="coord-search" placeholder="Periodo escolar (ej. 2026-1)" value={periodoCarga} onChange={e => setPeriodoCarga(e.target.value)} /><button type="button" className="qa-btn" disabled={!periodoCarga.trim()} onClick={crearCargaRevision}>Enviar a revisión</button></div>
-                <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Periodo</th><th>Estado</th><th>Creación</th><th>Acciones</th></tr></thead><tbody>{cargas.length ? cargas.map(c => <tr key={c.id}><td>{c.periodo || 'Sin periodo'}</td><td><span className={`estado-badge estado-${c.estado}`}>{c.estado.replace('_',' ')}</span></td><td>{formatearFecha(c.created_at)}</td><td><div className="coord-action-row">{c.estado === 'en_revision' && <><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'aprobada')}>Aprobar</button><button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'rechazada')}>Rechazar</button></>}{c.estado === 'aprobada' && <button type="button" className="qa-btn" onClick={() => actualizarEstadoCarga(c.id,'publicada')}>Publicar</button>}</div></td></tr>) : <tr><td colSpan="4">No hay cargas académicas en el flujo.</td></tr>}</tbody></table></div>
-                <div className="coord-materias coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">Oferta académica</p><h3>Materias y cursos</h3><p>Administra las materias disponibles para el periodo de inscripción.</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={handleGenerarCarga}>Generar carga académica</button><button type="button" className="qa-btn" onClick={handleCargarCursosClick}>Cargar cursos (CSV)</button><input ref={fileInputRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleCargarCursosFile}/><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? 'Cargando...' : 'Consultar materias'}</button></div></div>{materias ? <table className="admin-table" style={{marginTop:12}}><thead><tr><th>Clave</th><th>Materia</th><th>Créditos</th><th>Profesor</th><th>Horario</th></tr></thead><tbody>{materias.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || 'Por asignar'}</td><td>{m.horario || 'Por definir'}</td></tr>)}</tbody></table> : <p className="empty-state">Consulta el catálogo para ver las materias cargadas.</p>}</div>
-              </div>
-            )}
-
             {['alumnos','aspirantes'].includes(activeSection) && datos && (
               <div className="panel-card coord-directory">
                 <div className="admin-card-head">
@@ -928,7 +1128,161 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
             {activeSection === 'bandeja' && (
               <div className="aspirante-section-card is-open">
                 <div className="section-panel">
-                      <div className="panel-card coord-queue"><div className="coord-queue-head"><h3>{copy.queue.title}</h3><div className="coord-filters">{FILTROS.map((item) => <button type="button" key={item.id} className={filtro === item.id ? 'is-active' : ''} onClick={() => setFiltro(item.id)}>{copy.filters[item.key]}</button>)}</div></div><div className="coord-list">{aspirantes.length === 0 ? <p className="empty-state">{copy.queue.empty}</p> : aspirantes.map((aspirante) => <button type="button" key={aspirante.id} className={`coord-item${seleccionado?.id === aspirante.id ? ' is-selected' : ''}`} onClick={() => { setSeleccionado(aspirante); setActiveSection('detalle'); }}><span><strong>{aspirante.nombre}</strong><small>{aspirante.programa} · {aspirante.unidad}</small></span><span className={`estado-badge estado-${aspirante.proceso_estado}`}>{etiquetaEstado(aspirante.proceso_estado, copy)}</span></button>)}</div></div>
+                  <div className="panel-card coord-bulk-notification">
+                    <div className="coord-bulk-heading">
+                      <div>
+                        <p className="panel-kicker">{copy.notifications.title}</p>
+                        <p>{copy.notifications.intro}</p>
+                      </div>
+                      <span className="coord-bulk-count">{notificacionDestinatarios.length} / {aspirantesNotificables.length} {copy.notifications.recipients}</span>
+                    </div>
+                    <div className="coord-bulk-controls">
+                      <label>
+                        <span>{copy.notifications.target}</span>
+                        <select value={notificacionGrupo} onChange={event => {
+                          setNotificacionGrupo(event.target.value);
+                          setNotificacionSeleccionados(null);
+                          setNotificacionResultado(null);
+                          setNotificacionError('');
+                        }}>
+                          <option value="por-revisar">{copy.filters.review}</option>
+                          <option value="revision">{copy.filters.inReview}</option>
+                          <option value="aceptado">{copy.filters.accepted}</option>
+                          <option value="rechazado">{copy.filters.rejected}</option>
+                          <option value="todos">{copy.filters.all}</option>
+                        </select>
+                      </label>
+                      <label className="coord-bulk-message">
+                        <span>{copy.notifications.message}</span>
+                        <textarea
+                          rows="2"
+                          maxLength="1000"
+                          value={notificacionMensaje}
+                          placeholder={copy.notifications.messagePlaceholder}
+                          onChange={event => setNotificacionMensaje(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <label className="coord-bulk-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={notificacionIncluirFechas}
+                        onChange={event => setNotificacionIncluirFechas(event.target.checked)}
+                      />
+                      <span><strong>{copy.notifications.includeDates}</strong><small>{copy.notifications.dateInfo}</small></span>
+                    </label>
+                    <details className="coord-bulk-recipients">
+                      <summary>{copy.notifications.chooseRecipients} ({notificacionDestinatarios.length}/{aspirantesNotificables.length})</summary>
+                      <div className="coord-bulk-recipient-actions">
+                        <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setNotificacionSeleccionados(null)}>{copy.notifications.selectAll}</button>
+                        <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setNotificacionSeleccionados([])}>{copy.notifications.selectNone}</button>
+                      </div>
+                      {aspirantesNotificables.length ? (
+                        <div className="coord-bulk-recipient-list">
+                          {aspirantesNotificables.map(aspirante => (
+                            <label key={aspirante.id}>
+                              <input
+                                type="checkbox"
+                                checked={notificacionSeleccionados === null || notificacionSeleccionados.includes(aspirante.id)}
+                                onChange={event => setNotificacionSeleccionados(current => {
+                                  const selected = current === null ? aspirantesNotificables.map(item => item.id) : current;
+                                  return event.target.checked
+                                    ? [...selected, aspirante.id]
+                                    : selected.filter(id => id !== aspirante.id);
+                                })}
+                              />
+                              <span><strong>{aspirante.nombre}</strong><small>{aspirante.correo || copy.notifications.noEmail} · {etiquetaEstado(aspirante.proceso_estado, copy)}</small></span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : <p className="empty-state">{copy.notifications.noRecipients}</p>}
+                    </details>
+                    <details className="coord-bulk-preview">
+                      <summary>{copy.notifications.preview}</summary>
+                      <p>{notificacionMensaje.trim() || copy.notifications.defaultMessage}</p>
+                      <div>
+                        {notificacionDestinatarios.map(aspirante => {
+                          const fechas = notificacionIncluirFechas ? [
+                            [copy.notifications.examDate, aspirante.fecha_examen_admision],
+                            [copy.notifications.interviewDate, aspirante.fecha_entrevista],
+                            [copy.notifications.courseDate, aspirante.fecha_inicio_curso_propedeutico],
+                          ].filter(([, value]) => value) : [];
+                          return (
+                            <article key={aspirante.id}>
+                              <strong>{aspirante.nombre}</strong>
+                              <span>{etiquetaEstado(aspirante.proceso_estado, copy)}</span>
+                              {notificacionIncluirFechas && (
+                                <small>{fechas.length
+                                  ? fechas.map(([label, value]) => `${label}: ${formatearFecha(value, copy.locale)}`).join(' · ')
+                                  : copy.notifications.noDates}</small>
+                              )}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </details>
+                    {notificacionError && <div className="api-error" role="alert">{notificacionError}</div>}
+                    {notificacionResultado && (
+                      <div className="coord-bulk-result" role="status" aria-live="polite">
+                        <strong>
+                          {copy.notifications.result}: {notificacionResultado.enviados} {copy.notifications.sent} · {notificacionResultado.avisos_internos || 0} {copy.notifications.internalSaved}
+                          {(notificacionResultado.correos_desactivados || 0) > 0
+                            ? ` · ${notificacionResultado.correos_desactivados} ${copy.notifications.disabledEmail}`
+                            : ''}
+                          {' · '}{notificacionResultado.fallidos.length} {copy.notifications.failed}
+                          {(notificacionResultado.sin_correo.length + notificacionResultado.sin_correo_seleccionados.length) > 0
+                            ? ` · ${notificacionResultado.sin_correo.length + notificacionResultado.sin_correo_seleccionados.length} ${copy.notifications.noEmail}`
+                            : ''}.
+                        </strong>
+                        {(notificacionResultado.fallidos.length || notificacionResultado.sin_correo.length || notificacionResultado.sin_correo_seleccionados.length) > 0 && (
+                          <ul>
+                            {[...notificacionResultado.fallidos, ...notificacionResultado.sin_correo, ...notificacionResultado.sin_correo_seleccionados].map(item => <li key={item.id}>{item.nombre}</li>)}
+                          </ul>
+                        )}
+                        {notificacionResultado.fallidos.length > 0 && (
+                          <button
+                            type="button"
+                            className="qa-btn qa-btn-secondary coord-bulk-retry"
+                            onClick={() => {
+                              setNotificacionSeleccionados(notificacionResultado.fallidos.map(item => item.id));
+                              setNotificacionResultado(null);
+                              setNotificacionError('');
+                            }}
+                          >
+                            {copy.notifications.retry}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className="coord-bulk-footer">
+                      <span>
+                        {notificacionResultado
+                          ? copy.notifications.success
+                          : `${notificacionConCorreo.length} ${copy.notifications.recipients}`}
+                        {notificacionSinCorreo > 0 && <small className="coord-bulk-no-email">{notificacionSinCorreo} {copy.notifications.excludedNoEmail}</small>}
+                      </span>
+                      <button type="button" className="qa-btn" disabled={notificacionEnviando || !notificacionConCorreo.length} onClick={enviarNotificacionesMasivas}>
+                        {notificacionEnviando ? copy.notifications.sending : copy.notifications.send}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="panel-card coord-queue">
+                    <div className="coord-queue-head">
+                      <h3>{copy.queue.title}</h3>
+                      <div className="coord-filters">{FILTROS.map(item => (
+                        <button type="button" key={item.id} className={filtro === item.id ? 'is-active' : ''} onClick={() => setFiltro(item.id)}>{copy.filters[item.key]}</button>
+                      ))}</div>
+                    </div>
+                    <div className="coord-list">
+                      {aspirantes.length === 0 ? <p className="empty-state">{copy.queue.empty}</p> : aspirantes.map(aspirante => (
+                        <button type="button" key={aspirante.id} className={`coord-item${seleccionado?.id === aspirante.id ? ' is-selected' : ''}`} onClick={() => { setSeleccionado(aspirante); setActiveSection('detalle'); }}>
+                          <span><strong>{aspirante.nombre}</strong><small>{aspirante.programa} · {aspirante.unidad}</small></span>
+                          <span className={`estado-badge estado-${aspirante.proceso_estado}`}>{etiquetaEstado(aspirante.proceso_estado, copy)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -938,15 +1292,15 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                 <div className="section-panel">
                   <div className="panel-card coord-detail">
                   {seleccionado ? (
-                    <div>
-                      <div className="coord-detail-head">
+                    <div className="coord-record">
+                      <div className="coord-detail-head coord-record-header">
                         <div className="coord-profile-photo">{seleccionado.profile_photo ? <img src={seleccionado.profile_photo.startsWith('http') ? seleccionado.profile_photo : `http://localhost:8000${seleccionado.profile_photo}`} alt={copy.detail.title} /> : <span>{(seleccionado.nombre || 'A').charAt(0).toUpperCase()}</span>}</div>
-                        <div>
+                        <div className="coord-record-identity">
                           <p className="panel-kicker">{copy.detail.title}</p>
                           <h3>{seleccionado.nombre}</h3>
-                          <p>{seleccionado.correo} · {seleccionado.telefono}</p>
+                          <p><span>{seleccionado.correo || '—'}</span><span>{seleccionado.telefono || '—'}</span></p>
                         </div>
-                        <span className={`estado-badge estado-${seleccionado.proceso_estado}`}>{etiquetaEstado(seleccionado.proceso_estado, copy)}</span>
+                        <span className={`estado-badge estado-${seleccionado.proceso_estado} coord-record-status`}>{etiquetaEstado(seleccionado.proceso_estado, copy)}</span>
                       </div>
 
                       {detalleCargando && !detalle ? (
@@ -956,7 +1310,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                           {saveError && <div className="api-error" role="alert">{saveError}</div>}
                           {saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}
 
-                          <div className="coord-action-row">
+                          <div className="coord-action-row coord-record-actions">
                                 {detalle?.rol === 'aspirante' && <>
                                   <button type="button" className="qa-btn" onClick={() => cambiarEstado('revision')} disabled={actualizando}>{copy.detail.markReview}</button>
                                   <button type="button" className="qa-btn" onClick={intentarAceptar} disabled={actualizando}>{copy.detail.accept}</button>
@@ -979,21 +1333,24 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                             )}
 
                             {detalle?.rol === 'alumno' && (
-                              <div>
+                              <div className="coord-student-actions">
                                 <button type="button" className="qa-btn" onClick={handleDescargarCalificaciones}>{copy.detail.grades}</button>
                                 <button type="button" className="qa-btn" onClick={handleDescargarAdscripcion}>{copy.detail.affiliation}</button>
                                 <button type="button" className="qa-btn" onClick={handleDarBaja}>{copy.detail.dropout}</button>
                                 <button type="button" className="qa-btn" onClick={handleGenerarCarga}>{copy.detail.generateLoad}</button>
-                                <button type="button" className="qa-btn" onClick={handleCargarCursosClick}>{copy.detail.uploadCourses}</button>
-                                <input ref={fileInputRef} type="file" accept=".csv" style={{display:'none'}} onChange={handleCargarCursosFile} />
                               </div>
                             )}
                           </div>
 
+                          {detalle.expediente_digital?.id && (
+                            <div className="coord-digital-record">
+                              <ExpedienteCentralizadoCard expedienteId={detalle.expediente_digital.id} session={session}/>
+                            </div>
+                          )}
+
                           <div className="coord-data">
-                            {detalle.expediente_digital?.id && <ExpedienteCentralizadoCard expedienteId={detalle.expediente_digital.id} session={session}/>} 
-                            <div><span>{copy.detail.curp}</span><strong>{detalle.curp}</strong></div>
-                            <div><span>{copy.directory.username}</span><strong>{detalle.usuario}</strong></div>
+                            <div><span>{copy.detail.curp}</span><strong>{detalle.curp || '—'}</strong></div>
+                            <div><span>{copy.directory.username}</span><strong>{detalle.usuario || '—'}</strong></div>
                             <div><span>{copy.detail.program}</span><strong>{detalle.programa || '—'}</strong></div>
                             <div><span>{copy.detail.unit}</span><strong>{detalle.unidad || '—'}</strong></div>
                             <div><span>{copy.detail.department}</span><strong>{detalle.departamento || '—'}</strong></div>
@@ -1119,7 +1476,8 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                               <button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : copy.subjects.query}</button>
                             </div>
                             {materias ? (
-                              <table className="admin-table" style={{marginTop:12}}>
+                              <div className="coord-subjects-table">
+                              <table className="admin-table">
                                 <thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead>
                                 <tbody>
                                   {materias.map((m) => (
@@ -1127,6 +1485,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                                   ))}
                                 </tbody>
                               </table>
+                              </div>
                             ) : <p className="empty-state">{copy.detail.noSubjects}</p>}
                           </div>
 

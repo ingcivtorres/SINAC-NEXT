@@ -29,7 +29,7 @@ def generar_alertas_automatizadas(dias_vencimiento=ALERTA_DIAS_VENCIMIENTO):
     """Registra alertas idempotentes para que pueda ejecutarse de forma periódica."""
     ahora = timezone.now()
     limite = ahora + timedelta(days=dias_vencimiento)
-    resultado = {'bajas': 0, 'vencimientos': 0, 'becas': 0}
+    resultado = {'bajas': 0, 'vencimientos': 0, 'aperturas': 0, 'becas': 0}
 
     for alumno in Aspirante.objects.filter(rol='alumno', proceso_estado='baja', is_staff=False):
         detalle = 'Alerta institucional: tu cuenta académica se encuentra en estado de baja. Contacta a Servicios Escolares para orientación.'
@@ -46,6 +46,22 @@ def generar_alertas_automatizadas(dias_vencimiento=ALERTA_DIAS_VENCIMIENTO):
                 'alerta_vencimiento',
                 detalle,
                 detalle_estable=f'Alerta de vencimiento [{periodo.pk}]:',
+            )
+
+    periodos_abiertos = PeriodoInscripcion.objects.filter(
+        activo=True,
+        apertura__lte=ahora,
+        cierre__gte=ahora,
+    )
+    for periodo in periodos_abiertos:
+        detalle = f'Alerta de apertura [{periodo.pk}]: el periodo de inscripción "{periodo.nombre}" ya está abierto. Contacta a Servicios Escolares si necesitas apoyo.'
+        for alumno in alumnos_activos:
+            resultado['aperturas'] += _crear_alerta(
+                alumno,
+                'alerta_apertura_inscripcion',
+                detalle,
+                origen='Servicios Escolares',
+                detalle_estable=f'Alerta de apertura [{periodo.pk}]:',
             )
 
     solicitudes = Aspirante.objects.filter(apoyo_solicitado=True, is_staff=False)

@@ -1,5 +1,8 @@
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from datetime import timedelta
+from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -11,10 +14,13 @@ from .models import (
     Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual,
     EvaluacionColegio, ProyectoTesis, RevisionAntiplagio, JuradoProyecto, DefensaTesis,
 )
+from .configuracion_sistema import (
+    LOCKOUT_DURATION_MINUTES, get_login_attempt_limit, password_meets_policy,
+)
 
 
 class AspiranteRegistroSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Aspirante
@@ -49,8 +55,8 @@ class AspiranteRegistroSerializer(serializers.ModelSerializer):
         if correo:
             if Aspirante.objects.filter(correo__iexact=correo).exists():
                 raise serializers.ValidationError({'correo': ['Ya existe un aspirante registrado con este correo.']})
-        if len(password) < 8 or not re.search(r'[A-Z]', password) or not re.search(r'[a-z]', password) or not re.search(r'[0-9]', password):
-            raise serializers.ValidationError({'password': ['La contraseña debe tener 8 caracteres, mayúscula, minúscula y número.']})
+        if not password_meets_policy(password):
+            raise serializers.ValidationError({'password': ['La contraseña no cumple la política configurada.']})
 
         return attrs
 
@@ -110,13 +116,22 @@ class InscripcionSerializer(serializers.ModelSerializer):
 
 
 class SolicitudAcademicaSerializer(serializers.ModelSerializer):
+    aspirante = serializers.SerializerMethodField()
     tipo_label = serializers.CharField(source='get_tipo_display', read_only=True)
     estado_label = serializers.CharField(source='get_estado_display', read_only=True)
+    resuelta_por_nombre = serializers.CharField(source='resuelta_por.nombre', read_only=True, default=None)
 
     class Meta:
         model = SolicitudAcademica
-        fields = ['id', 'tipo', 'tipo_label', 'comentario', 'estado', 'estado_label', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'tipo_label', 'estado_label', 'created_at', 'updated_at']
+        fields = ['id', 'aspirante', 'tipo', 'tipo_label', 'comentario', 'estado', 'estado_label', 'respuesta_revision', 'resuelta_por_nombre', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'aspirante', 'tipo_label', 'estado_label', 'respuesta_revision', 'resuelta_por_nombre', 'created_at', 'updated_at']
+
+    def get_aspirante(self, obj):
+        return {
+            'id': obj.aspirante_id,
+            'nombre': obj.aspirante.nombre,
+            'usuario': obj.aspirante.usuario,
+        }
 
 
 class ExpedienteDigitalSerializer(serializers.ModelSerializer):
@@ -357,12 +372,12 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
             return 'admin'
         if str(getattr(user, 'rol', '')).strip().lower() in ('admin', 'administrador'):
             return 'admin'
+        if str(getattr(user, 'rol', '')).strip().lower() in ('servicios', 'servicios_escolares', 'servicios escolares'):
+            return 'servicios'
         if user.is_staff:
             return 'coordinacion'
         if str(getattr(user, 'rol', '')).strip().lower() in ('director', 'director de tesis'):
             return 'director'
-        if str(getattr(user, 'rol', '')).strip().lower() in ('servicios', 'servicios_escolares', 'servicios escolares'):
-            return 'servicios'
         if getattr(user, 'rol', None) == 'docente':
             return 'docente'
         if getattr(user, 'rol', None) == 'alumno':
@@ -389,9 +404,34 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
 
         user = self.get_user_by_identifier(identifier)
         if user is None or not user.is_active:
-            raise AuthenticationFailed('No active account found with the given credentials.')
-        if not user.check_password(password):
-            raise AuthenticationFailed('No active account found with the given credentials.')
+            raise AuthenticationFailed('Credenciales inválidas.')
+
+        invalid_credentials = False
+        now = timezone.now()
+        with transaction.atomic():
+            user = Aspirante.objects.select_for_update().filter(pk=user.pk).first()
+            if user is None or not user.is_active:
+                invalid_credentials = True
+            elif user.login_locked_until and user.login_locked_until > now:
+                invalid_credentials = True
+            else:
+                had_login_failures = bool(user.login_failed_attempts or user.login_locked_until)
+                if user.login_locked_until:
+                    user.login_failed_attempts = 0
+                    user.login_locked_until = None
+                if not user.check_password(password):
+                    user.login_failed_attempts += 1
+                    if user.login_failed_attempts >= get_login_attempt_limit():
+                        user.login_locked_until = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                    user.save(update_fields=['login_failed_attempts', 'login_locked_until', 'updated_at'])
+                    invalid_credentials = True
+                elif had_login_failures:
+                    user.login_failed_attempts = 0
+                    user.login_locked_until = None
+                    user.save(update_fields=['login_failed_attempts', 'login_locked_until', 'updated_at'])
+
+        if invalid_credentials:
+            raise AuthenticationFailed('Credenciales inválidas.')
 
         self.user = user
         refresh = RefreshToken.for_user(user)
@@ -422,17 +462,25 @@ class MateriaSerializer(serializers.ModelSerializer):
 
 
 class ExamenEnLineaSerializer(serializers.ModelSerializer):
+    aspirante = serializers.SerializerMethodField()
     tipo_label = serializers.CharField(source='get_tipo_display', read_only=True)
     estado_label = serializers.CharField(source='get_estado_display', read_only=True)
     color = serializers.SerializerMethodField()
     preguntas = serializers.SerializerMethodField()
+
+    def get_aspirante(self, obj):
+        return {
+            'id': obj.aspirante_id,
+            'nombre': obj.aspirante.nombre,
+            'usuario': obj.aspirante.usuario,
+        }
 
     def get_preguntas(self, obj):
         return [{'id': p.id, 'texto': p.texto, 'opciones': p.opciones, 'orden': p.orden} for p in obj.preguntas.all()]
 
     class Meta:
         model = ExamenEnLinea
-        fields = ['id', 'tipo', 'tipo_label', 'titulo', 'descripcion', 'business_key',
+        fields = ['id', 'aspirante', 'tipo', 'tipo_label', 'titulo', 'descripcion', 'business_key',
                   'camunda_instance_id', 'fecha_programada', 'fecha_inicio', 'fecha_fin',
                   'duracion_minutos', 'estado', 'estado_label', 'calificacion', 'intentos',
                   'max_intentos', 'retroalimentacion', 'color', 'preguntas', 'created_at', 'updated_at']
@@ -451,6 +499,13 @@ class ExamenEnLineaSerializer(serializers.ModelSerializer):
         if obj.estado == 'cancelado':
             return 'secondary'
         return 'neutral'
+
+
+class CalificacionExamenDocenteSerializer(serializers.Serializer):
+    calificacion = serializers.DecimalField(
+        max_digits=4, decimal_places=2, min_value=Decimal('0'), max_value=Decimal('10'),
+    )
+    retroalimentacion = serializers.CharField(required=False, allow_blank=True)
 
 
 class EntrevistaVirtualSerializer(serializers.ModelSerializer):

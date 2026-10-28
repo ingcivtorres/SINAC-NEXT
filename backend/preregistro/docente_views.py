@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 import requests
 from django.conf import settings
 from .models import Aspirante, Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual
-from .serializers import MateriaSerializer, InscripcionSerializer, SolicitudAcademicaSerializer, ExamenEnLineaSerializer, EntrevistaVirtualSerializer
+from .serializers import MateriaSerializer, InscripcionSerializer, SolicitudAcademicaSerializer, ExamenEnLineaSerializer, EntrevistaVirtualSerializer, CalificacionExamenDocenteSerializer
 from .views import _registrar_seguimiento
 
 logger = logging.getLogger(__name__)
@@ -54,14 +54,14 @@ class PanelDocenteView(APIView):
         estudiante_ids = inscripciones.values_list('aspirante_id', flat=True)
         solicitudes_query = SolicitudAcademica.objects.filter(
             aspirante_id__in=estudiante_ids
-        ).order_by('-created_at')
+        ).select_related('aspirante').order_by('-created_at')
         
         solicitudes = solicitudes_query[:10]
 
         # Obtener exámenes en línea del docente
         examenes = ExamenEnLinea.objects.filter(
             aspirante_id__in=estudiante_ids
-        ).order_by('-fecha_programada')
+        ).select_related('aspirante').order_by('-fecha_programada')
 
         # Obtener entrevistas virtuales de estudiantes del docente
         aspirantes = Aspirante.objects.filter(
@@ -295,7 +295,7 @@ class ActasCalificacionesView(APIView):
 
 
 class DocenteExamenView(APIView):
-    """Lista y actualiza exámenes en línea."""
+    """Lista exámenes en línea asociados al docente."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -329,96 +329,84 @@ class DocenteExamenView(APIView):
             }
         })
 
-    def put(self, request, pk):
-        """Actualiza el estado de un examen."""
-        docente = request.user
-        if not _es_docente(docente):
-            return Response(
-                {'error': 'No tienes permisos de docente.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        try:
-            examen = ExamenEnLinea.objects.get(pk=pk)
-        except ExamenEnLinea.DoesNotExist:
-            return Response(
-                {'error': 'Examen no encontrado.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Verificar que el docente tenga permiso (puede ser profesor de alguna materia del estudiante)
-        materias = Materia.objects.filter(profesor__iexact=docente.nombre)
-        inscripciones = Inscripcion.objects.filter(
-            aspirante=examen.aspirante,
-            materia__in=materias
-        )
-        if not inscripciones.exists():
-            return Response(
-                {'error': 'No tienes permiso para actualizar este examen.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Actualizar campos permitidos
-        if 'estado' in request.data:
-            estado = request.data.get('estado')
-            valid_estados = ['programado', 'iniciado', 'completado', 'aprobado', 'reprobado', 'cancelado']
-            if estado not in valid_estados:
-                return Response(
-                    {'error': f'Estado inválido. Debe ser uno de: {", ".join(valid_estados)}'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            examen.estado = estado
-
-        if 'calificacion' in request.data:
-            try:
-                calificacion = float(request.data.get('calificacion'))
-                if not (0 <= calificacion <= 10):
-                    raise ValueError('La calificación debe estar entre 0 y 10.')
-                examen.calificacion = calificacion
-                examen.estado = 'aprobado' if calificacion >= 8 else 'reprobado'
-            except (ValueError, TypeError) as e:
-                return Response(
-                    {'error': f'Calificación inválida: {str(e)}'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if 'retroalimentacion' in request.data:
-            examen.retroalimentacion = request.data.get('retroalimentacion')
-
-        if 'fecha_inicio' in request.data:
-            examen.fecha_inicio = request.data.get('fecha_inicio')
-
-        if 'fecha_fin' in request.data:
-            examen.fecha_fin = request.data.get('fecha_fin')
-
-        examen.save()
-        return Response(ExamenEnLineaSerializer(examen).data)
-
-
 class DocenteExamenDetailView(APIView):
-    """Obtiene detalle de un examen específico."""
+    """Consulta y ajusta la calificación de un examen del alumno."""
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, pk):
-        """Obtiene detalle de un examen."""
+    def _get_examen(self, request, pk):
         docente = request.user
         if not _es_docente(docente):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            return None, Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
             examen = ExamenEnLinea.objects.select_related('aspirante').get(pk=pk)
         except ExamenEnLinea.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
 
-        # Verificar permiso
         materias = Materia.objects.filter(profesor__iexact=docente.nombre)
         inscripciones = Inscripcion.objects.filter(
             aspirante=examen.aspirante,
             materia__in=materias
         )
         if not inscripciones.exists():
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            return None, Response(status=status.HTTP_403_FORBIDDEN)
 
+        return examen, None
+
+    def get(self, request, pk):
+        examen, error = self._get_examen(request, pk)
+        if error:
+            return error
+        return Response(ExamenEnLineaSerializer(examen).data)
+
+    def put(self, request, pk):
+        examen, error = self._get_examen(request, pk)
+        if error:
+            return error
+
+        if not hasattr(request.data, 'keys'):
+            return Response(
+                {'error': 'El cuerpo de la solicitud debe ser un objeto.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        campos_permitidos = {'calificacion', 'retroalimentacion'}
+        campos_no_permitidos = set(request.data.keys()) - campos_permitidos
+        if campos_no_permitidos:
+            return Response(
+                {'error': f'Campos no permitidos: {", ".join(sorted(campos_no_permitidos))}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if 'calificacion' not in request.data:
+            return Response(
+                {'error': 'Se requiere una calificación para actualizar el resultado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if examen.tipo == 'predoctoral':
+            return Response(
+                {'error': 'Los exámenes predoctorales se gestionan desde su flujo especializado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if examen.estado not in {'aprobado', 'reprobado'}:
+            return Response(
+                {'error': 'Solo se puede ajustar la calificación de un examen ya concluido.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = CalificacionExamenDocenteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'error': 'La calificación debe ser un número entre 0 y 10, con hasta dos decimales.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        calificacion = serializer.validated_data['calificacion']
+        examen.calificacion = calificacion
+        examen.estado = 'aprobado' if calificacion >= 8 else 'reprobado'
+        update_fields = ['calificacion', 'estado', 'updated_at']
+        if 'retroalimentacion' in serializer.validated_data:
+            examen.retroalimentacion = serializer.validated_data['retroalimentacion']
+            update_fields.append('retroalimentacion')
+        examen.save(update_fields=update_fields)
         return Response(ExamenEnLineaSerializer(examen).data)
 
 

@@ -17,6 +17,9 @@ const COPY = {
     date: 'Fecha', field: 'Campo', before: 'Anterior', after: 'Nuevo', by: 'Realizado por', none: 'Sin registros.', deactivate: 'Desactivar docente', activate: 'Activar docente', saved: 'Cambios guardados.', saveError: 'No se pudo guardar.',
     confirmDeactivate: '¿Desactivar a este docente? Dejará de tener acceso al sistema.',
     sni: 'Nivel SNI', specialty: 'Especialidad', declaredLines: 'Líneas de investigación (separadas por coma)', save: 'Guardar perfil',
+    chooseOption: 'Selecciona una opción',
+    otherOption: 'Otro (especificar)',
+    enterValue: 'Escribe un valor',
   },
   en: {
     title: 'FACULTY DIRECTORY', subtitle: 'Detailed information on faculty and thesis directors.',
@@ -33,10 +36,24 @@ const COPY = {
     date: 'Date', field: 'Field', before: 'Previous', after: 'New', by: 'Performed by', none: 'No records.', deactivate: 'Deactivate', activate: 'Activate', saved: 'Changes saved.', saveError: 'Could not save.',
     confirmDeactivate: 'Deactivate this faculty member? They will lose system access.',
     sni: 'SNI level', specialty: 'Specialty', declaredLines: 'Research lines (comma separated)', save: 'Save profile',
+    chooseOption: 'Choose an option',
+    otherOption: 'Other (specify)',
+    enterValue: 'Enter a value',
   },
 };
 
 const TABS = ['general', 'academic', 'students', 'courses', 'committees', 'history'];
+const PROFILE_SUGGESTIONS = {
+  degrees: ['Licenciatura', 'Especialidad', 'Maestría', 'Doctorado', 'Posdoctorado'],
+  institutions: [
+    'Cinvestav',
+    'Instituto Politécnico Nacional',
+    'Universidad Nacional Autónoma de México',
+    'Universidad Autónoma Metropolitana',
+    'Universidad de Guadalajara',
+  ],
+  sniLevels: ['No aplica', 'Sin reconocimiento', 'Candidatura', 'Nivel I', 'Nivel II', 'Nivel III', 'Emérito'],
+};
 export const PERFIL_COPY = COPY;
 
 function fmt(value, language) {
@@ -61,17 +78,49 @@ function Table({head, rows, empty}) {
 }
 
 export function PerfilForm({d, t, onSave}) {
-  const [form, setForm] = useState({
+  const initialForm = {
     ultimo_grado: d.ultimo_grado || '', institucion: d.institucion || '', sni_nivel: d.sni_nivel || '', orcid: d.orcid || '',
     especialidad: d.especialidad || '', lineas_declaradas: d.lineas_declaradas || '', idiomas: d.idiomas || '',
     publicaciones: d.publicaciones || '', experiencia: d.experiencia || '',
-  });
+  };
+  const [form, setForm] = useState(initialForm);
+  const [customAcademicValue, setCustomAcademicValue] = useState(() => ({
+    ultimo_grado: Boolean(initialForm.ultimo_grado && !PROFILE_SUGGESTIONS.degrees.includes(initialForm.ultimo_grado)),
+    institucion: Boolean(initialForm.institucion && !PROFILE_SUGGESTIONS.institutions.includes(initialForm.institucion)),
+    sni_nivel: Boolean(initialForm.sni_nivel && !PROFILE_SUGGESTIONS.sniLevels.includes(initialForm.sni_nivel)),
+  }));
   const bind = campo => ({value: form[campo], onChange: e => setForm({...form, [campo]: e.target.value})});
+  const academicSelect = (campo, label, options) => (
+    <label key={campo}>{label}
+      <select
+        value={customAcademicValue[campo] ? '__custom__' : form[campo]}
+        onChange={event => {
+          const custom = event.target.value === '__custom__';
+          setCustomAcademicValue(previous => ({...previous, [campo]: custom}));
+          if (!custom) setForm(previous => ({...previous, [campo]: event.target.value}));
+          else if (!customAcademicValue[campo]) setForm(previous => ({...previous, [campo]: ''}));
+        }}
+      >
+        <option value="">{t.chooseOption}</option>
+        {options.map(value => <option key={value} value={value}>{value}</option>)}
+        <option value="__custom__">{t.otherOption}</option>
+      </select>
+      {customAcademicValue[campo] && (
+        <input
+          aria-label={label}
+          placeholder={t.enterValue}
+          maxLength={campo === 'ultimo_grado' ? 80 : campo === 'institucion' ? 180 : 30}
+          value={form[campo]}
+          onChange={event => setForm(previous => ({...previous, [campo]: event.target.value}))}
+        />
+      )}
+    </label>
+  );
   return (
     <form className="servicios-form-grid" onSubmit={e => { e.preventDefault(); onSave(form); }}>
-      <label>{t.degree}<input maxLength="80" {...bind('ultimo_grado')}/></label>
-      <label>{t.institution}<input maxLength="180" {...bind('institucion')}/></label>
-      <label>{t.sni}<input maxLength="30" {...bind('sni_nivel')}/></label>
+      {academicSelect('ultimo_grado', t.degree, PROFILE_SUGGESTIONS.degrees)}
+      {academicSelect('institucion', t.institution, PROFILE_SUGGESTIONS.institutions)}
+      {academicSelect('sni_nivel', t.sni, PROFILE_SUGGESTIONS.sniLevels)}
       <label>ORCID<input maxLength="40" {...bind('orcid')}/></label>
       <label>{t.specialty}<input maxLength="180" {...bind('especialidad')}/></label>
       <label>{t.declaredLines}<textarea rows="2" {...bind('lineas_declaradas')}/></label>

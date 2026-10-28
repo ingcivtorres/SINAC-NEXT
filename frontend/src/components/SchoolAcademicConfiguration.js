@@ -30,15 +30,25 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
   const [periodoForm, setPeriodoForm] = useState({id: null, nombre: "", apertura: "", cierre: "", activo: true});
   const [planes, setPlanes] = useState([]);
   const [materias, setMaterias] = useState([]);
+  const [cargas, setCargas] = useState([]);
+  const [periodosPublicacion, setPeriodosPublicacion] = useState([]);
+  const [comentariosCarga, setComentariosCarga] = useState({});
+  const [periodosCarga, setPeriodosCarga] = useState({});
+  const [detallesCarga, setDetallesCarga] = useState({});
   const [planForm, setPlanForm] = useState(nuevoPlan);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshIndex, setRefreshIndex] = useState(0);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
-    const endpoint = section === "periodos" ? "/api/periodos-inscripcion/?todos=1" : "/api/tesis/flujo/";
+    setLoading(true);
+    setError("");
+    const endpoint = section === "periodos"
+      ? "/api/periodos-inscripcion/?todos=1"
+      : section === "cargas" ? "/api/cargas-academicas/" : "/api/tesis/flujo/";
     fetch(endpoint, {headers: {Authorization: `Bearer ${session.access}`}, signal: controller.signal})
       .then(async response => {
         if (response.status === 401) {
@@ -46,7 +56,8 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
           throw Object.assign(new Error(), {name: "AbortError"});
         }
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.detail || (section === "periodos" ? copy.periods.createError : copy.plans.loadError));
+        const loadError = section === "periodos" ? copy.periods.createError : section === "cargas" ? copy.loadReview.loadError : copy.plans.loadError;
+        if (!response.ok) throw new Error(body.detail || loadError);
         return body;
       })
       .then(body => {
@@ -54,6 +65,9 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
           const lista = Array.isArray(body) ? body : [];
           setPeriodos(lista);
           if (lista.length) seleccionarPeriodo(lista[0]);
+        } else if (section === "cargas") {
+          setCargas(body.cargas || []);
+          setPeriodosPublicacion(body.periodos_inscripcion || []);
         } else {
           const lista = body.configuraciones || [];
           setPlanes(lista);
@@ -62,9 +76,9 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
         }
       })
       .catch(err => { if (err.name !== "AbortError") setError(err.message); })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [copy.messages.expired, copy.periods.createError, copy.plans.loadError, onLogout, section, session.access]);
+  }, [copy.messages.expired, copy.periods.createError, copy.plans.loadError, copy.loadReview.loadError, onLogout, refreshIndex, section, session.access]);
 
   function seleccionarPeriodo(periodo) {
     setPeriodoForm({
@@ -196,7 +210,103 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
     }
   }
 
+  async function actualizarEstadoCarga(carga, estado) {
+    const comentario = comentariosCarga[carga.id]?.trim() || "";
+    const periodoInscripcion = periodosCarga[carga.id];
+    if (["aprobada", "rechazada"].includes(estado) && !comentario) {
+      return setError(copy.loadReview.reviewComment);
+    }
+    if (estado === "publicada" && !periodoInscripcion) {
+      return setError(copy.loadReview.choosePeriod);
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/cargas-academicas/${carga.id}/`, {
+        method: "PATCH",
+        headers: {Authorization: `Bearer ${session.access}`, "Content-Type": "application/json"},
+        body: JSON.stringify({
+          estado,
+          comentario,
+          ...(estado === "publicada" ? {periodo_inscripcion: Number(periodoInscripcion)} : {}),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      if (!response.ok) throw new Error(body.detail || copy.loads.updateError);
+      setCargas(previous => previous.map(item => item.id === body.id ? body : item));
+      setComentariosCarga(previous => ({...previous, [carga.id]: ""}));
+      setSuccess(copy.loads.updated);
+    } catch (err) {
+      setError(err.message || copy.loads.updateError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) return <div className="servicios-empty-card">{copy.loading}</div>;
+
+  if (section === "cargas") {
+    const estados = {
+      borrador: copy.loadReview.statusDraft,
+      en_revision: copy.loadReview.statusReview,
+      aprobada: copy.loadReview.statusApproved,
+      rechazada: copy.loadReview.statusRejected,
+      publicada: copy.loadReview.statusPublished,
+    };
+    const periodosHabilitados = periodosPublicacion.filter(periodo => periodo.habilitado);
+    return (
+      <section className="servicios-card">
+        <div className="servicios-card-heading">
+          <div><span className="panel-kicker">{copy.loads.kicker}</span><h3>{copy.loadReview.title}</h3><p>{copy.loadReview.intro}</p></div>
+          <button type="button" className="btn-secondary" onClick={() => setRefreshIndex(index => index + 1)}>{copy.refresh}</button>
+        </div>
+        {cargas.length ? cargas.map(carga => (
+          <article className="servicios-card" key={carga.id}>
+            <div className="servicios-card-heading">
+              <div><h4>{carga.periodo}</h4><p>{copy.loads.created}: {carga.created_at ? new Intl.DateTimeFormat(copy.locale, {dateStyle: "medium", timeStyle: "short"}).format(new Date(carga.created_at)) : "—"} · {carga.materias.length} {copy.loadReview.courseCount}</p></div>
+              <span className={`servicios-status servicios-status--${carga.estado}`}>{estados[carga.estado] || carga.estado}</span>
+            </div>
+            <div className="servicios-row-actions">
+              <button type="button" className="btn-secondary" onClick={() => setDetallesCarga(previous => ({...previous, [carga.id]: !previous[carga.id]}))}>
+                {detallesCarga[carga.id] ? copy.loadReview.hideDetails : copy.loadReview.details}
+              </button>
+            </div>
+            {detallesCarga[carga.id] && (
+              carga.materias.length ? <div className="servicios-table-wrap"><table className="admin-table">
+                <thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.plans.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th><th>{copy.loadReview.room}</th><th>{copy.loadReview.capacity}</th><th>{copy.detail.modality}</th></tr></thead>
+                <tbody>{carga.materias.map(materia => <tr key={materia.id}><td>{materia.clave}</td><td>{materia.nombre}</td><td>{materia.creditos}</td><td>{materia.docente_nombre || "—"}</td><td>{materia.horario || "—"}</td><td>{materia.salon_label}</td><td>{materia.capacidad}</td><td>{materia.modalidad_label}</td></tr>)}</tbody>
+              </table></div> : <p className="servicios-muted">{copy.loadReview.noCourses}</p>
+            )}
+            {carga.comentario && <p className="servicios-muted"><strong>{copy.loadReview.reviewComment}:</strong> {carga.comentario}</p>}
+            {carga.estado === "en_revision" && (
+              <div className="servicios-form">
+                <label>{copy.loadReview.reviewComment}<textarea rows="3" maxLength="2000" value={comentariosCarga[carga.id] || ""} placeholder={copy.loadReview.reviewCommentHint} onChange={event => setComentariosCarga(previous => ({...previous, [carga.id]: event.target.value}))}/></label>
+                <div className="servicios-row-actions">
+                  <button type="button" className="btn-primary" disabled={saving || !comentariosCarga[carga.id]?.trim()} onClick={() => actualizarEstadoCarga(carga, "aprobada")}>{copy.loads.approve}</button>
+                  <button type="button" className="btn-secondary" disabled={saving || !comentariosCarga[carga.id]?.trim()} onClick={() => actualizarEstadoCarga(carga, "rechazada")}>{copy.loads.reject}</button>
+                </div>
+              </div>
+            )}
+            {carga.estado === "aprobada" && (
+              <div className="servicios-form">
+                <label>{copy.loadReview.publicationPeriod}<select value={periodosCarga[carga.id] || ""} onChange={event => setPeriodosCarga(previous => ({...previous, [carga.id]: event.target.value}))}>
+                  <option value="">{copy.loadReview.choosePeriod}</option>
+                  {periodosHabilitados.map(periodo => <option key={periodo.id} value={periodo.id}>{periodo.nombre}</option>)}
+                </select></label>
+                {periodosHabilitados.length === 0 && <p className="servicios-muted">{copy.loadReview.noEnabledPeriods}</p>}
+                <button type="button" className="btn-primary" disabled={saving || !periodosCarga[carga.id] || periodosHabilitados.length === 0} onClick={() => actualizarEstadoCarga(carga, "publicada")}>{copy.loads.publish}</button>
+              </div>
+            )}
+          </article>
+        )) : <p className="servicios-muted">{copy.loads.noLoads}</p>}
+        {error && <div className="api-error" role="alert">{error}</div>}
+        {success && <div className="api-success" role="status">{success}</div>}
+      </section>
+    );
+  }
 
   if (section === "periodos") {
     return (
