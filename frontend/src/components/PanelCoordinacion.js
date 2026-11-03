@@ -6,6 +6,7 @@ import HistoricoPanel from './HistoricoPanel';
 import ExamenesGestionPanel from './ExamenesGestionPanel';
 import SolicitudesAcademicasReview from './SolicitudesAcademicasReview';
 import {useCoordinationCopy} from './coordinationPanelTranslations';
+import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from './TablaControles';
 import './PanelCoordinacion.css';
 
 const FILTROS = [
@@ -46,8 +47,8 @@ function formatoDateTimeLocal(valor) {
 }
 
 const CARGA_FORM_TEXT = {
-  es: {add: 'Agregar materia', remove: 'Quitar', room: 'Salón', capacity: 'Cupo', save: 'Guardar borrador', update: 'Actualizar borrador', edit: 'Editar', cancel: 'Cancelar edición', submit: 'Enviar a revisión', subject: 'Selecciona una materia', teacher: 'Selecciona un docente', count: 'Materias', detail: 'Ver detalle', hide: 'Ocultar detalle', reviewComment: 'Comentario de revisión (obligatorio)', reviewCommentHint: 'Explica el motivo de la decisión.', approveComment: 'Aprobar con comentario', rejectComment: 'Rechazar con comentario', noCourses: 'La carga no contiene materias.'},
-  en: {add: 'Add subject', remove: 'Remove', room: 'Room', capacity: 'Capacity', save: 'Save draft', update: 'Update draft', edit: 'Edit', cancel: 'Cancel editing', submit: 'Submit for review', subject: 'Select a subject', teacher: 'Select an instructor', count: 'Subjects', detail: 'View details', hide: 'Hide details', reviewComment: 'Review comment (required)', reviewCommentHint: 'Explain the reason for your decision.', approveComment: 'Approve with comment', rejectComment: 'Reject with comment', noCourses: 'This course load has no subjects.'},
+  es: {add: 'Agregar materia', remove: 'Quitar', room: 'Salón', capacity: 'Cupo', save: 'Guardar borrador', update: 'Actualizar borrador', edit: 'Editar', cancel: 'Cancelar edición', submit: 'Enviar a revisión', subject: 'Selecciona una materia', teacher: 'Selecciona un docente', count: 'Materias', detail: 'Ver detalle', hide: 'Ocultar detalle', reviewComment: 'Comentario de revisión (obligatorio)', reviewCommentHint: 'Explica el motivo de la decisión.', approveComment: 'Aprobar con comentario', rejectComment: 'Rechazar con comentario', noCourses: 'La carga no contiene materias.', reopen: 'Reabrir para corregir', reopened: 'La carga volvió a borrador. Corrígela y envíala de nuevo a revisión.', rejectedReason: 'Motivo del rechazo'},
+  en: {add: 'Add subject', remove: 'Remove', room: 'Room', capacity: 'Capacity', save: 'Save draft', update: 'Update draft', edit: 'Edit', cancel: 'Cancel editing', submit: 'Submit for review', subject: 'Select a subject', teacher: 'Select an instructor', count: 'Subjects', detail: 'View details', hide: 'Hide details', reviewComment: 'Review comment (required)', reviewCommentHint: 'Explain the reason for your decision.', approveComment: 'Approve with comment', rejectComment: 'Reject with comment', noCourses: 'This course load has no subjects.', reopen: 'Reopen to fix', reopened: 'The course load is back in draft. Fix it and submit it for review again.', rejectedReason: 'Rejection reason'},
   de: {add: 'Fach hinzufügen', remove: 'Entfernen', room: 'Raum', capacity: 'Kapazität', save: 'Entwurf speichern', update: 'Entwurf aktualisieren', edit: 'Bearbeiten', cancel: 'Bearbeitung abbrechen', submit: 'Zur Prüfung senden', subject: 'Fach auswählen', teacher: 'Lehrkraft auswählen', count: 'Fächer', detail: 'Details anzeigen', hide: 'Details ausblenden', reviewComment: 'Prüfungskommentar (erforderlich)', reviewCommentHint: 'Begründen Sie Ihre Entscheidung.', approveComment: 'Mit Kommentar genehmigen', rejectComment: 'Mit Kommentar ablehnen', noCourses: 'Dieses Lehrangebot enthält keine Fächer.'},
   zh: {add: '添加课程', remove: '移除', room: '教室', capacity: '容量', save: '保存草稿', update: '更新草稿', edit: '编辑', cancel: '取消编辑', submit: '提交审核', subject: '选择课程', teacher: '选择教师', count: '门课程', detail: '查看详情', hide: '隐藏详情', reviewComment: '审核意见（必填）', reviewCommentHint: '请说明决定理由。', approveComment: '附意见批准', rejectComment: '附意见拒绝', noCourses: '此课程安排没有课程。'},
   pt: {add: 'Adicionar disciplina', remove: 'Remover', room: 'Sala', capacity: 'Vagas', save: 'Salvar rascunho', update: 'Atualizar rascunho', edit: 'Editar', cancel: 'Cancelar edição', submit: 'Enviar para revisão', subject: 'Selecione uma disciplina', teacher: 'Selecione um docente', count: 'Disciplinas', detail: 'Ver detalhes', hide: 'Ocultar detalhes', reviewComment: 'Comentário da revisão (obrigatório)', reviewCommentHint: 'Explique o motivo da decisão.', approveComment: 'Aprovar com comentário', rejectComment: 'Rejeitar com comentário', noCourses: 'A carga não contém disciplinas.'},
@@ -76,7 +77,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const copy = useCoordinationCopy();
   const extText = EXTEMPORANEO_TEXT[copy.locale.slice(0, 2)] || EXTEMPORANEO_TEXT.es;
   const regularText = INSCRIPCION_REGULAR_TEXT[copy.locale.slice(0, 2)] || INSCRIPCION_REGULAR_TEXT.es;
-  const cargaText = CARGA_FORM_TEXT[(document.documentElement.lang || 'es').slice(0, 2)] || CARGA_FORM_TEXT.es;
+  const cargaText = CARGA_FORM_TEXT[copy.locale.slice(0, 2)] || CARGA_FORM_TEXT.es;
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -130,6 +131,9 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   const [confirmacionCiclo, setConfirmacionCiclo] = useState('');
   const [proyectosTesis, setProyectosTesis] = useState([]);
   const [examenesPredoctorales, setExamenesPredoctorales] = useState([]);
+  const [revisionTesis, setRevisionTesis] = useState(null);
+  const [calificacionExamen, setCalificacionExamen] = useState(null);
+  const [guardandoRevision, setGuardandoRevision] = useState(false);
   const [solicitudesTesis, setSolicitudesTesis] = useState([]);
   const [directoresTesis, setDirectoresTesis] = useState([]);
 
@@ -208,19 +212,19 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     }
   }
 
-  async function enviarCargaRevision(id) {
+  async function enviarCargaRevision(id, estado = 'en_revision') {
     setError('');
     setSaveSuccess('');
     try {
       const response = await fetch(`/api/cargas-academicas/${id}/`, {
         method: 'PATCH',
         headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
-        body: JSON.stringify({estado: 'en_revision'}),
+        body: JSON.stringify({estado}),
       });
       const data = await response.json().catch(() => ({}));
       if (response.status === 401) return onLogout(copy.messages.expired);
       if (!response.ok) throw new Error(data.detail || copy.loads.updateError);
-      setSaveSuccess(copy.loads.sent);
+      setSaveSuccess(estado === 'borrador' ? cargaText.reopened : copy.loads.sent);
       await cargarFlujoCargas();
     } catch (error) {
       setError(error.message || copy.loads.updateError);
@@ -234,14 +238,26 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       setProyectosTesis(await r.json());
     } catch (e) { setError(e.message || copy.messages.loadProjects); }
   }, [copy, session.access]);
-  async function actualizarProyectoTesis(proyecto, estado) {
-    const comentario = window.prompt(copy.thesis.comment, proyecto.comentarios_revision || '');
-    if (comentario === null) return;
-    const r = await fetch(`/api/proyectos-tesis/${proyecto.id}/`, {method:'PATCH', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({estado, comentarios_revision: comentario})});
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) return setError(data.detail || copy.thesis.updateError);
-    setProyectosTesis(items => items.map(item => item.id === data.id ? data : item));
-    setSaveSuccess(`${copy.thesis.updatedTo} ${etiquetaEstado(data.estado, copy)}.`);
+  async function actualizarProyectoTesis(event) {
+    event.preventDefault();
+    if (!revisionTesis || guardandoRevision) return;
+    const {proyecto, estado, comentario} = revisionTesis;
+    setGuardandoRevision(true);
+    setError('');
+    setSaveSuccess('');
+    try {
+      const r = await fetch(`/api/proyectos-tesis/${proyecto.id}/`, {method:'PATCH', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({estado, comentarios_revision: comentario.trim()})});
+      if (r.status === 401) return onLogout(copy.messages.expired);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || copy.thesis.updateError);
+      setProyectosTesis(items => items.map(item => item.id === data.id ? data : item));
+      setRevisionTesis(null);
+      setSaveSuccess(`${copy.thesis.updatedTo} ${etiquetaEstado(data.estado, copy)}.`);
+    } catch (err) {
+      setError(err.message || copy.thesis.updateError);
+    } finally {
+      setGuardandoRevision(false);
+    }
   }
   async function descargarReporte(tipo='expedientes', formato='xlsx') { await downloadBlob(`/api/coordinacion/reportes/?tipo=${tipo}&format=${formato}`, `reporte-${tipo}-${new Date().toISOString().slice(0,10)}.${formato}`); }
 
@@ -302,12 +318,18 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
     }
   }, [datos, seleccionado]);
 
+  const datosListos = Boolean(datos);
   useEffect(() => {
-    if (!datos) return;
+    if (!datosListos) return;
     fetch('/api/preregistro/evaluaciones-colegio/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : Promise.reject(new Error(copy.messages.loadEvaluations))).then(setEvaluacionesColegio).catch(err => setError(err.message));
-  }, [copy, datos, session.access]);
+  }, [copy, datosListos, session.access]);
 
   useEffect(() => { if (['cargas', 'materias'].includes(activeSection)) cargarFlujoCargas(); }, [activeSection, cargarFlujoCargas]);
+  useEffect(() => {
+    setRevisionTesis(null);
+    setCalificacionExamen(null);
+    if (activeSection !== 'detalle') setSaveSuccess('');
+  }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'inscripciones') return undefined;
     const controller = new AbortController();
@@ -347,13 +369,45 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
       .catch(err => setError(err.message));
   }, [activeSection, copy, session.access]);
   useEffect(() => { if (activeSection !== 'predoctoral') return; fetch('/api/predoctoral/examenes/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : Promise.reject(new Error(copy.messages.loadAssignments))).then(data => setExamenesPredoctorales(data.examenes || [])).catch(err => setError(err.message)); }, [activeSection, copy, session.access]);
-  async function actualizarExamenPredoctoral(examen, cambios) { const r = await fetch(`/api/predoctoral/examenes/${examen.id}/`, {method:'PATCH', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify(cambios)}); const data = await r.json().catch(()=>({})); if (!r.ok) return setError(data.detail || copy.predoctoral.saveError); setExamenesPredoctorales(items => items.map(item => item.id === data.id ? {...item, ...data} : item)); }
+  async function actualizarExamenPredoctoral(event) {
+    event.preventDefault();
+    if (!calificacionExamen || guardandoRevision) return;
+    const {examen, valor} = calificacionExamen;
+    const nota = Number(valor);
+    if (valor === '' || Number.isNaN(nota) || nota < 0 || nota > 10) {
+      setError(copy.predoctoral.prompt);
+      return;
+    }
+    setGuardandoRevision(true);
+    setError('');
+    setSaveSuccess('');
+    try {
+      const r = await fetch(`/api/predoctoral/examenes/${examen.id}/`, {method:'PATCH', headers:{'Authorization':`Bearer ${session.access}`,'Content-Type':'application/json'}, body:JSON.stringify({calificacion: nota})});
+      if (r.status === 401) return onLogout(copy.messages.expired);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || copy.predoctoral.saveError);
+      setExamenesPredoctorales(items => items.map(item => item.id === data.id ? {...item, ...data} : item));
+      setCalificacionExamen(null);
+      setSaveSuccess(`${examen.alumno?.nombre || copy.predoctoral.student}: ${copy.loads.updated}`);
+    } catch (err) {
+      setError(err.message || copy.predoctoral.saveError);
+    } finally {
+      setGuardandoRevision(false);
+    }
+  }
   async function actualizarSolicitudTesis(solicitud, estado, directorId = '') {
-    const response = await fetch(`/api/tesis/solicitudes/${solicitud.id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({estado, director_asignado: directorId || null})});
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return setError(body.detail || copy.assignments.updateError);
-    setSolicitudesTesis(items => items.map(item => item.id === body.id ? body : item));
-    setSaveSuccess(`${solicitud.alumno?.nombre || copy.thesis.student}: ${copy.loads.updated}`);
+    setError('');
+    setSaveSuccess('');
+    try {
+      const response = await fetch(`/api/tesis/solicitudes/${solicitud.id}/`, {method: 'PATCH', headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'}, body: JSON.stringify({estado, director_asignado: directorId || null})});
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || copy.assignments.updateError);
+      setSolicitudesTesis(items => items.map(item => item.id === body.id ? body : item));
+      setSaveSuccess(`${solicitud.alumno?.nombre || copy.thesis.student}: ${copy.loads.updated}`);
+    } catch (err) {
+      setError(err.message || copy.assignments.updateError);
+    }
   }
   useEffect(() => {
     if (activeSection !== 'extemporanea' || !alumnoExtemporaneoId) {
@@ -522,11 +576,53 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   );
   const notificacionSinCorreo = notificacionDestinatarios.length - notificacionConCorreo.length;
   const alumnos = useMemo(() => (datos?.personas || []).filter(a => a.rol === 'alumno'), [datos]);
-  const docentes = useMemo(() => (datos?.personas || []).filter(a => ['docente','director'].includes(a.rol)), [datos]);
+  const docentes = useMemo(() => (datos?.personas || []).filter(a => ['docente','investigador','director'].includes(a.rol)), [datos]);
+  const resumen = useMemo(() => ({
+    total: aspirantesRegistrados.length,
+    por_revisar: aspirantesRegistrados.filter(a => ['pendiente', 'iniciado'].includes(a.proceso_estado)).length,
+    revision: aspirantesRegistrados.filter(a => a.proceso_estado === 'revision').length,
+    aceptado: aspirantesRegistrados.filter(a => a.proceso_estado === 'aceptado').length,
+  }), [aspirantesRegistrados]);
   const directores = useMemo(() => (datos?.personas || []).filter(a => a.rol === 'director' && a.is_active !== false), [datos]);
   const filtrarPersonas = (lista) => lista.filter(a => !busqueda.trim() || `${a.nombre} ${a.usuario} ${a.correo}`.toLowerCase().includes(busqueda.toLowerCase()));
-  const analitica = useMemo(() => { const lista=datos?.personas||[]; const total=lista.length||1; const estados=['pendiente','revision','aceptado','rechazado']; return {total:lista.length, aspirantes:lista.filter(a=>a.rol==='aspirante').length, alumnos:lista.filter(a=>a.rol==='alumno').length, personal:lista.filter(a=>['docente','director'].includes(a.rol)).length, estados:estados.map(e=>({key:e,label:etiquetaEstado(e, copy),count:lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length,pct:Math.round(lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length*100/Math.max(1,lista.filter(a=>a.rol==='aspirante').length))}))}; }, [copy, datos]);
+  const analitica = useMemo(() => { const lista=datos?.personas||[]; const total=lista.length||1; const estados=['pendiente','revision','aceptado','rechazado']; return {total:lista.length, aspirantes:lista.filter(a=>a.rol==='aspirante').length, alumnos:lista.filter(a=>a.rol==='alumno').length, personal:lista.filter(a=>['docente','investigador','director'].includes(a.rol)).length, estados:estados.map(e=>({key:e,label:etiquetaEstado(e, copy),count:lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length,pct:Math.round(lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length*100/Math.max(1,lista.filter(a=>a.rol==='aspirante').length))}))}; }, [copy, datos]);
   const evaluacionesVisibles = useMemo(() => evaluacionFiltro === 'todas' ? evaluacionesColegio : evaluacionesColegio.filter(e => e.estado === evaluacionFiltro), [evaluacionesColegio, evaluacionFiltro]);
+  const etiquetasFiltro = useEtiquetasFiltro();
+  const bandejaTabla = useTablaControl(aspirantes, {
+    campos: aspirante => [aspirante.nombre, aspirante.usuario, aspirante.correo, aspirante.programa, aspirante.unidad],
+    filtros: {programa: aspirante => aspirante.programa, unidad: aspirante => aspirante.unidad},
+  });
+  const materiasTabla = useTablaControl(materias, {
+    campos: m => [m.clave, m.nombre, m.profesor, m.horario],
+    filtros: {creditos: m => m.creditos, profesor: m => m.profesor || copy.subjects.assign},
+  });
+  const cargasTabla = useTablaControl(cargas, {
+    campos: carga => [carga.periodo, carga.creador_nombre, carga.comentario],
+    filtros: {estado: carga => carga.estado, periodo: carga => carga.periodo},
+  });
+  const programaPersona = a => a.programa || a.departamento || a.unidad;
+  const alumnosDirectorioTabla = useTablaControl(filtrarPersonas(alumnos), {filtros: {programa: programaPersona, periodo: a => a.numero_periodo_actual}});
+  const aspirantesDirectorioTabla = useTablaControl(filtrarPersonas(datos?.aspirantes || []), {filtros: {programa: programaPersona, estado: a => a.proceso_estado}});
+  const directorioTabla = activeSection === 'alumnos' ? alumnosDirectorioTabla : aspirantesDirectorioTabla;
+  const personalTabla = useTablaControl(docentes, {
+    campos: persona => [persona.nombre, persona.usuario, persona.correo, persona.departamento, ...(persona.horarios || [])],
+    filtros: {departamento: persona => persona.departamento || copy.faculty.noDepartment, rol: persona => persona.rol},
+  });
+  const tesisTabla = useTablaControl(proyectosTesis, {
+    campos: proyecto => [proyecto.titulo, proyecto.linea_investigacion, proyecto.alumno_nombre, proyecto.alumno_matricula, proyecto.director_nombre],
+    filtros: {estado: proyecto => proyecto.estado, director: proyecto => proyecto.director_nombre || copy.thesis.noDirector, linea: proyecto => proyecto.linea_investigacion},
+  });
+  const asignacionesTabla = useTablaControl(solicitudesTesis, {
+    campos: solicitud => [solicitud.alumno?.nombre, solicitud.alumno?.programa, solicitud.linea_investigacion, solicitud.director_sugerido?.nombre, solicitud.director_asignado?.nombre],
+    filtros: {estado: solicitud => solicitud.estado, programa: solicitud => solicitud.alumno?.programa, linea: solicitud => solicitud.linea_investigacion},
+  });
+  const predoctoralTabla = useTablaControl(examenesPredoctorales, {
+    campos: examen => [examen.alumno?.nombre, examen.alumno?.matricula, examen.alumno?.programa],
+    filtros: {estado: examen => examen.estado, programa: examen => examen.alumno?.programa},
+  });
+  const colegioTabla = useTablaControl(evaluacionesVisibles, {
+    campos: e => [e.aspirante_nombre, e.evaluador_nombre, e.dictamen],
+  });
 
   async function enviarNotificacionesMasivas() {
     if (!notificacionConCorreo.length) {
@@ -575,9 +671,28 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
 
   function payloadEditable(data) {
     return CAMPOS_EDITABLES.reduce((payload, campo) => {
-      if (data?.[campo] !== undefined) payload[campo] = data[campo];
+      if (data?.[campo] !== undefined) payload[campo] = data[campo] === '' ? null : data[campo];
       return payload;
     }, {});
+  }
+
+  function primerErrorApi(data, fallback) {
+    if (!data || typeof data !== 'object') return fallback;
+    if (data.detail) return data.detail;
+    const valor = Object.values(data)[0];
+    return (Array.isArray(valor) ? valor[0] : valor) || fallback;
+  }
+
+  function sincronizarPersona(actualizado) {
+    setDatos((actual) => {
+      if (!actual) return actual;
+      const reemplazar = (lista = []) => lista.map((item) => item.id === actualizado.id ? {...item, ...actualizado} : item);
+      return {
+        ...actual,
+        personas: reemplazar(actual.personas),
+        aspirantes: reemplazar(actual.aspirantes).filter((persona) => persona.rol === 'aspirante'),
+      };
+    });
   }
 
   async function handleGuardarCambios() {
@@ -591,15 +706,16 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
         headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
         body: JSON.stringify(payloadEditable(editData)),
       });
+      if (response.status === 401) return onLogout(copy.messages.expired);
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || copy.detail.saveError);
+        const data = await response.json().catch(() => ({}));
+        throw new Error(primerErrorApi(data, copy.detail.saveError));
       }
       const actualizado = await response.json();
       setDetalle(actualizado);
       setEditData(actualizado);
       setSaveSuccess(copy.detail.saved);
-      setDatos((actual) => ({...actual, aspirantes: actual.aspirantes.map((aspirante) => aspirante.id === actualizado.id ? actualizado : aspirante)}));
+      sincronizarPersona(actualizado);
       setSeleccionado(actualizado);
     } catch (err) {
       setSaveError(err.message || copy.detail.saveError);
@@ -622,12 +738,13 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
         headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
         body: JSON.stringify({proceso_estado: estado}),
       });
+      if (response.status === 401) return onLogout(copy.messages.expired);
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || copy.detail.updateError);
+        throw new Error(primerErrorApi(data, copy.detail.updateError));
       }
       const actualizado = await response.json();
-      setDatos((actual) => ({...actual, aspirantes: actual.aspirantes.map((aspirante) => aspirante.id === actualizado.id ? actualizado : aspirante)}));
+      sincronizarPersona(actualizado);
       setSeleccionado(actualizado);
       setDetalle(actualizado);
       setEditData(actualizado);
@@ -737,13 +854,18 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
 
   async function handleDarBaja() {
     if (!seleccionado) return setError(copy.detail.selectApplicant);
-    if (!confirm(copy.detail.confirmDrop)) return;
+    if (!window.confirm(copy.detail.confirmDrop)) return;
     try {
       const resp = await fetch(`/api/coordinacion/aspirantes/${seleccionado.id}/dar_baja/`, {method: 'POST', headers: {'Authorization': `Bearer ${session.access}`}});
-      if (!resp.ok) throw new Error(copy.detail.dropoutError);
+      if (resp.status === 401) return onLogout(copy.messages.expired);
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(primerErrorApi(data, copy.detail.dropoutError));
+      }
       setSaveSuccess(copy.detail.dropped);
-      // refresh panel
+      setDetalle((actual) => actual ? {...actual, is_active: false, proceso_estado: 'baja'} : actual);
       cargarPanel(new AbortController().signal);
+      cargarDetalle(seleccionado.id, new AbortController().signal);
     } catch (err) {
       setError(err.message || copy.detail.dropoutError);
     }
@@ -820,9 +942,9 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
               <span>{datos.usuario?.profile_photo ? <img style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit'}} src={fotoUrl(datos.usuario.profile_photo)} alt="Profile photo" /> : 'CA'}</span><div><small>{copy.profile.operations}</small><h2>{copy.profile.brand}</h2></div>
             </div>
             <nav className="coordinacion-sidebar-nav">
-              {COORDINATION_NAV.map(group => <div className="coord-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button type="button" key={id} className={`sidebar-item${activeSection === id ? ' is-active' : ''}`} onClick={() => setActiveSection(id)} aria-current={activeSection === id ? 'page' : undefined}><i aria-hidden="true">{icon}</i><span>{copy.nav[id]}</span>{id === 'bandeja' && <b>{datos.resumen.por_revisar || 0}</b>}</button>)}</div>)}
+              {COORDINATION_NAV.map(group => <div className="coord-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button type="button" key={id} className={`sidebar-item${activeSection === id ? ' is-active' : ''}`} onClick={() => setActiveSection(id)} aria-current={activeSection === id ? 'page' : undefined}><i aria-hidden="true">{icon}</i><span>{copy.nav[id]}</span>{id === 'bandeja' && <b>{resumen.por_revisar || 0}</b>}</button>)}</div>)}
             </nav>
-            <div className="coord-sidebar-summary"><strong>{datos.resumen.total || 0}</strong><span>{copy.profile.summary}</span><small>{datos.resumen.por_revisar || 0} {copy.profile.attention}</small></div>
+            <div className="coord-sidebar-summary"><strong>{resumen.total || 0}</strong><span>{copy.profile.summary}</span><small>{resumen.por_revisar || 0} {copy.profile.attention}</small></div>
             <button type="button" className="sidebar-logout" onClick={() => onLogout(copy.logout)}>{copy.logout}</button>
           </aside>
 
@@ -834,7 +956,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   <div className="panel-card analytics-pie-card"><h3>{copy.summary.system}</h3><div className="analytics-pie" style={{background:`conic-gradient(#009b8f 0 ${analitica.total?analitica.aspirantes*100/analitica.total:0}%, #1769aa 0 ${analitica.total?(analitica.aspirantes+analitica.alumnos)*100/analitica.total:0}%, #e09b3d 0 100%)`}}><span>{analitica.total}</span><small>{copy.summary.records}</small></div><div className="analytics-legend"><span>{copy.summary.applicants}: <b>{analitica.aspirantes}</b></span><span>{copy.summary.students}: <b>{analitica.alumnos}</b></span><span>{copy.summary.staff}: <b>{analitica.personal}</b></span></div></div>
                   <div className="coord-export-actions"><button type="button" className="qa-btn" onClick={()=>descargarReporte('expedientes','xlsx')}>{copy.reports.files} XLSX</button><button type="button" className="qa-btn" onClick={()=>descargarReporte('expedientes','pdf')}>{copy.reports.files} PDF</button><button type="button" className="qa-btn" onClick={()=>descargarReporte('aspirantes','xlsx')}>{copy.summary.applicantsXlsx}</button><button type="button" className="qa-btn" onClick={()=>descargarReporte('alumnos','xlsx')}>{copy.summary.studentsXlsx}</button></div><div className="aspirante-section-card is-open">
                     <div className="section-panel">
-                      <div className="coord-stats"><div className="admin-stat"><span>{datos.resumen.total}</span><small>{copy.summary.totalRequests}</small></div><div className="admin-stat"><span>{datos.resumen.por_revisar}</span><small>{copy.summary.review}</small></div><div className="admin-stat"><span>{datos.resumen.revision}</span><small>{copy.summary.inReview}</small></div><div className="admin-stat"><span>{datos.resumen.aceptado}</span><small>{copy.summary.accepted}</small></div></div>
+                      <div className="coord-stats"><div className="admin-stat"><span>{resumen.total}</span><small>{copy.summary.totalRequests}</small></div><div className="admin-stat"><span>{resumen.por_revisar}</span><small>{copy.summary.review}</small></div><div className="admin-stat"><span>{resumen.revision}</span><small>{copy.summary.inReview}</small></div><div className="admin-stat"><span>{resumen.aceptado}</span><small>{copy.summary.accepted}</small></div></div>
                     </div>
                   </div>
                   </>)}
@@ -1013,7 +1135,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
               </section>
             )}
 
-            {activeSection === 'materias' && <div className="panel-card coord-directory coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.subjects.kicker}</p><h3>{copy.subjects.title}</h3><p>{copy.subjects.intro}</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : materiasError ? copy.retry : copy.subjects.query}</button></div></div>{materiasError && <div className="api-error coord-catalog-error" role="alert">{materiasError}</div>}{materiasCargando ? <p className="empty-state" role="status">{copy.subjects.loading}</p> : materias !== null ? materias.length ? <><div className="coord-catalog-summary"><span>{materias.length} {copy.directory.subjects}</span><span>{copy.subjects.readOnly}</span></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead><tbody>{materias.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || copy.subjects.assign}</td><td>{m.horario || copy.subjects.define}</td></tr>)}</tbody></table></div></> : <p className="empty-state">{copy.detail.noSubjects}</p> : !materiasError && <p className="empty-state">{copy.subjects.noCatalog}</p>}</div>}
+            {activeSection === 'materias' && <div className="panel-card coord-directory coord-materias-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.subjects.kicker}</p><h3>{copy.subjects.title}</h3><p>{copy.subjects.intro}</p></div><div className="coord-action-row"><button type="button" className="qa-btn" onClick={cargarMateriasDisponibles} disabled={materiasCargando}>{materiasCargando ? copy.subjects.loading : materiasError ? copy.retry : copy.subjects.query}</button></div></div>{materiasError && <div className="api-error coord-catalog-error" role="alert">{materiasError}</div>}{materiasCargando ? <p className="empty-state" role="status">{copy.subjects.loading}</p> : materias !== null ? materias.length ? <><div className="coord-catalog-summary"><span>{materias.length} {copy.directory.subjects}</span><span>{copy.subjects.readOnly}</span></div><TablaHerramientas control={materiasTabla} filtros={[{clave: 'creditos', etiqueta: copy.subjects.credits}, {clave: 'profesor', etiqueta: copy.subjects.teacher}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.subjects.key}</th><th>{copy.subjects.subject}</th><th>{copy.subjects.credits}</th><th>{copy.subjects.teacher}</th><th>{copy.subjects.schedule}</th></tr></thead><tbody>{materiasTabla.visibles.map(m=><tr key={m.id}><td>{m.clave}</td><td>{m.nombre}</td><td>{m.creditos ?? '—'}</td><td>{m.profesor || copy.subjects.assign}</td><td>{m.horario || copy.subjects.define}</td></tr>)}</tbody></table></div><TablaPaginacion control={materiasTabla} /></> : <p className="empty-state">{copy.detail.noSubjects}</p> : !materiasError && <p className="empty-state">{copy.subjects.noCatalog}</p>}</div>}
             {activeSection === 'cargas' && <div className="panel-card coord-directory">
               <div className="admin-card-head"><div><p className="panel-kicker">{copy.loads.kicker}</p><h3>{copy.loads.title}</h3><p>{copy.loads.intro}</p></div><button type="button" className="qa-btn" onClick={cargarFlujoCargas}>{copy.refresh}</button></div>
               <form className="coord-carga-form" onSubmit={guardarCargaBorrador}>
@@ -1051,11 +1173,14 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   {cargaEditando && <button type="button" className="qa-btn qa-btn-secondary" onClick={cancelarEdicionCarga}>{cargaText.cancel}</button>}
                 </div>
               </form>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{cargaText.count}</th><th>{copy.loads.created}</th><th>{copy.loads.actions}</th></tr></thead><tbody>
-                {cargas.length ? cargas.map(carga => <tr key={carga.id}><td>{carga.periodo || '-'}<small>{carga.creador_nombre}</small></td><td><span className={`estado-badge estado-${carga.estado}`}>{etiquetaEstado(carga.estado, copy)}</span></td><td>{carga.materias.length}</td><td>{formatearFecha(carga.created_at, copy.locale)}</td><td><div className="coord-action-row">
+              <TablaHerramientas control={cargasTabla} filtros={[{clave: 'estado', etiqueta: copy.detail.state, formato: value => etiquetaEstado(value, copy)}, {clave: 'periodo', etiqueta: copy.loads.period}]} />
+              <div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.loads.period}</th><th>{copy.detail.state}</th><th>{cargaText.count}</th><th>{copy.loads.created}</th><th>{copy.loads.actions}</th></tr></thead><tbody>
+                {cargasTabla.visibles.length ? cargasTabla.visibles.map(carga => <tr key={carga.id}><td>{carga.periodo || '-'}<small>{carga.creador_nombre}</small></td><td><span className={`estado-badge estado-${carga.estado}`}>{etiquetaEstado(carga.estado, copy)}</span>{carga.comentario && ['rechazada', 'borrador'].includes(carga.estado) && <small>{cargaText.rejectedReason}: {carga.comentario}</small>}</td><td>{carga.materias.length}</td><td>{formatearFecha(carga.created_at, copy.locale)}</td><td><div className="coord-action-row">
                   {carga.estado === 'borrador' && <><button type="button" className="qa-btn qa-btn-secondary" onClick={() => editarCarga(carga)}>{cargaText.edit}</button><button type="button" className="qa-btn" disabled={!carga.materias.length} onClick={() => enviarCargaRevision(carga.id)}>{cargaText.submit}</button></>}
+                  {carga.estado === 'rechazada' && <button type="button" className="qa-btn qa-btn-secondary" onClick={() => enviarCargaRevision(carga.id, 'borrador')}>{cargaText.reopen}</button>}
                 </div></td></tr>) : <tr><td colSpan="5">{copy.loads.noLoads}</td></tr>}
               </tbody></table></div>
+              <TablaPaginacion control={cargasTabla} />
             </div>}
             {['alumnos','aspirantes'].includes(activeSection) && datos && (
               <div className="panel-card coord-directory">
@@ -1067,11 +1192,14 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   </div>
                 </div>
                 <input className="coord-search" value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder={copy.directory.search} />
-                <div className="admin-table-wrap">
+                <TablaHerramientas control={directorioTabla} filtros={activeSection === 'alumnos'
+                  ? [{clave: 'programa', etiqueta: copy.directory.programDepartment}, {clave: 'periodo', etiqueta: copy.directory.term}]
+                  : [{clave: 'programa', etiqueta: copy.directory.programDepartment}, {clave: 'estado', etiqueta: copy.detail.state, formato: value => etiquetaEstado(value, copy)}]} />
+                <div className="admin-table-wrap tabla-scroll">
                   <table className="admin-table">
                     <thead><tr><th>{copy.directory.name}</th><th>{copy.directory.username}</th><th>{copy.directory.email}</th><th>{copy.directory.programDepartment}</th><th>{activeSection === 'alumnos' ? copy.directory.term : copy.detail.state}</th></tr></thead>
                     <tbody>
-                      {filtrarPersonas(activeSection==='alumnos'?alumnos:(datos.aspirantes||[])).map(a=><tr key={a.id}>
+                      {directorioTabla.visibles.map(a=><tr key={a.id}>
                         <td><strong>{a.nombre}</strong></td><td>{a.usuario}</td><td>{a.correo}</td><td>{a.programa || a.departamento || a.unidad || '—'}</td>
                         <td>{activeSection === 'alumnos'
                           ? <div className="coord-action-row">
@@ -1098,23 +1226,24 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                     </tbody>
                   </table>
                 </div>
+                <TablaPaginacion control={directorioTabla} />
               </div>
             )}
 
             {activeSection === 'alumnos' && confirmacionCiclo && <div className="api-success" role="status" aria-live="polite">{confirmacionCiclo}</div>}
 
-            {activeSection === 'personal' && datos && <div className="panel-card coord-directory personal-detail-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.faculty.kicker}</p><h3>{copy.faculty.title}</h3></div><div className="coord-action-row"><button className="qa-btn" type="button" onClick={() => descargarReporte('personal')}>{copy.faculty.downloadXlsx}</button><button className="qa-btn" type="button" onClick={() => descargarReporte('personal', 'pdf')}>{copy.reports.pdf}</button></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.faculty.name}</th><th>{copy.faculty.department}</th><th>{copy.faculty.courses}</th><th>{copy.faculty.schedule}</th><th>{copy.faculty.students}</th></tr></thead><tbody>{filtrarPersonas(docentes).map(persona => <tr key={`detalle-${persona.id}`}><td><strong>{persona.nombre}</strong><small>{persona.correo}</small></td><td>{persona.departamento || copy.faculty.noDepartment}</td><td>{persona.total_materias || 0} · {persona.creditos_impartidos || 0} {copy.directory.credits}</td><td>{persona.horarios?.join(' · ') || copy.faculty.noSchedule}</td><td>{persona.total_tesistas || 0}</td></tr>)}</tbody></table></div></div>}
+            {activeSection === 'personal' && datos && <div className="panel-card coord-directory personal-detail-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.faculty.kicker}</p><h3>{copy.faculty.title}</h3></div><div className="coord-action-row"><button className="qa-btn" type="button" onClick={() => descargarReporte('personal')}>{copy.faculty.downloadXlsx}</button><button className="qa-btn" type="button" onClick={() => descargarReporte('personal', 'pdf')}>{copy.reports.pdf}</button></div></div><TablaHerramientas control={personalTabla} placeholder={copy.directory.search} filtros={[{clave: 'departamento', etiqueta: copy.faculty.department}, {clave: 'rol', etiqueta: etiquetasFiltro.role, formato: value => String(value).charAt(0).toUpperCase() + String(value).slice(1)}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.faculty.name}</th><th>{copy.faculty.department}</th><th>{copy.faculty.courses}</th><th>{copy.faculty.schedule}</th><th>{copy.faculty.students}</th></tr></thead><tbody>{personalTabla.visibles.map(persona => <tr key={`detalle-${persona.id}`}><td><strong>{persona.nombre}</strong><small>{persona.correo}</small></td><td>{persona.departamento || copy.faculty.noDepartment}</td><td>{persona.total_materias || 0} · {persona.creditos_impartidos || 0} {copy.directory.credits}</td><td>{persona.horarios?.join(' · ') || copy.faculty.noSchedule}</td><td>{persona.total_tesistas || 0}</td></tr>)}</tbody></table></div><TablaPaginacion control={personalTabla} /></div>}
 
-            {activeSection === 'tesis' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.thesis.kicker}</p><h3>{copy.thesis.title}</h3><p>{copy.thesis.intro}</p></div><button type="button" className="qa-btn" onClick={cargarProyectosTesis}>{copy.refresh}</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.thesis.project}</th><th>{copy.thesis.student}</th><th>{copy.thesis.director}</th><th>{copy.thesis.status}</th><th>{copy.thesis.updated}</th><th>{copy.loads.actions}</th></tr></thead><tbody>{proyectosTesis.length ? proyectosTesis.map(proyecto => <tr key={proyecto.id}><td><strong>{proyecto.titulo}</strong><small>{proyecto.linea_investigacion || copy.thesis.linePending}</small></td><td>{proyecto.alumno_nombre}<small>{proyecto.alumno_matricula || copy.thesis.noEnrollment}</small></td><td>{proyecto.director_nombre || copy.thesis.noDirector}</td><td><span className={`estado-badge estado-${proyecto.estado}`}>{etiquetaEstado(proyecto.estado, copy)}</span></td><td>{formatearFecha(proyecto.updated_at, copy.locale)}</td><td><div className="coord-action-row">{['en_revision','observado'].includes(proyecto.estado) && <><button type="button" className="qa-btn" onClick={() => actualizarProyectoTesis(proyecto, 'aprobado')}>{copy.thesis.approve}</button><button type="button" className="qa-btn" onClick={() => actualizarProyectoTesis(proyecto, 'observado')}>{copy.thesis.observe}</button><button type="button" className="qa-btn" onClick={() => actualizarProyectoTesis(proyecto, 'rechazado')}>{copy.thesis.reject}</button></>}</div></td></tr>) : <tr><td colSpan="6">{copy.thesis.noProjects}</td></tr>}</tbody></table></div></div>}
+            {activeSection === 'tesis' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.thesis.kicker}</p><h3>{copy.thesis.title}</h3><p>{copy.thesis.intro}</p></div><button type="button" className="qa-btn" onClick={cargarProyectosTesis}>{copy.refresh}</button></div>{saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}{revisionTesis && <form className="coord-inline-review" onSubmit={actualizarProyectoTesis}><p><strong>{revisionTesis.proyecto.titulo}</strong> · {etiquetaEstado(revisionTesis.estado, copy)}</p><label><span>{copy.thesis.comment}</span><textarea rows="3" maxLength="2000" value={revisionTesis.comentario} onChange={event => setRevisionTesis(current => ({...current, comentario: event.target.value}))} autoFocus /></label><div className="coord-action-row"><button type="submit" className="qa-btn" disabled={guardandoRevision}>{copy.directory.save}</button><button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoRevision} onClick={() => setRevisionTesis(null)}>{copy.assignments.cancel}</button></div></form>}<TablaHerramientas control={tesisTabla} filtros={[{clave: 'estado', etiqueta: copy.thesis.status, formato: value => etiquetaEstado(value, copy)}, {clave: 'director', etiqueta: copy.thesis.director}, {clave: 'linea', etiqueta: etiquetasFiltro.line}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.thesis.project}</th><th>{copy.thesis.student}</th><th>{copy.thesis.director}</th><th>{copy.thesis.status}</th><th>{copy.thesis.updated}</th><th>{copy.loads.actions}</th></tr></thead><tbody>{tesisTabla.visibles.length ? tesisTabla.visibles.map(proyecto => <tr key={proyecto.id}><td><strong>{proyecto.titulo}</strong><small>{proyecto.linea_investigacion || copy.thesis.linePending}</small></td><td>{proyecto.alumno_nombre}<small>{proyecto.alumno_matricula || copy.thesis.noEnrollment}</small></td><td>{proyecto.director_nombre || copy.thesis.noDirector}</td><td><span className={`estado-badge estado-${proyecto.estado}`}>{etiquetaEstado(proyecto.estado, copy)}</span></td><td>{formatearFecha(proyecto.updated_at, copy.locale)}</td><td><div className="coord-action-row">{['en_revision','observado'].includes(proyecto.estado) && [['aprobado', copy.thesis.approve], ['observado', copy.thesis.observe], ['rechazado', copy.thesis.reject]].map(([estado, etiqueta]) => <button type="button" key={estado} className="qa-btn" disabled={guardandoRevision} onClick={() => setRevisionTesis({proyecto, estado, comentario: proyecto.comentarios_revision || ''})}>{etiqueta}</button>)}</div></td></tr>) : <tr><td colSpan="6">{copy.thesis.noProjects}</td></tr>}</tbody></table></div><TablaPaginacion control={tesisTabla} /></div>}
 
-            {activeSection === 'asignaciones' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.assignments.kicker}</p><h3>{copy.assignments.title}</h3><p>{copy.assignments.intro}</p></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.assignments.student}</th><th>{copy.assignments.line}</th><th>{copy.assignments.suggested}</th><th>{copy.assignments.assigned}</th><th>{copy.detail.state}</th><th>{copy.loads.actions}</th></tr></thead><tbody>{solicitudesTesis.length ? solicitudesTesis.map(solicitud => <tr key={solicitud.id}><td><strong>{solicitud.alumno?.nombre}</strong><small>{solicitud.alumno?.programa || copy.assignments.noProgram}</small></td><td>{solicitud.linea_investigacion || copy.assignments.notSpecified}</td><td>{solicitud.director_sugerido?.nombre || copy.assignments.noSuggestion}</td><td><select value={solicitud.director_asignado?.id || solicitud.director_sugerido?.id || ''} onChange={event => actualizarSolicitudTesis(solicitud, 'aprobada', event.target.value)}><option value="">{copy.assignments.selectDirector}</option>{directoresTesis.map(director => <option key={director.id} value={director.id}>{director.nombre}</option>)}</select></td><td><span className={`estado-badge estado-${solicitud.estado}`}>{etiquetaEstado(solicitud.estado, copy)}</span></td><td><div className="coord-action-row"><button type="button" className="qa-btn" onClick={() => actualizarSolicitudTesis(solicitud, 'rechazada')}>{copy.assignments.reject}</button>{solicitud.estado === 'aprobada' && <button type="button" className="qa-btn" onClick={() => actualizarSolicitudTesis(solicitud, 'cancelada')}>{copy.assignments.cancel}</button>}</div></td></tr>) : <tr><td colSpan="6">{copy.assignments.noRequests}</td></tr>}</tbody></table></div></div>}
+            {activeSection === 'asignaciones' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.assignments.kicker}</p><h3>{copy.assignments.title}</h3><p>{copy.assignments.intro}</p></div></div>{saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}<TablaHerramientas control={asignacionesTabla} filtros={[{clave: 'estado', etiqueta: copy.detail.state, formato: value => etiquetaEstado(value, copy)}, {clave: 'programa', etiqueta: etiquetasFiltro.program}, {clave: 'linea', etiqueta: copy.assignments.line}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.assignments.student}</th><th>{copy.assignments.line}</th><th>{copy.assignments.suggested}</th><th>{copy.assignments.assigned}</th><th>{copy.detail.state}</th><th>{copy.loads.actions}</th></tr></thead><tbody>{asignacionesTabla.visibles.length ? asignacionesTabla.visibles.map(solicitud => <tr key={solicitud.id}><td><strong>{solicitud.alumno?.nombre}</strong><small>{solicitud.alumno?.programa || copy.assignments.noProgram}</small></td><td>{solicitud.linea_investigacion || copy.assignments.notSpecified}</td><td>{solicitud.director_sugerido?.nombre || copy.assignments.noSuggestion}</td><td><select value={solicitud.director_asignado?.id || solicitud.director_sugerido?.id || ''} onChange={event => { if (event.target.value) actualizarSolicitudTesis(solicitud, 'aprobada', event.target.value); }}><option value="">{copy.assignments.selectDirector}</option>{directoresTesis.map(director => <option key={director.id} value={director.id}>{director.nombre}</option>)}</select></td><td><span className={`estado-badge estado-${solicitud.estado}`}>{etiquetaEstado(solicitud.estado, copy)}</span></td><td><div className="coord-action-row"><button type="button" className="qa-btn" onClick={() => actualizarSolicitudTesis(solicitud, 'rechazada')}>{copy.assignments.reject}</button>{solicitud.estado === 'aprobada' && <button type="button" className="qa-btn" onClick={() => actualizarSolicitudTesis(solicitud, 'cancelada')}>{copy.assignments.cancel}</button>}</div></td></tr>) : <tr><td colSpan="6">{copy.assignments.noRequests}</td></tr>}</tbody></table></div><TablaPaginacion control={asignacionesTabla} /></div>}
 
-            {activeSection === 'predoctoral' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3><p>{copy.predoctoral.intro}</p></div><button type="button" className="qa-btn" onClick={() => { fetch('/api/predoctoral/examenes/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : Promise.reject()).then(data => setExamenesPredoctorales(data.examenes || [])).catch(() => setError(copy.messages.loadAssignments)); }}>{copy.refresh}</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.predoctoral.student}</th><th>{copy.predoctoral.program}</th><th>{copy.predoctoral.scheduled}</th><th>{copy.predoctoral.status}</th><th>{copy.predoctoral.result}</th><th>{copy.predoctoral.action}</th></tr></thead><tbody>{examenesPredoctorales.length ? examenesPredoctorales.map(examen => <tr key={examen.id}><td><strong>{examen.alumno?.nombre || copy.predoctoral.unavailable}</strong><small>{examen.alumno?.matricula || copy.predoctoral.noEnrollment}</small></td><td>{examen.alumno?.programa || copy.predoctoral.noProgram}</td><td>{formatearFecha(examen.fecha_programada, copy.locale)}</td><td><span className={`estado-badge estado-${examen.estado}`}>{etiquetaEstado(examen.estado, copy)}</span></td><td>{examen.calificacion ?? copy.loads.pending}</td><td><button type="button" className="qa-btn" onClick={() => { const valor = window.prompt(copy.predoctoral.prompt, examen.calificacion ?? ''); if (valor !== null) actualizarExamenPredoctoral(examen, {calificacion: valor}); }}>{copy.predoctoral.validate}</button></td></tr>) : <tr><td colSpan="6">{copy.predoctoral.noExams}</td></tr>}</tbody></table></div></div>}
+            {activeSection === 'predoctoral' && <div className="panel-card coord-directory"><div className="admin-card-head"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3><p>{copy.predoctoral.intro}</p></div><button type="button" className="qa-btn" onClick={() => { fetch('/api/predoctoral/examenes/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : Promise.reject()).then(data => setExamenesPredoctorales(data.examenes || [])).catch(() => setError(copy.messages.loadAssignments)); }}>{copy.refresh}</button></div>{saveSuccess && <div className="api-success" role="status">{saveSuccess}</div>}<TablaHerramientas control={predoctoralTabla} filtros={[{clave: 'estado', etiqueta: copy.predoctoral.status, formato: value => etiquetaEstado(value, copy)}, {clave: 'programa', etiqueta: copy.predoctoral.program}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.predoctoral.student}</th><th>{copy.predoctoral.program}</th><th>{copy.predoctoral.scheduled}</th><th>{copy.predoctoral.status}</th><th>{copy.predoctoral.result}</th><th>{copy.predoctoral.action}</th></tr></thead><tbody>{predoctoralTabla.visibles.length ? predoctoralTabla.visibles.map(examen => <tr key={examen.id}><td><strong>{examen.alumno?.nombre || copy.predoctoral.unavailable}</strong><small>{examen.alumno?.matricula || copy.predoctoral.noEnrollment}</small></td><td>{examen.alumno?.programa || copy.predoctoral.noProgram}</td><td>{formatearFecha(examen.fecha_programada, copy.locale)}</td><td><span className={`estado-badge estado-${examen.estado}`}>{etiquetaEstado(examen.estado, copy)}</span></td><td>{examen.calificacion ?? copy.loads.pending}</td><td>{calificacionExamen?.examen.id === examen.id ? <form className="coord-action-row" onSubmit={actualizarExamenPredoctoral}><input type="number" min="0" max="10" step="0.01" required aria-label={copy.predoctoral.prompt} title={copy.predoctoral.prompt} value={calificacionExamen.valor} onChange={event => setCalificacionExamen(current => ({...current, valor: event.target.value}))} autoFocus /><button type="submit" className="qa-btn" disabled={guardandoRevision}>{copy.directory.save}</button><button type="button" className="qa-btn qa-btn-secondary" disabled={guardandoRevision} onClick={() => setCalificacionExamen(null)}>{copy.assignments.cancel}</button></form> : <button type="button" className="qa-btn" disabled={guardandoRevision} onClick={() => setCalificacionExamen({examen, valor: examen.calificacion ?? ''})}>{copy.predoctoral.validate}</button>}</td></tr>) : <tr><td colSpan="6">{copy.predoctoral.noExams}</td></tr>}</tbody></table></div><TablaPaginacion control={predoctoralTabla} /></div>}
 
             {activeSection === 'perfil' && datos && <PerfilAspirante perfil={{...datos.usuario, telefono: datos.usuario?.telefono || ''}} session={session} onActualizado={(actualizado) => setDatos(actual => ({...actual, usuario: {...actual.usuario, ...actualizado}}))} />}
 
             {activeSection === 'reportes' && (
-              <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.reports.title}</h3><p>{copy.reports.intro}</p><div className="coord-report-grid"><div><strong>{datos.resumen.total || 0}</strong><span>{copy.reports.total}</span></div><div><strong>{datos.resumen.por_revisar || 0}</strong><span>{copy.reports.review}</span></div><div><strong>{datos.resumen.revision || 0}</strong><span>{copy.reports.inReview}</span></div><div><strong>{datos.resumen.aceptado || 0}</strong><span>{copy.reports.accepted}</span></div></div></div></div></div>
+              <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.reports.title}</h3><p>{copy.reports.intro}</p><div className="coord-report-grid"><div><strong>{resumen.total || 0}</strong><span>{copy.reports.total}</span></div><div><strong>{resumen.por_revisar || 0}</strong><span>{copy.reports.review}</span></div><div><strong>{resumen.revision || 0}</strong><span>{copy.reports.inReview}</span></div><div><strong>{resumen.aceptado || 0}</strong><span>{copy.reports.accepted}</span></div></div></div></div></div>
             )}
 
             {activeSection === 'egresados' && <EgresadosPanel session={session} onLogout={onLogout}/>}
@@ -1122,7 +1251,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
             {activeSection === 'examenes' && <ExamenesGestionPanel session={session}/>}
 
             {activeSection === 'colegio' && (
-              <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.college.title}</h3><p>{copy.college.intro}</p><form className="colegio-evaluacion-form" onSubmit={guardarEvaluacionColegio}><label>{copy.college.applicant}<select value={evaluacionForm.aspirante} onChange={e => setEvaluacionForm({...evaluacionForm, aspirante: e.target.value})}><option value="">{copy.college.selectApplicant}</option>{(datos.aspirantes || []).filter(a => a.rol === 'aspirante').map(a => <option key={a.id} value={a.id}>{a.nombre} — {a.programa || copy.college.noProgram}</option>)}</select></label><label>{copy.college.decision}<select value={evaluacionForm.estado} onChange={e => setEvaluacionForm({...evaluacionForm, estado: e.target.value})}><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.status.favorable}</option><option value="no_favorable">{copy.status.no_favorable}</option></select></label><label>{copy.college.comments}<textarea rows="4" value={evaluacionForm.dictamen} onChange={e => setEvaluacionForm({...evaluacionForm, dictamen: e.target.value})} placeholder={copy.college.placeholder} required /></label><button type="submit" className="qa-btn">{evaluacionForm.id ? copy.college.update : copy.college.save}</button>{evaluacionForm.id && <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setEvaluacionForm({aspirante: '', estado: 'en_revision', dictamen: ''})}>{copy.college.cancel}</button>}</form></div><div className="panel-card"><div className="admin-card-head"><div><h3>{copy.college.registered}</h3><p>{copy.college.history}</p></div><select className="coord-filter-select" value={evaluacionFiltro} onChange={e => setEvaluacionFiltro(e.target.value)}><option value="todas">{copy.college.all}</option><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.college.favorable}</option><option value="no_favorable">{copy.college.noFavorable}</option></select></div>{evaluacionesVisibles.length ? <div className="colegio-evaluaciones-list">{evaluacionesVisibles.map(e => <article key={e.id}><div><strong>{e.aspirante_nombre || `Aspirante #${e.aspirante}`}</strong><small>{e.evaluador_nombre || copy.predoctoral.unavailable} · {formatearFecha(e.fecha_evaluacion, copy.locale)}</small><p>{e.dictamen || '—'}</p></div><div className="coord-action-row"><span className={`estado-badge estado-${e.estado}`}>{etiquetaEstado(e.estado, copy)}</span><button type="button" className="qa-btn" onClick={() => setEvaluacionForm({id:e.id, aspirante:e.aspirante, estado:e.estado, dictamen:e.dictamen || ''})}>{copy.college.update}</button></div></article>)}</div> : <p className="empty-state">{copy.college.selectDecision}</p>}</div></div></div>
+              <div className="aspirante-section-card is-open"><div className="section-panel"><div className="panel-card"><h3>{copy.college.title}</h3><p>{copy.college.intro}</p><form className="colegio-evaluacion-form" onSubmit={guardarEvaluacionColegio}><label>{copy.college.applicant}<select value={evaluacionForm.aspirante} onChange={e => setEvaluacionForm({...evaluacionForm, aspirante: e.target.value})}><option value="">{copy.college.selectApplicant}</option>{(datos.aspirantes || []).filter(a => a.rol === 'aspirante').map(a => <option key={a.id} value={a.id}>{a.nombre} — {a.programa || copy.college.noProgram}</option>)}</select></label><label>{copy.college.decision}<select value={evaluacionForm.estado} onChange={e => setEvaluacionForm({...evaluacionForm, estado: e.target.value})}><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.status.favorable}</option><option value="no_favorable">{copy.status.no_favorable}</option></select></label><label>{copy.college.comments}<textarea rows="4" value={evaluacionForm.dictamen} onChange={e => setEvaluacionForm({...evaluacionForm, dictamen: e.target.value})} placeholder={copy.college.placeholder} required /></label><button type="submit" className="qa-btn">{evaluacionForm.id ? copy.college.update : copy.college.save}</button>{evaluacionForm.id && <button type="button" className="qa-btn qa-btn-secondary" onClick={() => setEvaluacionForm({aspirante: '', estado: 'en_revision', dictamen: ''})}>{copy.college.cancel}</button>}</form></div><div className="panel-card"><div className="admin-card-head"><div><h3>{copy.college.registered}</h3><p>{copy.college.history}</p></div><select className="coord-filter-select" value={evaluacionFiltro} onChange={e => setEvaluacionFiltro(e.target.value)}><option value="todas">{copy.college.all}</option><option value="en_revision">{copy.status.en_revision}</option><option value="favorable">{copy.college.favorable}</option><option value="no_favorable">{copy.college.noFavorable}</option></select></div><TablaHerramientas control={colegioTabla} />{colegioTabla.visibles.length ? <div className="colegio-evaluaciones-list tabla-scroll-lista">{colegioTabla.visibles.map(e => <article key={e.id}><div><strong>{e.aspirante_nombre || `Aspirante #${e.aspirante}`}</strong><small>{e.evaluador_nombre || copy.predoctoral.unavailable} · {formatearFecha(e.fecha_evaluacion, copy.locale)}</small><p>{e.dictamen || '—'}</p></div><div className="coord-action-row"><span className={`estado-badge estado-${e.estado}`}>{etiquetaEstado(e.estado, copy)}</span><button type="button" className="qa-btn" onClick={() => setEvaluacionForm({id:e.id, aspirante:e.aspirante, estado:e.estado, dictamen:e.dictamen || ''})}>{copy.college.update}</button></div></article>)}</div> : <p className="empty-state">{copy.college.selectDecision}</p>}<TablaPaginacion control={colegioTabla} /></div></div></div>
             )}
 
             {activeSection === 'bandeja' && (
@@ -1274,14 +1403,16 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                         <button type="button" key={item.id} className={filtro === item.id ? 'is-active' : ''} onClick={() => setFiltro(item.id)}>{copy.filters[item.key]}</button>
                       ))}</div>
                     </div>
-                    <div className="coord-list">
-                      {aspirantes.length === 0 ? <p className="empty-state">{copy.queue.empty}</p> : aspirantes.map(aspirante => (
+                    <TablaHerramientas control={bandejaTabla} filtros={[{clave: 'programa', etiqueta: etiquetasFiltro.program}, {clave: 'unidad', etiqueta: copy.directory.programDepartment}]} />
+                    <div className="coord-list tabla-scroll-lista">
+                      {bandejaTabla.visibles.length === 0 ? <p className="empty-state">{copy.queue.empty}</p> : bandejaTabla.visibles.map(aspirante => (
                         <button type="button" key={aspirante.id} className={`coord-item${seleccionado?.id === aspirante.id ? ' is-selected' : ''}`} onClick={() => { setSeleccionado(aspirante); setActiveSection('detalle'); }}>
                           <span><strong>{aspirante.nombre}</strong><small>{aspirante.programa} · {aspirante.unidad}</small></span>
                           <span className={`estado-badge estado-${aspirante.proceso_estado}`}>{etiquetaEstado(aspirante.proceso_estado, copy)}</span>
                         </button>
                       ))}
                     </div>
+                    <TablaPaginacion control={bandejaTabla} />
                   </div>
                 </div>
               </div>
@@ -1294,7 +1425,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                   {seleccionado ? (
                     <div className="coord-record">
                       <div className="coord-detail-head coord-record-header">
-                        <div className="coord-profile-photo">{seleccionado.profile_photo ? <img src={seleccionado.profile_photo.startsWith('http') ? seleccionado.profile_photo : `http://localhost:8000${seleccionado.profile_photo}`} alt={copy.detail.title} /> : <span>{(seleccionado.nombre || 'A').charAt(0).toUpperCase()}</span>}</div>
+                        <div className="coord-profile-photo">{seleccionado.profile_photo ? <img src={fotoUrl(seleccionado.profile_photo)} alt={copy.detail.title} /> : <span>{(seleccionado.nombre || 'A').charAt(0).toUpperCase()}</span>}</div>
                         <div className="coord-record-identity">
                           <p className="panel-kicker">{copy.detail.title}</p>
                           <h3>{seleccionado.nombre}</h3>
@@ -1336,7 +1467,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                               <div className="coord-student-actions">
                                 <button type="button" className="qa-btn" onClick={handleDescargarCalificaciones}>{copy.detail.grades}</button>
                                 <button type="button" className="qa-btn" onClick={handleDescargarAdscripcion}>{copy.detail.affiliation}</button>
-                                <button type="button" className="qa-btn" onClick={handleDarBaja}>{copy.detail.dropout}</button>
+                                {detalle.proceso_estado !== 'baja' && detalle.is_active !== false && <button type="button" className="qa-btn" onClick={handleDarBaja}>{copy.detail.dropout}</button>}
                                 <button type="button" className="qa-btn" onClick={handleGenerarCarga}>{copy.detail.generateLoad}</button>
                               </div>
                             )}
@@ -1496,7 +1627,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                                 <article className="coord-event" key={evento.id}>
                                   <div className="coord-event-head">
                                     <strong>{etiquetaEstado(evento.estado, copy)}</strong>
-                                    <time>{formatearFecha(evento.created_at)}</time>
+                                    <time>{formatearFecha(evento.created_at, copy.locale)}</time>
                                   </div>
                                   <p>{evento.detalle}</p>
                                   <small>{evento.origen}</small>

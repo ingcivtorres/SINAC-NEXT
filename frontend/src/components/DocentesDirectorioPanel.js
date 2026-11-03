@@ -1,5 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useLanguage} from '../translations';
+import {TablaHerramientas, TablaPaginacion, useTablaControl} from './TablaControles';
+import './DocentesDirectorioPanel.css';
 
 const COPY = {
   es: {
@@ -40,6 +42,63 @@ const COPY = {
     otherOption: 'Other (specify)',
     enterValue: 'Enter a value',
   },
+  de: {
+    title: 'LEHRKRÄFTEVERZEICHNIS', subtitle: 'Detaillierte Informationen zu Lehrkräften und Dissertationsbetreuern.',
+    search: 'Nach Name, Benutzer oder E-Mail suchen', allRoles: 'Alle Rollen', docente: 'Lehrkraft', director: 'Dissertationsbetreuer/in', investigador: 'Forscher/in',
+    allStatus: 'Alle Status', active: 'Aktiv', inactive: 'Inaktiv', allDepartments: 'Alle Abteilungen', allPrograms: 'Alle Studiengänge', line: 'Forschungslinie',
+    name: 'Lehrkraft', role: 'Rolle', department: 'Abteilung', lines: 'Linien', advisees: 'Doktoranden', graduates: 'Absolventen', subjects: 'Fächer', status: 'Status', view: 'Profil ansehen',
+    loading: 'Lehrkräfte werden geladen...', empty: 'Keine Lehrkräfte für diese Filter.', error: 'Die Informationen konnten nicht geladen werden.', expired: 'Ihre Sitzung ist abgelaufen.', back: '← Zurück zum Verzeichnis',
+    general: 'Allgemeine Daten', academic: 'Akademisches Profil', students: 'Doktoranden', courses: 'Fächer', committees: 'Komitees', history: 'Verlauf',
+    user: 'Benutzer', email: 'E-Mail', phone: 'Telefon', curp: 'CURP', unit: 'Einheit', program: 'Studiengang', since: 'Angelegt', degree: 'Höchster Abschluss', institution: 'Institution',
+    languages: 'Sprachen', publications: 'Publikationen', experience: 'Erfahrung', documents: 'Dokumente', reviewed: 'Geprüft', markReviewed: 'Als geprüft markieren', unmark: 'Prüfung entfernen', open: 'Öffnen',
+    noDocs: 'Keine Dokumente hochgeladen.', current: 'Aktive Doktoranden', graduated: 'Promovierte Doktoranden', matricula: 'Matrikelnummer', project: 'Projekt', projectStatus: 'Projektstatus', egress: 'Abschluss', thesis: 'Dissertation',
+    catalog: 'Im Katalog zugewiesene Fächer', loads: 'Beteiligung an Lehrdeputaten', key: 'Kürzel', subject: 'Fach', period: 'Zeitraum', schedule: 'Stundenplan', credits: 'Credits', loadStatus: 'Status des Deputats', room: 'Raum',
+    juries: 'Prüfungskomitees', requests: 'Betreuungsanfragen', interviews: 'Gespräche', signatures: 'Aktenunterschriften', pending: 'Offene Anfragen', student: 'Studierende/r', as: 'Als',
+    date: 'Datum', field: 'Feld', before: 'Vorher', after: 'Neu', by: 'Durchgeführt von', none: 'Keine Einträge.', deactivate: 'Lehrkraft deaktivieren', activate: 'Lehrkraft aktivieren', saved: 'Änderungen gespeichert.', saveError: 'Speichern nicht möglich.',
+    confirmDeactivate: 'Diese Lehrkraft deaktivieren? Sie verliert den Zugang zum System.',
+    sni: 'SNI-Stufe', specialty: 'Fachgebiet', declaredLines: 'Forschungslinien (durch Komma getrennt)', save: 'Profil speichern',
+    chooseOption: 'Option auswählen',
+    otherOption: 'Andere (angeben)',
+    enterValue: 'Wert eingeben',
+  },
+  zh: {
+    title: '教师名录', subtitle: '教师和论文导师的详细信息。',
+    search: '按姓名、用户名或邮箱搜索', allRoles: '所有角色', docente: '教师', director: '论文导师', investigador: '研究员',
+    allStatus: '所有状态', active: '启用', inactive: '停用', allDepartments: '所有院系', allPrograms: '所有项目', line: '研究方向',
+    name: '教师', role: '角色', department: '院系', lines: '研究方向', advisees: '指导学生', graduates: '毕业生', subjects: '课程', status: '状态', view: '查看档案',
+    loading: '正在加载教师...', empty: '没有符合筛选条件的教师。', error: '无法加载信息。', expired: '你的会话已过期。', back: '← 返回名录',
+    general: '基本信息', academic: '学术档案', students: '指导学生', courses: '课程', committees: '委员会', history: '历史记录',
+    user: '用户名', email: '邮箱', phone: '电话', curp: 'CURP', unit: '单位', program: '项目', since: '创建时间', degree: '最高学位', institution: '机构',
+    languages: '语言', publications: '出版物', experience: '经验', documents: '文件', reviewed: '已审核', markReviewed: '标记为已审核', unmark: '取消审核', open: '打开',
+    noDocs: '尚未上传文件。', current: '在读指导学生', graduated: '已毕业指导学生', matricula: '学号', project: '项目', projectStatus: '项目状态', egress: '毕业', thesis: '论文',
+    catalog: '课程目录中分配的课程', loads: '参与的教学安排', key: '代码', subject: '课程', period: '学期', schedule: '时间表', credits: '学分', loadStatus: '教学安排状态', room: '教室',
+    juries: '评审委员会', requests: '指导申请', interviews: '面谈', signatures: '档案签署', pending: '待处理申请', student: '学生', as: '担任',
+    date: '日期', field: '字段', before: '修改前', after: '修改后', by: '操作人', none: '无记录。', deactivate: '停用教师', activate: '启用教师', saved: '更改已保存。', saveError: '无法保存。',
+    confirmDeactivate: '确定停用该教师吗？其将无法访问系统。',
+    sni: 'SNI 级别', specialty: '专业', declaredLines: '研究方向（以逗号分隔）', save: '保存档案',
+    chooseOption: '请选择一个选项',
+    otherOption: '其他（请注明）',
+    enterValue: '请输入数值',
+  },
+  pt: {
+    title: 'DIRETÓRIO DE DOCENTES', subtitle: 'Informações detalhadas sobre docentes e orientadores de tese.',
+    search: 'Buscar por nome, usuário ou e-mail', allRoles: 'Todas as funções', docente: 'Docente', director: 'Orientador de tese', investigador: 'Pesquisador',
+    allStatus: 'Todos os status', active: 'Ativo', inactive: 'Inativo', allDepartments: 'Todos os departamentos', allPrograms: 'Todos os programas', line: 'Linha de pesquisa',
+    name: 'Docente', role: 'Função', department: 'Departamento', lines: 'Linhas', advisees: 'Orientandos', graduates: 'Titulados', subjects: 'Disciplinas', status: 'Status', view: 'Ver ficha',
+    loading: 'Carregando docentes...', empty: 'Nenhum docente com esses filtros.', error: 'Não foi possível carregar as informações.', expired: 'Sua sessão expirou.', back: '← Voltar ao diretório',
+    general: 'Dados gerais', academic: 'Perfil acadêmico', students: 'Orientandos', courses: 'Disciplinas', committees: 'Comitês', history: 'Histórico',
+    user: 'Usuário', email: 'E-mail', phone: 'Telefone', curp: 'CURP', unit: 'Unidade', program: 'Programa', since: 'Cadastro', degree: 'Último grau', institution: 'Instituição',
+    languages: 'Idiomas', publications: 'Publicações', experience: 'Experiência', documents: 'Documentos', reviewed: 'Revisado', markReviewed: 'Marcar como revisado', unmark: 'Remover revisão', open: 'Abrir',
+    noDocs: 'Nenhum documento enviado.', current: 'Orientandos ativos', graduated: 'Orientandos titulados', matricula: 'Matrícula', project: 'Projeto', projectStatus: 'Status do projeto', egress: 'Conclusão', thesis: 'Tese',
+    catalog: 'Disciplinas atribuídas no catálogo', loads: 'Participação em cargas acadêmicas', key: 'Código', subject: 'Disciplina', period: 'Período', schedule: 'Horário', credits: 'Créditos', loadStatus: 'Status da carga', room: 'Sala',
+    juries: 'Bancas', requests: 'Solicitações de orientação', interviews: 'Entrevistas', signatures: 'Assinaturas de expediente', pending: 'Solicitações pendentes', student: 'Aluno', as: 'Como',
+    date: 'Data', field: 'Campo', before: 'Anterior', after: 'Novo', by: 'Realizado por', none: 'Sem registros.', deactivate: 'Desativar docente', activate: 'Ativar docente', saved: 'Alterações salvas.', saveError: 'Não foi possível salvar.',
+    confirmDeactivate: 'Desativar este docente? Ele perderá o acesso ao sistema.',
+    sni: 'Nível SNI', specialty: 'Especialidade', declaredLines: 'Linhas de pesquisa (separadas por vírgula)', save: 'Salvar perfil',
+    chooseOption: 'Selecione uma opção',
+    otherOption: 'Outro (especificar)',
+    enterValue: 'Digite um valor',
+  },
 };
 
 const TABS = ['general', 'academic', 'students', 'courses', 'committees', 'history'];
@@ -62,18 +121,43 @@ function fmt(value, language) {
 }
 
 function Field({label, value}) {
-  return <div><span>{label}</span><strong>{value || '—'}</strong></div>;
+  return <div className={`docdir-field${value ? '' : ' is-empty'}`}><span>{label}</span><strong>{value || '—'}</strong></div>;
 }
 
-function Table({head, rows, empty}) {
-  if (!rows.length) return <p className="servicios-muted">{empty}</p>;
+function Bloque({titulo, total, children}) {
   return (
-    <div className="servicios-table-wrap">
-      <table className="admin-table">
-        <thead><tr>{head.map(h => <th key={h}>{h}</th>)}</tr></thead>
-        <tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : cell}</td>)}</tr>)}</tbody>
-      </table>
-    </div>
+    <section className="docdir-block">
+      <header className="docdir-block-head"><h4>{titulo}</h4>{total !== undefined && <span className="docdir-count">{total}</span>}</header>
+      {children}
+    </section>
+  );
+}
+
+function Stat({label, value}) {
+  return <div className="docdir-stat"><strong>{value ?? 0}</strong><span>{label}</span></div>;
+}
+
+function iniciales(nombre) {
+  return (nombre || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('');
+}
+
+const textoCelda = row => row.filter(cell => typeof cell === 'string' || typeof cell === 'number');
+
+function Table({head, rows, empty}) {
+  const control = useTablaControl(rows, {campos: textoCelda});
+  if (!rows.length) return <p className="servicios-muted docdir-empty">{empty}</p>;
+  const extensa = rows.length > 10;
+  return (
+    <>
+      {extensa && <TablaHerramientas control={control}/>}
+      <div className="servicios-table-wrap tabla-scroll">
+        <table className="admin-table">
+          <thead><tr>{head.map(h => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{control.visibles.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : cell}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
+      {extensa && <TablaPaginacion control={control}/>}
+    </>
   );
 }
 
@@ -145,6 +229,7 @@ export default function DocentesDirectorioPanel({session, onLogout}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const docentesTabla = useTablaControl(lista.docentes);
 
   const request = useCallback(async (url, options = {}) => {
     const response = await fetch(url, {headers, ...options});
@@ -193,46 +278,54 @@ export default function DocentesDirectorioPanel({session, onLogout}) {
     const d = detalle;
     const c = d.comites;
     return (
-      <div className="panel-card">
-        <button type="button" className="link-btn" onClick={() => { setDetalle(null); cargar(); }}>{t.back}</button>
-        <div className="servicios-card-heading">
-          <div><span className="panel-kicker">{t[d.rol] || d.rol}</span><h3>{d.nombre}</h3></div>
-          <div>{estado(d.is_active)}</div>
+      <div className="panel-card docdir-detail">
+        <button type="button" className="link-btn docdir-back" onClick={() => { setDetalle(null); cargar(); }}>{t.back}</button>
+        <div className="docdir-hero">
+          <div className="docdir-avatar" aria-hidden="true">{iniciales(d.nombre)}</div>
+          <div className="docdir-hero-info">
+            <span className="panel-kicker">{t[d.rol] || d.rol}</span>
+            <h3>{d.nombre}</h3>
+            <p className="docdir-hero-meta">{[d.correo, d.departamento, d.programa].filter(Boolean).map(v => <span key={v}>{v}</span>)}</p>
+          </div>
+          {estado(d.is_active)}
         </div>
         {message && <div className="api-success">{message}</div>}
         {error && <div className="api-error" role="alert">{error}</div>}
-        <div className="servicios-toolbar" style={{marginBottom: 16}}>
-          {TABS.map(k => <button type="button" key={k} className={tab === k ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab(k)}>{t[k]}</button>)}
+        <div className="docdir-tabs" role="tablist">
+          {TABS.map(k => <button type="button" role="tab" aria-selected={tab === k} key={k} className={`docdir-tab${tab === k ? ' is-active' : ''}`} onClick={() => setTab(k)}>{t[k]}</button>)}
         </div>
 
         {tab === 'general' && (
           <>
-            <div className="servicios-detail-grid">
-              <Field label={t.user} value={d.usuario}/><Field label={t.email} value={d.correo}/><Field label={t.phone} value={d.telefono}/>
-              <Field label={t.curp} value={d.curp}/><Field label={t.unit} value={d.unidad}/><Field label={t.department} value={d.departamento}/>
-              <Field label={t.program} value={d.programa}/><Field label={t.since} value={fmt(d.created_at, language)}/>
-            </div>
+            <Bloque titulo={t.general}>
+              <div className="docdir-fields">
+                <Field label={t.user} value={d.usuario}/><Field label={t.email} value={d.correo}/><Field label={t.phone} value={d.telefono}/>
+                <Field label={t.curp} value={d.curp}/><Field label={t.unit} value={d.unidad}/><Field label={t.department} value={d.departamento}/>
+                <Field label={t.program} value={d.programa}/><Field label={t.since} value={fmt(d.created_at, language)}/>
+              </div>
+            </Bloque>
             {lista.puede_gestionar && (
-              <p style={{marginTop: 16}}>
-                <button type="button" className="btn-secondary" onClick={() => { if (!d.is_active || window.confirm(t.confirmDeactivate)) guardar({is_active: !d.is_active}); }}>
+              <div className="docdir-actions">
+                <button type="button" className={`btn-secondary${d.is_active ? ' is-danger' : ''}`} onClick={() => { if (!d.is_active || window.confirm(t.confirmDeactivate)) guardar({is_active: !d.is_active}); }}>
                   {d.is_active ? t.deactivate : t.activate}
                 </button>
-              </p>
+              </div>
             )}
           </>
         )}
 
         {tab === 'academic' && (
           <>
-            {d.puede_editar_perfil ? <PerfilForm key={d.id + (d.updated_key || '')} d={d} t={t} onSave={guardar}/> : (
-              <div className="servicios-detail-grid">
-                <Field label={t.degree} value={d.ultimo_grado}/><Field label={t.institution} value={d.institucion}/><Field label={t.line} value={lineas(d)}/>
-                <Field label={t.sni} value={d.sni_nivel}/><Field label="ORCID" value={d.orcid}/><Field label={t.specialty} value={d.especialidad}/>
-                <Field label={t.languages} value={d.idiomas}/><Field label={t.publications} value={d.publicaciones}/><Field label={t.experience} value={d.experiencia}/>
-              </div>
-            )}
-            <h4 style={{marginTop: 16}}>{t.documents}</h4>
-            {d.documentos.length === 0 ? <p className="servicios-muted">{t.noDocs}</p> : (
+            <Bloque titulo={t.academic}>
+              {d.puede_editar_perfil ? <PerfilForm key={d.id + (d.updated_key || '')} d={d} t={t} onSave={guardar}/> : (
+                <div className="docdir-fields">
+                  <Field label={t.degree} value={d.ultimo_grado}/><Field label={t.institution} value={d.institucion}/><Field label={t.line} value={lineas(d)}/>
+                  <Field label={t.sni} value={d.sni_nivel}/><Field label="ORCID" value={d.orcid}/><Field label={t.specialty} value={d.especialidad}/>
+                  <Field label={t.languages} value={d.idiomas}/><Field label={t.publications} value={d.publicaciones}/><Field label={t.experience} value={d.experiencia}/>
+                </div>
+              )}
+            </Bloque>
+            <Bloque titulo={t.documents} total={d.documentos.length}>
               <Table
                 head={[t.documents, t.reviewed, '']}
                 empty={t.noDocs}
@@ -242,47 +335,55 @@ export default function DocentesDirectorioPanel({session, onLogout}) {
                   lista.puede_gestionar ? <button type="button" className="btn-secondary" onClick={() => guardar({documento_id: doc.id, revisado: !doc.revisado})}>{doc.revisado ? t.unmark : t.markReviewed}</button> : '',
                 ])}
               />
-            )}
+            </Bloque>
           </>
         )}
 
         {tab === 'students' && (
           <>
-            <h4>{t.current} ({d.tesistas.length})</h4>
-            <Table head={[t.student, t.matricula, t.program, t.project, t.projectStatus]} empty={t.none}
-              rows={d.tesistas.map(a => [a.nombre, a.matricula, a.programa, a.proyecto, a.estado_proyecto])}/>
-            <h4 style={{marginTop: 16}}>{t.graduated} ({d.graduados.length})</h4>
-            <Table head={[t.student, t.matricula, t.egress, t.thesis]} empty={t.none}
-              rows={d.graduados.map(a => [a.nombre, a.matricula, fmt(a.fecha_egreso, language), a.titulo_tesis])}/>
+            <Bloque titulo={t.current} total={d.tesistas.length}>
+              <Table head={[t.student, t.matricula, t.program, t.project, t.projectStatus]} empty={t.none}
+                rows={d.tesistas.map(a => [a.nombre, a.matricula, a.programa, a.proyecto, a.estado_proyecto])}/>
+            </Bloque>
+            <Bloque titulo={t.graduated} total={d.graduados.length}>
+              <Table head={[t.student, t.matricula, t.egress, t.thesis]} empty={t.none}
+                rows={d.graduados.map(a => [a.nombre, a.matricula, fmt(a.fecha_egreso, language), a.titulo_tesis])}/>
+            </Bloque>
           </>
         )}
 
         {tab === 'courses' && (
           <>
-            <h4>{t.catalog}</h4>
-            <Table head={[t.key, t.subject, t.schedule, t.credits]} empty={t.none}
-              rows={d.materias_catalogo.map(m => [m.clave, m.nombre, m.horario, m.creditos])}/>
-            <h4 style={{marginTop: 16}}>{t.loads}</h4>
-            <Table head={[t.key, t.subject, t.period, t.schedule, t.room, t.loadStatus]} empty={t.none}
-              rows={d.materias_cargas.map(m => [m.clave, m.materia, m.periodo, m.horario, m.salon, m.estado_carga])}/>
+            <Bloque titulo={t.catalog} total={d.materias_catalogo.length}>
+              <Table head={[t.key, t.subject, t.schedule, t.credits]} empty={t.none}
+                rows={d.materias_catalogo.map(m => [m.clave, m.nombre, m.horario, m.creditos])}/>
+            </Bloque>
+            <Bloque titulo={t.loads} total={d.materias_cargas.length}>
+              <Table head={[t.key, t.subject, t.period, t.schedule, t.room, t.loadStatus]} empty={t.none}
+                rows={d.materias_cargas.map(m => [m.clave, m.materia, m.periodo, m.horario, m.salon, m.estado_carga])}/>
+            </Bloque>
           </>
         )}
 
         {tab === 'committees' && (
           <>
-            <div className="servicios-detail-grid">
-              <Field label={t.interviews} value={String(c.entrevistas)}/><Field label={t.signatures} value={String(c.firmas)}/><Field label={t.pending} value={String(c.solicitudes_pendientes)}/>
+            <div className="docdir-stats">
+              <Stat label={t.interviews} value={c.entrevistas}/><Stat label={t.signatures} value={c.firmas}/><Stat label={t.pending} value={c.solicitudes_pendientes}/>
             </div>
-            <h4 style={{marginTop: 16}}>{t.juries}</h4>
-            <Table head={[t.project, t.student, t.role, t.status]} empty={t.none} rows={c.jurados.map(j => [j.proyecto, j.alumno, j.rol, j.estado])}/>
-            <h4 style={{marginTop: 16}}>{t.requests}</h4>
-            <Table head={[t.student, t.as, t.status]} empty={t.none} rows={c.solicitudes.map(s => [s.alumno, s.como, s.estado])}/>
+            <Bloque titulo={t.juries} total={c.jurados.length}>
+              <Table head={[t.project, t.student, t.role, t.status]} empty={t.none} rows={c.jurados.map(j => [j.proyecto, j.alumno, j.rol, j.estado])}/>
+            </Bloque>
+            <Bloque titulo={t.requests} total={c.solicitudes.length}>
+              <Table head={[t.student, t.as, t.status]} empty={t.none} rows={c.solicitudes.map(s => [s.alumno, s.como, s.estado])}/>
+            </Bloque>
           </>
         )}
 
         {tab === 'history' && (
-          <Table head={[t.date, t.field, t.before, t.after, t.by]} empty={t.none}
-            rows={d.historial.map(h => [fmt(h.fecha, language), h.campo || h.evento, h.valor_anterior, h.valor_nuevo, h.realizado_por])}/>
+          <Bloque titulo={t.history} total={d.historial.length}>
+            <Table head={[t.date, t.field, t.before, t.after, t.by]} empty={t.none}
+              rows={d.historial.map(h => [fmt(h.fecha, language), h.campo || h.evento, h.valor_anterior, h.valor_nuevo, h.realizado_por])}/>
+          </Bloque>
         )}
       </div>
     );
@@ -312,12 +413,12 @@ export default function DocentesDirectorioPanel({session, onLogout}) {
         <input value={filters.linea} onChange={set('linea')} placeholder={t.line}/>
       </div>
       {error && <div className="api-error" role="alert">{error}</div>}
-      {loading && !lista.docentes.length ? <p>{t.loading}</p> : lista.docentes.length === 0 ? <p>{t.empty}</p> : (
-        <div className="servicios-table-wrap">
+      {loading && !lista.docentes.length ? <p>{t.loading}</p> : lista.docentes.length === 0 ? <p>{t.empty}</p> : (<>
+        <div className="servicios-table-wrap tabla-scroll">
           <table className="admin-table">
             <thead><tr><th>{t.name}</th><th>{t.role}</th><th>{t.department}</th><th>{t.lines}</th><th>{t.advisees}</th><th>{t.graduates}</th><th>{t.subjects}</th><th>{t.status}</th><th/></tr></thead>
             <tbody>
-              {lista.docentes.map(d => (
+              {docentesTabla.visibles.map(d => (
                 <tr key={d.id}>
                   <td><strong>{d.nombre}</strong><br/><small>{d.correo}</small></td>
                   <td>{t[d.rol] || d.rol}</td>
@@ -333,7 +434,8 @@ export default function DocentesDirectorioPanel({session, onLogout}) {
             </tbody>
           </table>
         </div>
-      )}
+        <TablaPaginacion control={docentesTabla}/>
+      </>)}
     </div>
   );
 }

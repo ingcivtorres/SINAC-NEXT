@@ -6,7 +6,8 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, ConfiguracionPrograma, Inscripcion, Materia, PlanEstudioMateria, SolicitudDireccionTesis
+from .director_views import es_programa_doctorado, requisitos_predoctoral
+from .models import Aspirante, ConfiguracionPrograma, Inscripcion, Materia, PlanEstudioMateria, ProyectoTesis, SolicitudDireccionTesis
 from .views import _registrar_seguimiento
 
 
@@ -131,8 +132,13 @@ class FlujoTesisView(APIView):
         if _rol(request.user) == 'alumno':
             solicitud = SolicitudDireccionTesis.objects.filter(alumno=request.user).select_related('alumno', 'director_sugerido', 'director_asignado').first()
             directores = Aspirante.objects.filter(rol__in=['director', 'director de tesis'], is_active=True).order_by('nombre')
+            director = request.user.director_tesis
             return Response({
+                'es_doctorado': es_programa_doctorado(request.user.programa),
+                'predoctoral_motivos': requisitos_predoctoral(request.user),
                 'elegibilidad': evaluar_elegibilidad_tesis(request.user),
+                'match_confirmado': bool(tiene_match_tesis(request.user)),
+                'director_tesis': {'id': director.id, 'nombre': director.nombre} if director else None,
                 'solicitud': _solicitud_data(solicitud) if solicitud else None,
                 'directores': [{'id': item.id, 'nombre': item.nombre, 'departamento': item.departamento, 'programa': item.programa} for item in directores],
             })
@@ -290,6 +296,7 @@ class SolicitudDireccionTesisDetailView(APIView):
             if solicitud.estado == 'aprobada':
                 solicitud.alumno.director_tesis = request.user
                 solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+                ProyectoTesis.objects.filter(alumno=solicitud.alumno).update(director=request.user)
                 _registrar_seguimiento(
                     solicitud.alumno, 'match_tesis', f'{request.user.nombre} aceptó acompañarte en tu proyecto de tesis.',
                     'Director de Tesis', notificar=False,
@@ -312,6 +319,7 @@ class SolicitudDireccionTesisDetailView(APIView):
             if solicitud.estado == 'aprobada':
                 solicitud.alumno.director_tesis = solicitud.director_asignado
                 solicitud.alumno.save(update_fields=['director_tesis', 'updated_at'])
+                ProyectoTesis.objects.filter(alumno=solicitud.alumno).update(director=solicitud.director_asignado)
                 _registrar_seguimiento(
                     solicitud.director_asignado, 'match_tesis',
                     f'{solicitud.alumno.nombre} confirmó el match para dirigir su proyecto de tesis.',

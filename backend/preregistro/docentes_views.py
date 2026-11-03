@@ -12,6 +12,7 @@ from .models import (
     HistorialPersona, JuradoProyecto, Materia, ProyectoTesis, SolicitudDireccionTesis,
 )
 from .servicios_views import es_servicios
+from .seguridad import url_media
 
 ROLES_DOCENTES = ('docente', 'director', 'investigador')
 
@@ -25,13 +26,11 @@ def _puede_gestionar(user):
 
 
 def _foto(persona):
-    return persona.profile_photo.url if persona.profile_photo else None
+    return url_media(persona.profile_photo)
 
 
 def _tesistas_qs(persona):
-    return Aspirante.objects.filter(
-        Q(director_tesis=persona) | Q(tutor_propuesto__iexact=persona.nombre), rol='alumno', is_staff=False,
-    ).distinct()
+    return Aspirante.objects.filter(director_tesis=persona, rol='alumno', is_staff=False)
 
 
 def _activos_qs(persona):
@@ -108,7 +107,7 @@ def _detalle(persona):
         'materias_catalogo': catalogo, 'materias_cargas': cargas,
         'documentos': [{
             'id': d.id, 'tipo': d.tipo, 'tipo_texto': d.get_tipo_display(), 'nombre': d.nombre_original,
-            'url': d.archivo.url if d.archivo else None, 'revisado': d.revisado,
+            'url': url_media(d.archivo), 'revisado': d.revisado,
             'revisado_en': d.revisado_en.isoformat() if d.revisado_en else None,
         } for d in documentos],
         'comites': {

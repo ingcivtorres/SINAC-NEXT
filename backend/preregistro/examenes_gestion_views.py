@@ -16,7 +16,21 @@ from .views import _registrar_seguimiento
 
 TIPOS_GESTIONABLES = ('admision', 'seleccion', 'diagnostico', 'otro')
 ROLES_COORDINACION = {'coordinacion', 'coordinador'}
+ROLES_EVALUADOR = ('docente', 'investigador', 'director')
 MAX_PREGUNTAS = 200
+
+
+def _evaluadores():
+    return Aspirante.objects.filter(rol__in=ROLES_EVALUADOR, is_staff=False, is_active=True).order_by('nombre')
+
+
+def _resolver_evaluador(valor):
+    if valor in (None, ''):
+        return None, None
+    try:
+        return _evaluadores().get(pk=int(valor)), None
+    except (Aspirante.DoesNotExist, TypeError, ValueError):
+        return None, 'Selecciona un docente evaluador válido.'
 
 
 def _puede_consultar(user):
@@ -43,6 +57,7 @@ def _item(examen, detalle=False, ver_respuestas=False):
         'calificacion': examen.calificacion, 'retroalimentacion': examen.retroalimentacion,
         'total_preguntas': getattr(examen, 'n_preguntas', None) if getattr(examen, 'n_preguntas', None) is not None else examen.preguntas.count(),
         'editable': examen.intentos == 0 and examen.estado == 'programado',
+        'evaluador': {'id': examen.evaluador_id, 'nombre': examen.evaluador.nombre} if examen.evaluador_id else None,
         'aspirante': {
             'id': examen.aspirante_id, 'nombre': examen.aspirante.nombre, 'usuario': examen.aspirante.usuario,
             'correo': examen.aspirante.correo, 'programa': examen.aspirante.programa,
@@ -134,7 +149,7 @@ class ExamenesGestionView(APIView):
         denegado = _denegar(request.user)
         if denegado:
             return denegado
-        qs = ExamenEnLinea.objects.exclude(tipo='predoctoral').select_related('aspirante').annotate(n_preguntas=Count('preguntas'))
+        qs = ExamenEnLinea.objects.exclude(tipo='predoctoral').select_related('aspirante', 'evaluador').annotate(n_preguntas=Count('preguntas'))
         q = request.query_params.get('q', '').strip()
         if q:
             qs = qs.filter(Q(titulo__icontains=q) | Q(aspirante__nombre__icontains=q) | Q(aspirante__usuario__icontains=q))
@@ -146,9 +161,11 @@ class ExamenesGestionView(APIView):
         base = ExamenEnLinea.objects.exclude(tipo='predoctoral')
         resumen = {estado: base.filter(estado=estado).count() for estado, _ in ExamenEnLinea.ESTADOS_EXAMEN}
         data = [_item(examen) for examen in qs[:300]]
+        puede_crear = _puede_crear(request.user)
         return Response({
             'examenes': data, 'total': qs.count(), 'resumen': resumen,
-            'puede_crear': _puede_crear(request.user),
+            'puede_crear': puede_crear,
+            'evaluadores': [{'id': d.id, 'nombre': d.nombre} for d in _evaluadores()] if puede_crear else [],
             'tipos': [{'value': v, 'label': l} for v, l in ExamenEnLinea.TIPOS_EXAMEN if v in TIPOS_GESTIONABLES],
         })
 
@@ -166,6 +183,9 @@ class ExamenesGestionView(APIView):
         preguntas, error_preguntas = _validar_preguntas(data.get('preguntas'))
         if error_preguntas:
             errores['preguntas'] = error_preguntas
+        evaluador, error_evaluador = _resolver_evaluador(data.get('evaluador'))
+        if error_evaluador:
+            errores['evaluador'] = error_evaluador
         ids = data.get('aspirantes')
         if not isinstance(ids, list) or not ids:
             errores['aspirantes'] = 'Selecciona al menos un aspirante.'
@@ -181,7 +201,7 @@ class ExamenesGestionView(APIView):
         creados = []
         for aspirante in aspirantes:
             examen = ExamenEnLinea.objects.create(
-                aspirante=aspirante, tipo=tipo, business_key=f'EXAM-{aspirante.pk}-{uuid.uuid4().hex[:10].upper()}',
+                aspirante=aspirante, tipo=tipo, evaluador=evaluador, business_key=f'EXAM-{aspirante.pk}-{uuid.uuid4().hex[:10].upper()}',
                 descripcion=cfg.get('descripcion', ''), **{k: v for k, v in cfg.items() if k != 'descripcion'},
             )
             PreguntaExamen.objects.bulk_create([PreguntaExamen(examen=examen, **p) for p in preguntas])
@@ -232,9 +252,18 @@ class ExamenesGestionDetailView(APIView):
             examen.respuestas.all().delete()
             _registrar_seguimiento(examen.aspirante, 'examen_reabierto', f'Se habilitó un nuevo intento para "{examen.titulo}".', 'Coordinación Académica', notificar=False)
             return Response(_item(examen, detalle=True, ver_respuestas=True))
+        evaluador = None
+        if 'evaluador' in data:
+            evaluador, error_evaluador = _resolver_evaluador(data.get('evaluador'))
+            if error_evaluador:
+                return Response({'evaluador': error_evaluador}, status=status.HTTP_400_BAD_REQUEST)
+            if set(data) - {'accion'} == {'evaluador'}:
+                examen.evaluador = evaluador
+                examen.save(update_fields=['evaluador', 'updated_at'])
+                return Response(_item(examen, detalle=True, ver_respuestas=True))
         if not (examen.intentos == 0 and examen.estado in ('programado', 'cancelado')):
             return Response({'detail': 'El examen ya fue iniciado; no se puede modificar su contenido.'}, status=status.HTTP_409_CONFLICT)
-        permitidos = {'titulo', 'descripcion', 'fecha_programada', 'duracion_minutos', 'max_intentos', 'preguntas', 'tipo'}
+        permitidos = {'titulo', 'descripcion', 'fecha_programada', 'duracion_minutos', 'max_intentos', 'preguntas', 'tipo', 'evaluador'}
         desconocidos = set(data) - permitidos - {'accion'}
         if desconocidos:
             return Response({'detail': f'Campos no permitidos: {", ".join(sorted(desconocidos))}.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -253,6 +282,8 @@ class ExamenesGestionDetailView(APIView):
             return Response(errores, status=status.HTTP_400_BAD_REQUEST)
         for campo, valor in cfg.items():
             setattr(examen, campo, valor)
+        if 'evaluador' in data:
+            examen.evaluador = evaluador
         if examen.estado == 'cancelado':
             examen.estado = 'programado'
         examen.save()

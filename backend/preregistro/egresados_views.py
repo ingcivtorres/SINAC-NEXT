@@ -14,6 +14,7 @@ from .expediente_central_views import _es_gestion
 from .models import Aspirante, ConfiguracionPrograma, EgresoAlumno, ExpedienteDigital, Inscripcion, ProyectoTesis
 from .servicios_views import evaluar_prevalidacion_egreso
 from .views import _registrar_seguimiento
+from .seguridad import url_media
 
 
 def _permiso(user):
@@ -21,7 +22,7 @@ def _permiso(user):
 
 
 def _foto(alumno):
-    return alumno.profile_photo.url if alumno.profile_photo else None
+    return url_media(alumno.profile_photo)
 
 
 def _serializar(egreso):

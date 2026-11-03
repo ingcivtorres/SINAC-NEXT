@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from preregistro.models import (
-    Aspirante, ConfiguracionPrograma, DefensaTesis, DocumentoAspirante, EgresoAlumno, EntrevistaVirtual,
+    Aspirante, CargaAcademica, CargaAcademicaMateria, ConfiguracionPrograma, DefensaTesis, DocumentoAspirante, EgresoAlumno, EntrevistaVirtual,
     EvaluacionColegio, ExamenEnLinea, ExpedienteDigital, Inscripcion, JuradoProyecto, Materia,
     PeriodoInscripcion, PlanEstudioMateria, PreguntaExamen, ProyectoTesis, RespuestaExamen,
     SeguimientoSolicitud, SolicitudAcademica, SolicitudDireccionTesis, SolicitudInscripcionExtemporanea,
@@ -187,6 +187,14 @@ class Command(BaseCommand):
             nombre='DEMO 2025-2', defaults={'apertura': ahora - timedelta(days=300), 'cierre': ahora - timedelta(days=200), 'activo': False})
         actual, _ = PeriodoInscripcion.objects.update_or_create(
             nombre='DEMO 2026-1', defaults={'apertura': ahora - timedelta(days=120), 'cierre': ahora - timedelta(days=20), 'activo': False})
+        periodo_demo_abierto, _ = PeriodoInscripcion.objects.update_or_create(
+            nombre='DEMO Periodo Abierto',
+            defaults={
+                'apertura': ahora - timedelta(days=15),
+                'cierre': ahora + timedelta(days=90),
+                'activo': True,
+            },
+        )
 
         materias = []
         for i, nombre in enumerate(MATERIAS):
@@ -201,7 +209,7 @@ class Command(BaseCommand):
                 'nombre': 'Seminario de tesis (Demostración)',
                 'categoria': 'seminario',
                 'creditos': 5,
-                'profesor': directores[3].nombre,
+                'profesor': docentes[0].nombre,
                 'horario': 'Vie 10:00-12:00',
                 'salon': 'sala_juntas',
                 'capacidad': 20,
@@ -246,12 +254,12 @@ class Command(BaseCommand):
                     defaults={'estado': 'aprobada' if cal >= 7 else 'reprobada', 'validacion_servicios': 'validada', 'calificacion': cal,
                               'parcial_1': p1, 'parcial_2': p2, 'parcial_3': cal, 'horario': materia.horario})
 
-        def tesis(alumno, director, titulo, estado):
+        def tesis(alumno, director, titulo, estado, avance_porcentaje):
             ProyectoTesis.objects.update_or_create(
                 alumno=alumno, titulo=titulo,
                 defaults={'director': director, 'resumen': f'Proyecto de investigación: {titulo}.', 'linea_investigacion': 'Ciencias de la Computación',
                           'objetivos': 'Definir, implementar y evaluar la propuesta.', 'metodologia': 'Revisión de literatura, diseño experimental y validación.',
-                          'estado': estado, 'fecha_presentacion': ahora - timedelta(days=60)})
+                          'estado': estado, 'avance_porcentaje': avance_porcentaje, 'fecha_presentacion': ahora - timedelta(days=60)})
 
         alumnos = []
         for i, nombre in enumerate(ALUMNOS, 1):
@@ -260,9 +268,56 @@ class Command(BaseCommand):
                                    matricula=f'DEMO-A{i:03d}', numero_periodo_actual=(1, 2, 3, 3, 4)[i - 1], director_tesis=directores[i - 1], tutor_propuesto=directores[i - 1].nombre)
             inscribir(alumno, i - 1, previo, 0)
             inscribir(alumno, i + 1, actual, 1)
-            tesis(alumno, directores[i - 1], TESIS[i - 1], ('borrador', 'en_revision', 'observado', 'aprobado', 'en_revision')[i - 1])
+            tesis(
+                alumno,
+                directores[i - 1],
+                TESIS[i - 1],
+                ('borrador', 'en_revision', 'observado', 'aprobado', 'en_revision')[i - 1],
+                (15, 32, 48, 67, 82)[i - 1],
+            )
             alumnos.append(alumno)
             credenciales.append(('Alumno', usuario, clave, f'{nombre} · {alumno.programa}'))
+
+        for numero, inicio in enumerate(range(0, len(materias), 5), 1):
+            nombre_periodo_carga = f'{periodo_demo_abierto.nombre} · Carga {numero}'
+            carga, _ = CargaAcademica.objects.update_or_create(
+                creador=coordinacion,
+                periodo=nombre_periodo_carga,
+                defaults={
+                    'estado': 'aprobada',
+                    'comentario': 'Carga académica de demostración aprobada.',
+                    'periodo_inscripcion': None,
+                },
+            )
+            for indice, materia in enumerate(materias[inicio:inicio + 5], start=inicio):
+                CargaAcademicaMateria.objects.update_or_create(
+                    carga=carga,
+                    materia=materia,
+                    defaults={
+                        'docente': docentes[indice // 2],
+                        'horario': materia.horario,
+                        'salon': materia.salon,
+                        'capacidad': materia.capacidad,
+                        'modalidad': 'presencial',
+                    },
+                )
+
+        for alumno in alumnos[:3]:
+            Inscripcion.objects.update_or_create(
+                aspirante=alumno,
+                materia=seminario,
+                periodo_inscripcion=periodo_demo_abierto,
+                defaults={
+                    'estado': 'cursando',
+                    'validacion_servicios': 'validada',
+                    'calificacion': None,
+                    'parcial_1': None,
+                    'parcial_2': None,
+                    'parcial_3': None,
+                    'horario': seminario.horario,
+                    'registrada_por': servicios,
+                },
+            )
 
         for i, aspirante in enumerate(aspirantes, 1):
             estados_examen = ('programado', 'programado', 'completado', 'aprobado', 'reprobado')
@@ -397,7 +452,7 @@ class Command(BaseCommand):
                                      matricula=f'DEMO-E{i:03d}', numero_periodo_actual=4, director_tesis=directores[i - 1], tutor_propuesto=directores[i - 1].nombre)
             inscribir(egresado, i + 3, previo, 2)
             inscribir(egresado, i + 5, actual, 3)
-            tesis(egresado, directores[i - 1], TESIS[4 + i], 'concluido')
+            tesis(egresado, directores[i - 1], TESIS[4 + i], 'concluido', 100)
             egresados.append(egresado)
             EgresoAlumno.objects.update_or_create(
                 alumno=egresado,

@@ -30,6 +30,10 @@ Thumbs.db
 # Environment files
 .env
 .env.*
+!.env.example
+
+# Archivos subidos por usuarios (datos personales)
+backend/media/
 
 # Logs
 *.log

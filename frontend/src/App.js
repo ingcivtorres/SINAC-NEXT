@@ -17,6 +17,8 @@ import AvisoPrivacidad from './components/AvisoPrivacidad';
 import Footer from './components/Footer';
 import ContactPage from './components/ContactPage';
 import NotificationBell from './components/NotificationBell';
+import ErrorPage from './components/ErrorPage';
+import ErrorBoundary from './components/ErrorBoundary';
 import './styles.css';
 import './components/Navbar.css';
 import './components/Footer.css';
@@ -27,6 +29,7 @@ const ROLE_HOME_VIEW = {
   aspirante: 'panel',
   alumno: 'alumno-panel',
   docente: 'docente-panel',
+  investigador: 'docente-panel',
   director: 'director-panel',
   coordinacion: 'coordinacion-panel',
   servicios: 'servicios-panel',
@@ -34,6 +37,19 @@ const ROLE_HOME_VIEW = {
 };
 
 const ROLE_VIEW_ACCESS = Object.fromEntries(Object.entries(ROLE_HOME_VIEW).map(([role, view]) => [view, [role]]));
+ROLE_VIEW_ACCESS['docente-panel'] = ['docente', 'investigador', 'director'];
+
+const PUBLIC_VIEWS = ['home', 'contact', 'privacy', 'portal', 'login', 'error-403', 'error-404'];
+const KNOWN_VIEWS = new Set([...PUBLIC_VIEWS, ...Object.values(ROLE_HOME_VIEW)]);
+
+function initialView() {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  return path === '' || path === '/index.html' ? 'home' : 'error-404';
+}
+
+function isDocentePanelRole(role) {
+  return ROLE_VIEW_ACCESS['docente-panel'].includes(normalizedRole(role));
+}
 
 function clearAuthStorage(){
   localStorage.removeItem('sinac_access');
@@ -72,8 +88,9 @@ function normalizedRole(role) {
 
 export default function App(){
   const [loading, setLoading]                 = useState(true);
-  const [view, setView]                       = useState('home');
-  const [displayView, setDisplayView]         = useState('home');
+  const [view, setView]                       = useState(initialView);
+  const [displayView, setDisplayView]         = useState(initialView);
+  const [notFoundPath]                        = useState(() => window.location.pathname);
   const [isViewTransitioning, setIsViewTransitioning] = useState(false);
   const [session, setSession]                 = useState(() => getSession());
   const [toastMessage, setToastMessage]       = useState('');
@@ -94,10 +111,10 @@ export default function App(){
   function handleNavigate(target, nextSession = session){
     const role = normalizedRole(nextSession?.role);
     const allowedRoles = ROLE_VIEW_ACCESS[target];
-    if (allowedRoles && (!nextSession || !allowedRoles.includes(role))) {
-      setToastMessage('No tienes permisos para acceder a esa sección.');
-      target = nextSession ? ROLE_HOME_VIEW[role] || 'panel' : 'login';
-    }
+    if (!KNOWN_VIEWS.has(target)) target = 'error-404';
+    else if (allowedRoles && !nextSession) target = 'login';
+    else if (allowedRoles && !allowedRoles.includes(role)) target = 'error-403';
+    if (!target.startsWith('error-') && window.location.pathname !== '/') window.history.replaceState(null, '', '/');
     setView(target);
     if (target === displayView) return;
     if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
@@ -158,6 +175,9 @@ export default function App(){
           <SessionToast message={toastMessage} onClose={() => setToastMessage('')} />,
           document.body
         )}
+        <ErrorBoundary resetKey={displayView} onHome={() => handleNavigate('home')}>
+        {displayView === 'error-404' && <ErrorPage code={404} path={notFoundPath} onHome={() => handleNavigate('home')} onBack={window.history.length > 1 ? () => window.history.back() : undefined} />}
+        {displayView === 'error-403' && <ErrorPage code={403} onHome={() => handleNavigate(session ? ROLE_HOME_VIEW[normalizedRole(session.role)] || 'home' : 'home')} />}
         {displayView === 'home'   && <HomePage />}
         {displayView === 'contact' && <ContactPage onNavigate={handleNavigate} />}
         {displayView === 'privacy' && <AvisoPrivacidad onNavigate={handleNavigate} />}
@@ -189,7 +209,7 @@ export default function App(){
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
         {displayView === 'docente-panel' && (
-          session && normalizedRole(session.role) === 'docente'
+          session && isDocentePanelRole(session.role)
             ? <PanelDocente session={session} onLogout={requestLogout} />
             : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
@@ -201,6 +221,7 @@ export default function App(){
         {displayView === 'servicios-panel' && (
           session && normalizedRole(session.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={requestLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
+        </ErrorBoundary>
       </main>
       {session && <NotificationBell session={session} />}
       {!loading && <Footer onNavigate={handleNavigate} />}

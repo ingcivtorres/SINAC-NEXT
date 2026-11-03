@@ -17,15 +17,24 @@ from .models import (
 from .configuracion_sistema import (
     LOCKOUT_DURATION_MINUTES, get_login_attempt_limit, password_meets_policy,
 )
+from .seguridad import ImagenFirmadaField, url_media
 
 
 class AspiranteRegistroSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, max_length=128, trim_whitespace=False)
 
     class Meta:
         model = Aspirante
-        exclude = ['business_key', 'proceso_estado', 'is_active', 'is_staff',
-                   'last_login', 'groups', 'user_permissions', 'created_at', 'updated_at']
+        fields = [
+            'nombre', 'usuario', 'curp', 'correo', 'telefono', 'nacimiento', 'password',
+            'estado_actual', 'municipio_actual', 'direccion_actual',
+            'estado_permanente', 'municipio_permanente', 'direccion_permanente',
+            'nombre_familiar', 'parentesco', 'telefono_familiar',
+            'ultimo_grado', 'institucion', 'promedio',
+            'idiomas', 'publicaciones', 'apoyos', 'experiencia',
+            'unidad', 'departamento', 'seccion', 'programa', 'modalidad',
+            'tutor_propuesto', 'comentarios',
+        ]
 
     def validate_promedio(self, value):
         try:
@@ -79,11 +88,11 @@ class InscripcionSerializer(serializers.ModelSerializer):
     materia_clave = serializers.CharField(source='materia.clave', read_only=True)
     materia_nombre = serializers.CharField(source='materia.nombre', read_only=True)
     materia_creditos = serializers.IntegerField(source='materia.creditos', read_only=True)
-    materia_profesor = serializers.CharField(source='materia.profesor', read_only=True)
-    materia_horario = serializers.CharField(source='materia.horario', read_only=True)
-    materia_salon = serializers.CharField(source='materia.get_salon_display', read_only=True)
-    materia_capacidad = serializers.IntegerField(source='materia.capacidad', read_only=True)
-    materia_inscritos = serializers.IntegerField(source='materia.inscripciones.count', read_only=True)
+    materia_profesor = serializers.CharField(source='profesor_asignado', read_only=True)
+    materia_horario = serializers.CharField(source='horario_asignado', read_only=True)
+    materia_salon = serializers.CharField(source='salon_asignado', read_only=True)
+    materia_capacidad = serializers.SerializerMethodField()
+    materia_inscritos = serializers.SerializerMethodField()
     periodo_nombre = serializers.CharField(source='periodo_inscripcion.nombre', read_only=True, default=None)
     estado_label = serializers.SerializerMethodField()
     color = serializers.SerializerMethodField()
@@ -104,6 +113,15 @@ class InscripcionSerializer(serializers.ModelSerializer):
 
     def get_aspirante(self, obj):
         return {'id': obj.aspirante_id, 'nombre': obj.aspirante.nombre, 'usuario': obj.aspirante.usuario, 'programa': obj.aspirante.programa}
+
+    def get_materia_capacidad(self, obj):
+        detalle = obj.detalle_carga
+        return detalle.capacidad if detalle else obj.materia.capacidad
+
+    def get_materia_inscritos(self, obj):
+        if not obj.periodo_inscripcion_id:
+            return obj.materia.inscripciones.filter(periodo_inscripcion__isnull=True).count()
+        return obj.materia.inscripciones.filter(periodo_inscripcion_id=obj.periodo_inscripcion_id).count()
 
     def get_color(self, obj):
         if obj.calificacion is None:
@@ -170,6 +188,7 @@ class ProyectoTesisSerializer(serializers.ModelSerializer):
     estado_label = serializers.CharField(source='get_estado_display', read_only=True)
     jurados = serializers.SerializerMethodField()
     defensa = serializers.SerializerMethodField()
+    revisiones_antiplagio = serializers.SerializerMethodField()
 
     class Meta:
         model = ProyectoTesis
@@ -177,11 +196,27 @@ class ProyectoTesisSerializer(serializers.ModelSerializer):
             'id', 'alumno', 'alumno_nombre', 'alumno_matricula', 'alumno_programa',
             'director', 'director_nombre', 'director_usuario', 'titulo', 'resumen',
             'linea_investigacion', 'objetivos', 'metodologia', 'comentarios_revision',
-            'estado', 'estado_label', 'fecha_presentacion', 'jurados', 'defensa', 'created_at', 'updated_at',
+            'avance_porcentaje', 'estado', 'estado_label', 'fecha_presentacion', 'jurados', 'defensa',
+            'revisiones_antiplagio', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'alumno_nombre', 'alumno_matricula', 'alumno_programa',
-            'director_nombre', 'director_usuario', 'estado_label', 'jurados', 'defensa', 'created_at', 'updated_at',
+            'director_nombre', 'director_usuario', 'estado_label', 'jurados', 'defensa',
+            'revisiones_antiplagio', 'created_at', 'updated_at',
+        ]
+
+    def get_revisiones_antiplagio(self, obj):
+        return [
+            {
+                'id': revision.id,
+                'proveedor': revision.proveedor,
+                'nombre_original': revision.nombre_original,
+                'porcentaje_similitud': float(revision.porcentaje_similitud),
+                'estado': revision.estado,
+                'observaciones': revision.observaciones,
+                'created_at': revision.created_at,
+            }
+            for revision in obj.revisiones_antiplagio.all()[:5]
         ]
 
     def validate_titulo(self, value):
@@ -248,17 +283,25 @@ class RevisionAntiplagioSerializer(serializers.ModelSerializer):
         fields = ['id', 'proyecto', 'proveedor', 'nombre_original', 'porcentaje_similitud', 'estado', 'estado_label', 'observaciones', 'resultados', 'archivo_url', 'created_at', 'updated_at']
 
     def get_archivo_url(self, obj):
-        return obj.archivo.url if obj.archivo else None
+        return url_media(obj.archivo)
 
 
 class AspiranteDetalleSerializer(serializers.ModelSerializer):
     inscripciones = InscripcionSerializer(many=True, read_only=True)
     solicitudes_academicas = SolicitudAcademicaSerializer(many=True, read_only=True)
     expediente_digital = ExpedienteDigitalSerializer(read_only=True)
+    profile_photo = ImagenFirmadaField(read_only=True)
 
     class Meta:
         model = Aspirante
-        exclude = ['password', 'groups', 'user_permissions', 'last_login']
+        exclude = ['password', 'groups', 'user_permissions', 'last_login', 'login_failed_attempts', 'login_locked_until']
+        read_only_fields = [
+            'usuario', 'matricula', 'curp', 'rol', 'is_active', 'is_staff', 'is_superuser',
+            'business_key', 'camunda_instance_id', 'proceso_estado', 'director_tesis',
+            'numero_periodo_actual', 'fecha_examen_admision', 'fecha_entrevista',
+            'fecha_inicio_curso_propedeutico', 'curso_propedeutico_nota', 'curso_propedeutico_aprobado',
+            'apoyo_autorizado', 'profile_photo', 'created_at', 'updated_at',
+        ]
 
     def validate(self, attrs):
         if attrs.get('apoyo_solicitado') and not self.instance.curso_propedeutico_aprobado:
@@ -267,16 +310,24 @@ class AspiranteDetalleSerializer(serializers.ModelSerializer):
 
 
 class PerfilAspiranteSerializer(serializers.ModelSerializer):
-    profile_photo = serializers.ImageField(required=False, allow_null=True)
+    profile_photo = ImagenFirmadaField(required=False, allow_null=True)
 
     class Meta:
         model = Aspirante
         fields = ['nombre', 'correo', 'telefono', 'matricula', 'profile_photo']
+        read_only_fields = ['matricula']
 
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
             raise serializers.ValidationError('El nombre no puede estar vacío.')
+        return value
+
+    def validate_telefono(self, value):
+        value = value.strip()
+        digitos = sum(caracter.isdigit() for caracter in value)
+        if not re.fullmatch(r'[\d\s()+-]+', value) or not 10 <= digitos <= 15:
+            raise serializers.ValidationError('Captura un teléfono válido de 10 a 15 dígitos.')
         return value
 
     def validate_correo(self, value):
@@ -286,7 +337,7 @@ class PerfilAspiranteSerializer(serializers.ModelSerializer):
 
 
 class AspiranteAdminSerializer(serializers.ModelSerializer):
-    profile_photo = serializers.ImageField(read_only=True)
+    profile_photo = ImagenFirmadaField(read_only=True)
     class Meta:
         model = Aspirante
         fields = ['id', 'nombre', 'usuario', 'matricula', 'correo', 'profile_photo', 'rol', 'programa', 'unidad',
@@ -314,7 +365,7 @@ class SeguimientoSolicitudSerializer(serializers.ModelSerializer):
 
 
 class AspiranteCoordinacionSerializer(serializers.ModelSerializer):
-    profile_photo = serializers.ImageField(read_only=True)
+    profile_photo = ImagenFirmadaField(read_only=True)
     director_tesis_nombre = serializers.CharField(source='director_tesis.nombre', read_only=True, allow_null=True)
     documentos = DocumentoAspiranteSerializer(many=True, read_only=True)
     seguimientos = SeguimientoSolicitudSerializer(many=True, read_only=True)
@@ -380,6 +431,8 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
             return 'director'
         if getattr(user, 'rol', None) == 'docente':
             return 'docente'
+        if str(getattr(user, 'rol', '')).strip().lower() == 'investigador':
+            return 'investigador'
         if getattr(user, 'rol', None) == 'alumno':
             return 'alumno'
         if getattr(user, 'rol', None) == 'director':
@@ -483,8 +536,8 @@ class ExamenEnLineaSerializer(serializers.ModelSerializer):
         fields = ['id', 'aspirante', 'tipo', 'tipo_label', 'titulo', 'descripcion', 'business_key',
                   'camunda_instance_id', 'fecha_programada', 'fecha_inicio', 'fecha_fin',
                   'duracion_minutos', 'estado', 'estado_label', 'calificacion', 'intentos',
-                  'max_intentos', 'retroalimentacion', 'color', 'preguntas', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'tipo_label', 'estado_label', 'color', 'created_at', 'updated_at']
+                  'max_intentos', 'retroalimentacion', 'evaluador', 'color', 'preguntas', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'tipo_label', 'estado_label', 'evaluador', 'color', 'created_at', 'updated_at']
 
     def get_color(self, obj):
         """Return color badge based on exam state and score."""
@@ -517,12 +570,12 @@ class EntrevistaVirtualSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EntrevistaVirtual
-        fields = ['id', 'aspirante', 'proposito', 'proposito_label', 'titulo', 'descripcion',
+        fields = ['id', 'aspirante', 'docente', 'proposito', 'proposito_label', 'titulo', 'descripcion',
                   'fecha_programada', 'fecha_inicio', 'fecha_fin', 'duracion_minutos',
                   'jitsi_room_id', 'jitsi_room_link', 'estado', 'estado_label',
                   'recording_link', 'notas_docente', 'retroalimentacion', 'color',
                   'tiempo_restante', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'proposito_label', 'estado_label', 'color', 'tiempo_restante',
+        read_only_fields = ['id', 'docente', 'proposito_label', 'estado_label', 'color', 'tiempo_restante',
                            'jitsi_room_id', 'jitsi_room_link', 'created_at', 'updated_at']
 
     def get_color(self, obj):

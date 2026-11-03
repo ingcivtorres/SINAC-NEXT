@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import ExamenesEnLinea from './ExamenesEnLinea';
+import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from './TablaControles';
 import {useStudentCopy} from './studentPanelTranslations';
 import thesisWorkflowTranslations from './tesisWorkflowTranslations';
 import './PanelAlumno.css';
@@ -8,7 +9,7 @@ import './PanelAlumnoFixes.css';
 
 const MENU = [
   {label: 'space', items: [['resumen', 'Resumen', '\u2302'], ['perfil', 'Mi perfil', '\u263A']]},
-  {label: 'academic', items: [['materias', 'Materias e inscripciones', '\u25A6'], ['calificaciones', 'Calificaciones y avance', '\u2713'], ['horario', 'Horario', '\u25F7']]},
+  {label: 'academic', items: [['materias', 'Materias e inscripciones', '\u25A6'], ['calificaciones', 'Calificaciones y avance', '\u2713'], ['horario', 'Horario', '\u25F7'], ['examenes', 'Exámenes en línea', '\u270E']]},
   {label: 'communication', items: [['solicitudes', 'Solicitudes académicas', '\u2709'], ['entrevistas', 'Entrevistas virtuales', '\u25C9']]},
   {label: 'thesisDocs', items: [['tesis', 'Proyecto de tesis', '\u25C7'], ['predoctoral', 'Examen predoctoral', '\u2736'], ['diploma', 'Diploma digital', '\u25C8'], ['tramites', 'Documentos y trámites', '\u25A4']]},
 ];
@@ -36,7 +37,8 @@ function estadoMateria(materia, copy) {
 function MateriaRow({materia}) {
   const copy = useStudentCopy();
   const estado = estadoMateria(materia, copy);
-  return <article className="subject-row"><div><strong>{materia.materia_clave}</strong> {materia.materia_nombre}<p>{materia.materia_profesor || copy.grade.professorMissing} · {copy.common.credits}: {materia.materia_creditos ?? '-'} · {copy.common.period}: {materia.periodo_nombre || copy.grade.periodMissing}</p></div><div className="subject-meta"><Badge tone={estado.tone}>{estado.label}</Badge><div className="subject-grades"><span>{copy.common.partials}: {[materia.parcial_1, materia.parcial_2, materia.parcial_3].map(n => n ?? '-').join(' · ')}</span><strong>{copy.common.final}: {materia.calificacion ?? copy.common.pending}</strong>{estado.aviso && <small className={`calificacion-aviso calificacion-aviso--${estado.tone}`}>{estado.aviso}</small>}</div></div></article>;
+  const validacion = materia.validacion_servicios;
+  return <article className="subject-row"><div><strong>{materia.materia_clave}</strong> {materia.materia_nombre}<p>{materia.materia_profesor || copy.grade.professorMissing} · {copy.common.credits}: {materia.materia_creditos ?? '-'} · {copy.common.period}: {materia.periodo_nombre || copy.grade.periodMissing}</p></div><div className="subject-meta"><Badge tone={estado.tone}>{estado.label}</Badge>{validacion && <Badge tone={validacion === 'validada' ? 'success' : validacion === 'observada' ? 'danger' : 'warning'}>{copy.extra.review.validation[validacion] || validacion}</Badge>}<div className="subject-grades"><span>{copy.common.partials}: {[materia.parcial_1, materia.parcial_2, materia.parcial_3].map(n => n ?? '-').join(' · ')}</span><strong>{copy.common.final}: {materia.calificacion ?? copy.common.pending}</strong>{estado.aviso && <small className={`calificacion-aviso calificacion-aviso--${estado.tone}`}>{estado.aviso}</small>}</div></div></article>;
 }
 function AvanceCurricular({inscripciones, plan = []}) {
   const copy = useStudentCopy();
@@ -94,20 +96,44 @@ function AvanceCurricular({inscripciones, plan = []}) {
     {!estados.length && <div className="avance-empty"><strong>{copy.grade.emptyTitle}</strong><span>{copy.grade.emptyText}</span></div>}
   </div>;
 }
+const CAMPOS_PROYECTO = ['titulo', 'resumen', 'linea_investigacion', 'objetivos', 'metodologia'];
+const PROYECTO_VACIO = {titulo:'', resumen:'', linea_investigacion:'', objetivos:'', metodologia:''};
+const ESTADOS_EDITABLES_PROYECTO = ['borrador', 'observado'];
+const ESTADOS_ANTIPLAGIO = ['borrador', 'en_revision', 'observado'];
+const MATERIAS_POR_PERIODO = 4;
+function primerErrorApi(data, fallback) {
+  if (!data || typeof data !== 'object') return fallback;
+  if (typeof data.detail === 'string') return data.detail;
+  const valor = Object.values(data).find(item => typeof item === 'string' || (Array.isArray(item) && typeof item[0] === 'string'));
+  return (Array.isArray(valor) ? valor[0] : valor) || fallback;
+}
+function descargarBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = nombre;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 function formatoFecha(value, locale, pending) { return value ? new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value)) : pending; }
-function JuradoDefensaAlumno({proyecto, session}) {
+function JuradoDefensaAlumno({proyecto, session, onError, onLogout}) {
   const copy = useStudentCopy();
   const defensa = proyecto.defensa;
   const diplomaDisponible = defensa && ['realizada', 'revisada'].includes(defensa.estado) && defensa.calificacion_final != null && Number(defensa.calificacion_final) >= 7;
   async function descargarDiploma() {
-    const response = await fetch(`/api/proyectos-tesis/${proyecto.id}/diploma/`, {headers: {Authorization: `Bearer ${session.access}`}});
-    if (!response.ok) return;
-    const url = URL.createObjectURL(await response.blob());
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `diploma-${proyecto.id}.pdf`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    try {
+      const response = await fetch(`/api/proyectos-tesis/${proyecto.id}/diploma/`, {headers: {Authorization: `Bearer ${session.access}`}});
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(primerErrorApi(data, copy.jury.diplomaError));
+      }
+      descargarBlob(await response.blob(), `diploma-${proyecto.id}.pdf`);
+    } catch (err) {
+      onError(err.message || copy.jury.diplomaError);
+    }
   }
   return <div className="tesis-follow-up">
     <div className="tesis-follow-up-section"><strong>{copy.jury.assigned}</strong>{proyecto.jurados?.length ? <div className="tesis-jury-list">{proyecto.jurados.map(jurado => <span key={jurado.id}><b>{jurado.rol_label || jurado.rol}</b> {jurado.jurado_nombre} <small>{etiquetaEstado(jurado.estado, copy)}</small></span>)}</div> : <p className="form-hint">{copy.jury.notAssigned}</p>}</div>
@@ -118,16 +144,15 @@ function EtapaTesisEnAvance({flujo, onOpenThesis, onOpenCourses}) {
   const copy = useStudentCopy();
   const text = thesisWorkflowTranslations[copy.locale.split('-')[0]]?.student || thesisWorkflowTranslations.es.student;
   const elegibilidad = flujo?.elegibilidad;
-  const solicitud = flujo?.solicitud;
   const etapa = elegibilidad?.resumen?.etapa;
-  const message = solicitud?.estado === 'aprobada'
+  const matched = Boolean(flujo?.match_confirmado);
+  const message = matched
     ? text.matched
     : etapa === 'por_iniciar'
       ? text.upcoming
       : etapa === 'iniciada'
         ? text.start
         : text.firstYear;
-  const matched = solicitud?.estado === 'aprobada';
   return <section className="panel-card tesis-stage-progress">
     <div className="alumno-section-title"><div><p className="panel-kicker">{copy.thesis.kicker}</p><h3>{text.title}</h3></div><Badge tone={matched ? 'success' : etapa === 'por_iniciar' ? 'warning' : 'info'}>{matched ? text.matchConfirmed : elegibilidad?.configuracion ? `${text.currentTerm} ${elegibilidad.resumen?.periodo_actual || '—'}` : copy.common.pending}</Badge></div>
     <p>{message}</p>
@@ -164,14 +189,15 @@ export default function PanelAlumno({session, onLogout}) {
   const [perfil, setPerfil] = useState(null), [inscripciones, setInscripciones] = useState([]), [materias, setMaterias] = useState([]), [solicitudes, setSolicitudes] = useState([]), [notificaciones, setNotificaciones] = useState([]), [entrevistas, setEntrevistas] = useState([]), [examenes, setExamenes] = useState([]), [proyectosTesis, setProyectosTesis] = useState([]), [inscribiendo, setInscribiendo] = useState(false);
   const [materiasSeleccionadas, setMateriasSeleccionadas] = useState([]);
   const [antiplagioForm, setAntiplagioForm] = useState({archivo: null, proveedor: 'turnitin'});
-  const [revisionAntiplagio, setRevisionAntiplagio] = useState(null);
   const [subiendoAntiplagio, setSubiendoAntiplagio] = useState(false);
   const [seccion, setSeccion] = useState('resumen'), [error, setError] = useState(''), [loading, setLoading] = useState(true), [message, setMessage] = useState('');
   const [modalInscripcion, setModalInscripcion] = useState(null);
   const [periodoInscripcion, setPeriodoInscripcion] = useState(null);
   const [solicitudAcademicaForm, setSolicitudAcademicaForm] = useState({tipo: '', comentario: ''});
   const [enviandoSolicitudAcademica, setEnviandoSolicitudAcademica] = useState(false);
-  const [proyectoForm, setProyectoForm] = useState({titulo:'', resumen:'', linea_investigacion:'', objetivos:'', metodologia:''});
+  const [proyectoForm, setProyectoForm] = useState(PROYECTO_VACIO);
+  const [guardandoProyecto, setGuardandoProyecto] = useState(false);
+  const [archivoAntiplagioKey, setArchivoAntiplagioKey] = useState(0);
   const [flujoTesis, setFlujoTesis] = useState(null);
   const [solicitudTesisForm, setSolicitudTesisForm] = useState({director_sugerido:'', linea_investigacion:'', justificacion:''});
   const apiHeaders = useMemo(() => ({Authorization: `Bearer ${session.access}`}), [session.access]);
@@ -194,6 +220,7 @@ export default function PanelAlumno({session, onLogout}) {
     finally { if (!signal.aborted) setLoading(false); }
   }, [apiHeaders, copy, onLogout]);
   useEffect(() => { const c = new AbortController(); cargarDatos(c.signal); return () => c.abort(); }, [cargarDatos]);
+  useEffect(() => { setMessage(''); setError(''); }, [seccion]);
   useEffect(() => { fetch('/api/periodos-inscripcion/', {headers: apiHeaders}).then(r=>r.ok?r.json():null).then(setPeriodoInscripcion).catch(()=>{}); }, [apiHeaders]);
   async function marcarNotificacionesLeidas() {
     try {
@@ -233,8 +260,53 @@ export default function PanelAlumno({session, onLogout}) {
       setEnviandoSolicitudAcademica(false);
     }
   }
-  const promedio = useMemo(() => { const a = inscripciones.map(i => Number(i.calificacion)).filter(n => !Number.isNaN(n)); return a.length ? (a.reduce((x, n) => x + n, 0) / a.length).toFixed(2) : null; }, [inscripciones]);
-  const descargar = useCallback(async (ruta, nombre) => { try { const r = await fetch(ruta, {headers: apiHeaders}); if (!r.ok) throw new Error(copy.messages.downloadError); const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = nombre; a.click(); URL.revokeObjectURL(url); setMessage(`${nombre}: ${copy.docs.pdf}`); } catch (e) { setError(e.message); } }, [apiHeaders, copy]);
+  const promedio = useMemo(() => { const a = inscripciones.filter(i => i.calificacion !== null && i.calificacion !== undefined && i.calificacion !== '').map(i => Number(i.calificacion)).filter(Number.isFinite); return a.length ? (a.reduce((x, n) => x + n, 0) / a.length).toFixed(2) : null; }, [inscripciones]);
+  const etiquetasFiltro = useEtiquetasFiltro();
+  const calificacionesTabla = useTablaControl(inscripciones, {
+    campos: m => [m.materia_clave, m.materia_nombre, m.materia_profesor, m.periodo_nombre],
+    filtros: {periodo: m => m.periodo_nombre || copy.grade.periodMissing, estado: m => estadoMateria(m, copy).label},
+  });
+  const solicitudesTabla = useTablaControl(solicitudes, {
+    campos: item => [copy.requests.types[item.tipo] || item.tipo_label, item.comentario, item.respuesta_revision, item.resuelta_por_nombre],
+    filtros: {estado: item => item.estado, tipo: item => item.tipo},
+    porPagina: 5,
+  });
+  const entrevistasTabla = useTablaControl(entrevistas, {
+    campos: i => [i.titulo, i.proposito_label || i.proposito, i.descripcion],
+    filtros: {estado: i => i.estado},
+    porPagina: 5,
+  });
+  const descargar = useCallback(async (ruta, nombre) => {
+    setError(''); setMessage('');
+    try {
+      const r = await fetch(ruta, {headers: apiHeaders});
+      if (r.status === 401) return onLogout(copy.messages.expired);
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(primerErrorApi(data, copy.messages.downloadError));
+      }
+      descargarBlob(await r.blob(), nombre);
+      setMessage(`${nombre}: ${copy.docs.pdf}`);
+    } catch (e) { setError(e.message || copy.messages.downloadError); }
+  }, [apiHeaders, copy, onLogout]);
+  const examenesEnLinea = useMemo(() => examenes.filter(examen => examen.tipo !== 'predoctoral'), [examenes]);
+  const esDoctorado = Boolean(flujoTesis?.es_doctorado)
+    || flujoTesis?.elegibilidad?.configuracion?.grado === 'doctorado'
+    || /doctorado/i.test(perfil?.programa || '')
+    || examenes.some(examen => examen.tipo === 'predoctoral');
+  const proyectoActivo = proyectosTesis.find(item => item.estado !== 'rechazado');
+  const proyectoAntiplagio = proyectoActivo && ESTADOS_ANTIPLAGIO.includes(proyectoActivo.estado) ? proyectoActivo : null;
+  const revisionesAntiplagio = proyectoActivo?.revisiones_antiplagio || [];
+  const ultimaRevision = revisionesAntiplagio[0];
+  const examenesPendientes = examenesEnLinea.filter(examen => ['programado', 'iniciado'].includes(examen.estado)).length;
+  const esDelPeriodoActivo = item => Boolean(periodoInscripcion?.id) && String(item.periodo_inscripcion) === String(periodoInscripcion.id);
+  const cargaPeriodo = () => {
+    const inscritas = new Set(inscripciones.filter(esDelPeriodoActivo).map(item => Number(item.materia)));
+    const ofertadas = new Set([...inscritas, ...materias.map(item => Number(item.id))]);
+    const requeridas = Math.min(MATERIAS_POR_PERIODO, ofertadas.size);
+    return {inscritas, actuales: inscritas.size, requeridas, faltan: Math.max(0, requeridas - inscritas.size)};
+  };
+  const mensajeCarga = ({faltan, requeridas}) => copy.enrollment.exactCount.replace('{count}', faltan).replace('{total}', requeridas);
   async function inscribirMateriasSeleccionadas() {
     if (inscribiendo) return;
     if (!periodoInscripcion?.activo) {
@@ -242,10 +314,9 @@ export default function PanelAlumno({session, onLogout}) {
       setModalInscripcion({kind: 'error', message: copy.enrollment.activeClosed});
       return;
     }
-    const inscripcionesPeriodo = inscripciones.filter(item => item.periodo_nombre === periodoInscripcion.nombre).length;
-    const faltan = Math.max(0, 4 - inscripcionesPeriodo);
-    if (materiasSeleccionadas.length !== faltan) {
-      const detalle = copy.enrollment.exactCount.replace('{count}', faltan);
+    const carga = cargaPeriodo();
+    if (materiasSeleccionadas.length !== carga.faltan) {
+      const detalle = mensajeCarga(carga);
       setError(detalle);
       setModalInscripcion({kind: 'error', message: detalle});
       return;
@@ -263,6 +334,7 @@ export default function PanelAlumno({session, onLogout}) {
       if (!Array.isArray(data)) throw new Error(copy.messages.courseLoadError);
       setInscripciones(items => [...items, ...data]);
       setMateriasSeleccionadas([]);
+      fetch('/api/preregistro/materias/', {headers: apiHeaders}).then(res => res.ok ? res.json() : null).then(lista => { if (Array.isArray(lista)) setMaterias(lista); }).catch(() => {});
       setMessage(copy.enrollment.registered.replace('{period}', periodoInscripcion.nombre));
       setModalInscripcion({kind: 'success', message: copy.enrollment.registered.replace('{period}', periodoInscripcion.nombre)});
     } catch (e) {
@@ -277,10 +349,9 @@ export default function PanelAlumno({session, onLogout}) {
       setModalInscripcion({kind: 'error', message: copy.enrollment.activeClosed});
       return;
     }
-    const actuales = inscripciones.filter(item => item.periodo_nombre === periodoInscripcion.nombre).length;
-    const faltan = Math.max(0, 4 - actuales);
-    if (materiasSeleccionadas.length !== faltan) {
-      const detalle = copy.enrollment.exactCount.replace('{count}', faltan);
+    const carga = cargaPeriodo();
+    if (materiasSeleccionadas.length !== carga.faltan) {
+      const detalle = mensajeCarga(carga);
       setError(detalle);
       setModalInscripcion({kind: 'error', message: detalle});
       return;
@@ -291,22 +362,38 @@ export default function PanelAlumno({session, onLogout}) {
   }
   async function guardarProyecto(event, enviarRevision = false) {
     event.preventDefault();
-    setError('');
-    const payload = {...proyectoForm, ...(enviarRevision ? {enviar_revision: true} : {})};
+    const form = event.currentTarget.form || event.currentTarget;
+    if (form?.reportValidity && !form.reportValidity()) return;
+    if (guardandoProyecto) return;
+    setError(''); setMessage('');
     const editando = Boolean(proyectoForm.id);
-    const response = await fetch(editando ? `/api/proyectos-tesis/${proyectoForm.id}/` : '/api/proyectos-tesis/', {method: editando ? 'PATCH' : 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return setError(data.detail || data.titulo?.[0] || data.resumen?.[0] || copy.thesis.saveError);
-    setProyectosTesis(items => editando ? items.map(item => item.id === data.id ? data : item) : [data, ...items]);
-    setProyectoForm({titulo:'', resumen:'', linea_investigacion:'', objetivos:'', metodologia:''});
-    setMessage(enviarRevision ? copy.thesis.sentReview : copy.thesis.draftSaved);
+    const payload = CAMPOS_PROYECTO.reduce((acc, campo) => ({...acc, [campo]: (proyectoForm[campo] || '').trim()}), enviarRevision ? {enviar_revision: true} : {});
+    setGuardandoProyecto(true);
+    try {
+      const response = await fetch(editando ? `/api/proyectos-tesis/${proyectoForm.id}/` : '/api/proyectos-tesis/', {method: editando ? 'PATCH' : 'POST', headers: {...apiHeaders, 'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(primerErrorApi(data, copy.thesis.saveError));
+      setProyectosTesis(items => editando ? items.map(item => item.id === data.id ? data : item) : [data, ...items]);
+      setProyectoForm(PROYECTO_VACIO);
+      setMessage(enviarRevision ? copy.thesis.sentReview : copy.thesis.draftSaved);
+    } catch (err) {
+      setError(err.message || copy.thesis.saveError);
+    } finally {
+      setGuardandoProyecto(false);
+    }
   }
   async function solicitarDireccionTesis(event) {
-    event.preventDefault(); setError('');
-    const response = await fetch('/api/tesis/flujo/', {method:'POST', headers:{...apiHeaders, 'Content-Type':'application/json'}, body:JSON.stringify(solicitudTesisForm)});
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return setError(data.detail || copy.messages.thesisRequestError);
-    setFlujoTesis(actual => ({...actual, solicitud:data})); setSolicitudTesisForm({director_sugerido:'', linea_investigacion:'', justificacion:''}); setMessage(copy.thesis.sentDirection);
+    event.preventDefault(); setError(''); setMessage('');
+    try {
+      const response = await fetch('/api/tesis/flujo/', {method:'POST', headers:{...apiHeaders, 'Content-Type':'application/json'}, body:JSON.stringify(solicitudTesisForm)});
+      if (response.status === 401) return onLogout(copy.messages.expired);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(primerErrorApi(data, copy.messages.thesisRequestError));
+      setFlujoTesis(actual => ({...actual, solicitud:data})); setSolicitudTesisForm({director_sugerido:'', linea_investigacion:'', justificacion:''}); setMessage(copy.thesis.sentDirection);
+    } catch (err) {
+      setError(err.message || copy.messages.thesisRequestError);
+    }
   }
   async function responderMatchTesis(estado) {
     const solicitud = flujoTesis?.solicitud;
@@ -318,8 +405,9 @@ export default function PanelAlumno({session, onLogout}) {
         headers: {...apiHeaders, 'Content-Type': 'application/json'},
         body: JSON.stringify({estado}),
       });
+      if (response.status === 401) return onLogout(copy.messages.expired);
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || copy.messages.thesisRequestError);
+      if (!response.ok) throw new Error(primerErrorApi(data, copy.messages.thesisRequestError));
       setFlujoTesis(actual => ({...actual, solicitud:data}));
       const text = thesisWorkflowTranslations[copy.locale.split('-')[0]]?.student || thesisWorkflowTranslations.es.student;
       setMessage(data.estado === 'aprobada' ? text.matchConfirmed : text.matchRejected);
@@ -336,28 +424,26 @@ export default function PanelAlumno({session, onLogout}) {
     }
     setSubiendoAntiplagio(true);
     try {
-      const proyectoActivo = proyectosTesis.find(item => item.estado && ['borrador', 'en_revision', 'observado'].includes(item.estado));
-      if (!proyectoActivo) {
+      if (!proyectoAntiplagio) {
         throw new Error(copy.plagiarism.activeProject);
       }
       const formData = new FormData();
       formData.append('archivo', antiplagioForm.archivo);
       formData.append('proveedor', antiplagioForm.proveedor);
-      const response = await fetch(`/api/proyectos-tesis/${proyectoActivo.id}/revision-antiplagio/`, {
+      const response = await fetch(`/api/proyectos-tesis/${proyectoAntiplagio.id}/revision-antiplagio/`, {
         method: 'POST',
         headers: {Authorization: `Bearer ${session.access}`},
         body: formData,
       });
+      if (response.status === 401) return onLogout(copy.messages.expired);
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || data.archivo?.[0] || data.archivo || copy.plagiarism.sendError);
-      setRevisionAntiplagio(data);
+      if (!response.ok) throw new Error(primerErrorApi(data, copy.plagiarism.sendError));
       setAntiplagioForm({archivo: null, proveedor: 'turnitin'});
-      setMessage(`${copy.plagiarism.complete}: ${data.porcentaje_similitud}% ${copy.plagiarism.similarity} (${data.estado}).`);
-      const proyectoActualizado = await fetch(`/api/proyectos-tesis/${proyectoActivo.id}/`, {headers: apiHeaders});
-      if (proyectoActualizado.ok) {
-        const proyectoData = await proyectoActualizado.json();
-        setProyectosTesis(items => items.map(item => item.id === proyectoData.id ? proyectoData : item));
-      }
+      setArchivoAntiplagioKey(key => key + 1);
+      setMessage(copy.extra.review.plagiarismDone.replace('{percent}', data.porcentaje_similitud).replace('{estado}', etiquetaEstado(data.estado, copy)));
+      setProyectosTesis(items => items.map(item => item.id === proyectoAntiplagio.id
+        ? {...item, revisiones_antiplagio: [data, ...(item.revisiones_antiplagio || [])].slice(0, 5)}
+        : item));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -365,13 +451,13 @@ export default function PanelAlumno({session, onLogout}) {
     }
   }
   const contenido = () => {
-    if (seccion === 'tesis' && (!flujoTesis || !flujoTesis.elegibilidad?.elegible || flujoTesis.solicitud?.estado !== 'aprobada')) return <EstadoInicioTesis flujo={flujoTesis} form={solicitudTesisForm} setForm={setSolicitudTesisForm} onSolicitar={solicitarDireccionTesis} onResponder={responderMatchTesis} cargando={loading}/>;
-    if (seccion === 'diploma') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.diploma.kicker}</p><h3>{copy.diploma.title}</h3></div><Badge tone="info">{copy.diploma.defense}</Badge></div><p>{copy.diploma.intro}</p>{proyectosTesis.length ? <div className="tesis-list">{proyectosTesis.map(proyecto => <article key={proyecto.id}><div><strong>{proyecto.titulo}</strong><small>{proyecto.defensa ? etiquetaEstado(proyecto.defensa.estado, copy) : copy.diploma.pending}</small><JuradoDefensaAlumno proyecto={proyecto} session={session}/></div></article>)}</div> : <p>{copy.diploma.noProjects}</p>}</div>;
+    if (seccion === 'tesis' && !flujoTesis?.match_confirmado) return <EstadoInicioTesis flujo={flujoTesis} form={solicitudTesisForm} setForm={setSolicitudTesisForm} onSolicitar={solicitarDireccionTesis} onResponder={responderMatchTesis} cargando={loading}/>;
+    if (seccion === 'diploma') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.diploma.kicker}</p><h3>{copy.diploma.title}</h3></div><Badge tone="info">{copy.diploma.defense}</Badge></div><p>{copy.diploma.intro}</p>{proyectosTesis.length ? <div className="tesis-list">{proyectosTesis.map(proyecto => <article key={proyecto.id}><div><strong>{proyecto.titulo}</strong><small>{proyecto.defensa ? etiquetaEstado(proyecto.defensa.estado, copy) : copy.diploma.pending}</small><JuradoDefensaAlumno proyecto={proyecto} session={session} onError={setError} onLogout={onLogout}/></div></article>)}</div> : <p>{copy.diploma.noProjects}</p>}</div>;
     if (seccion === 'predoctoral') {
       const examenesPredoctorales = examenes.filter(examen => examen.tipo === 'predoctoral');
-      return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3></div><Badge tone="info">{copy.predoctoral.academic}</Badge></div><p>{copy.predoctoral.intro}</p>{examenesPredoctorales.length ? <div className="request-list">{examenesPredoctorales.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.descripcion || copy.predoctoral.evaluation}</p><p><strong>{copy.common.date}:</strong> {formatoFecha(examen.fecha_programada, copy.locale, copy.communication.datePending)} · <strong>{copy.common.duration}:</strong> {examen.duracion_minutos || 120} {copy.common.minutes}</p><Badge tone={examen.color || 'neutral'}>{etiquetaEstado(examen.estado, copy)}</Badge>{examen.calificacion !== null && examen.calificacion !== undefined && <p>{copy.common.result}: <strong>{examen.calificacion}</strong></p>}{examen.retroalimentacion && <p><strong>{copy.common.feedback}:</strong> {examen.retroalimentacion}</p>}</article>)}</div> : <p>{copy.predoctoral.noExam}</p>}</div>;
+      return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3></div><Badge tone="info">{copy.predoctoral.academic}</Badge></div><p>{copy.predoctoral.intro}</p>{examenesPredoctorales.length ? <div className="request-list">{examenesPredoctorales.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.descripcion || copy.predoctoral.evaluation}</p><p><strong>{copy.common.date}:</strong> {formatoFecha(examen.fecha_programada, copy.locale, copy.communication.datePending)} · <strong>{copy.common.duration}:</strong> {examen.duracion_minutos || 120} {copy.common.minutes}</p><Badge tone={examen.color || 'neutral'}>{etiquetaEstado(examen.estado, copy)}</Badge>{examen.calificacion !== null && examen.calificacion !== undefined && <p>{copy.common.result}: <strong>{examen.calificacion}</strong></p>}{examen.retroalimentacion && <p><strong>{copy.common.feedback}:</strong> {examen.retroalimentacion}</p>}</article>)}</div> : <p>{copy.predoctoral.noExam}</p>}{!examenesPredoctorales.length && flujoTesis?.predoctoral_motivos?.length > 0 && <div className="form-hint"><strong>{copy.extra.review.predoctoralRequirements}</strong><ul>{flujoTesis.predoctoral_motivos.map(motivo => <li key={motivo}>{motivo}</li>)}</ul></div>}</div>;
     }
-    if (seccion === 'examenes') return <ExamenesEnLinea session={session} examenes={examenes} onChange={setExamenes} />;
+    if (seccion === 'examenes') return <ExamenesEnLinea session={session} examenes={examenesEnLinea} onChange={setExamenes} />;
     if (seccion === 'resumen') return <div className="alumno-dashboard-grid">
       <section className="alumno-dashboard-hero">
         <div className="alumno-dashboard-identity">
@@ -407,8 +493,8 @@ export default function PanelAlumno({session, onLogout}) {
         </div>
       </section>
     </div>;
-    if (seccion === 'materias') { const inscritas = new Set(inscripciones.filter(i => i.periodo_nombre === periodoInscripcion?.nombre).map(i => Number(i.materia))); const periodoActivo = Boolean(periodoInscripcion?.activo); const periodoActualInscripciones = inscripciones.filter(i => i.periodo_nombre === periodoInscripcion?.nombre).length; const faltan = Math.max(0, 4 - periodoActualInscripciones); const seleccionadas = new Set(materiasSeleccionadas); const fecha = valor => valor ? new Date(valor).toLocaleDateString(copy.locale) : '-'; const alternarMateria = id => setMateriasSeleccionadas(actual => actual.includes(id) ? actual.filter(item => item !== id) : actual.length < faltan ? [...actual, id] : actual); return <div className="alumno-materias-view"><div className="panel-card"><h3>{copy.summary.courses}</h3><p>{copy.enrollment.exact}</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `${copy.enrollment.open}: ${periodoInscripcion.nombre}` : copy.enrollment.closed}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} - ${fecha(periodoInscripcion.cierre)}` : copy.enrollment.notEnabled}</span></div>{periodoActivo && <p className="form-hint">{copy.enrollment.load}: {periodoActualInscripciones} / 4 · {copy.enrollment.selected}: {materiasSeleccionadas.length} / {faltan}</p>}{materias.length > 0 && periodoActivo ? <><div className="materias-grid">{materias.map(m => { const yaInscrita = inscritas.has(Number(m.id)); const seleccionada = seleccionadas.has(m.id); return <article className={`materia-card ${yaInscrita || seleccionada ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong>{m.categoria === 'seminario' && <Badge tone="info">{thesisWorkflowTranslations[copy.locale.split('-')[0]]?.seminar || thesisWorkflowTranslations.es.seminar}</Badge>}<small><strong>{copy.docs.schoolYear}: {periodoInscripcion.nombre}</strong><br/>{copy.common.period}: {m.periodo_sugerido}<br/>{copy.common.teacher}: {m.profesor || copy.common.notAssigned}<br/>{copy.docs.schedule}: {m.horario || copy.common.toDefine}<br/>{copy.common.roomPending}: {m.salon_label || copy.common.roomPending}<br/>{copy.common.enrolled}: {m.inscritos || 0} / {m.capacidad || 42}</small>{yaInscrita ? <Badge tone="success">{copy.enrollment.already}</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || (!seleccionada && materiasSeleccionadas.length >= faltan)} onClick={() => alternarMateria(m.id)}>{seleccionada ? copy.enrollment.selectedLabel : copy.enrollment.select}</button>}</article>; })}</div><button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || materiasSeleccionadas.length !== faltan} onClick={prepararInscripcion}>{inscribiendo ? copy.enrollment.submitting : faltan === 0 ? `${copy.enrollment.load} (4/4)` : `${copy.enrollment.submit}: ${faltan}`}</button></> : <p>{periodoActivo ? copy.enrollment.noAvailableCourses : copy.enrollment.activeClosed}</p>}</div><div className="panel-card"><h3>{copy.summary.registered}</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>{copy.common.noCourses}</p>}</div></div>; }
-    if (seccion === 'calificaciones') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.grade.kicker}</p><h3>{copy.grade.title}</h3></div></div><AvanceCurricular inscripciones={inscripciones} plan={flujoTesis?.elegibilidad?.configuracion?.materias_plan || []}/><EtapaTesisEnAvance flujo={flujoTesis} onOpenThesis={() => setSeccion('tesis')} onOpenCourses={() => setSeccion('materias')}/><div className="subject-list">{inscripciones.length ? inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>{copy.common.noCourses}</p>}</div></div>;
+    if (seccion === 'materias') { const {inscritas, actuales: periodoActualInscripciones, requeridas, faltan} = cargaPeriodo(); const periodoActivo = Boolean(periodoInscripcion?.activo); const seleccionadas = new Set(materiasSeleccionadas); const fecha = valor => valor ? new Date(valor).toLocaleDateString(copy.locale) : '-'; const alternarMateria = id => setMateriasSeleccionadas(actual => actual.includes(id) ? actual.filter(item => item !== id) : actual.length < faltan ? [...actual, id] : actual); return <div className="alumno-materias-view"><div className="panel-card"><h3>{copy.summary.courses}</h3><p>{copy.enrollment.exact}</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `${copy.enrollment.open}: ${periodoInscripcion.nombre}` : copy.enrollment.closed}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} - ${fecha(periodoInscripcion.cierre)}` : copy.enrollment.notEnabled}</span></div>{periodoActivo && <p className="form-hint">{copy.enrollment.load}: {periodoActualInscripciones} / {requeridas} · {copy.enrollment.selected}: {materiasSeleccionadas.length} / {faltan}</p>}{materias.length > 0 && periodoActivo ? <><div className="materias-grid">{materias.map(m => { const yaInscrita = inscritas.has(Number(m.id)); const seleccionada = seleccionadas.has(m.id); return <article className={`materia-card ${yaInscrita || seleccionada ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong>{m.categoria === 'seminario' && <Badge tone="info">{thesisWorkflowTranslations[copy.locale.split('-')[0]]?.seminar || thesisWorkflowTranslations.es.seminar}</Badge>}<small><strong>{copy.docs.schoolYear}: {periodoInscripcion.nombre}</strong><br/>{copy.common.period}: {m.periodo_sugerido}<br/>{copy.common.teacher}: {m.profesor || copy.common.notAssigned}<br/>{copy.docs.schedule}: {m.horario || copy.common.toDefine}<br/>{copy.common.roomPending}: {m.salon_label || copy.common.roomPending}<br/>{copy.common.enrolled}: {m.inscritos || 0} / {m.capacidad || 42}</small>{yaInscrita ? <Badge tone="success">{copy.enrollment.already}</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || (!seleccionada && materiasSeleccionadas.length >= faltan)} onClick={() => alternarMateria(m.id)}>{seleccionada ? copy.enrollment.selectedLabel : copy.enrollment.select}</button>}</article>; })}</div><button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || materiasSeleccionadas.length !== faltan} onClick={prepararInscripcion}>{inscribiendo ? copy.enrollment.submitting : faltan === 0 ? `${copy.enrollment.load} (${periodoActualInscripciones}/${requeridas})` : `${copy.enrollment.submit}: ${faltan}`}</button></> : <p>{periodoActivo ? copy.enrollment.noAvailableCourses : copy.enrollment.activeClosed}</p>}</div><div className="panel-card"><h3>{copy.summary.registered}</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>{copy.common.noCourses}</p>}</div></div>; }
+    if (seccion === 'calificaciones') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.grade.kicker}</p><h3>{copy.grade.title}</h3></div></div><AvanceCurricular inscripciones={inscripciones} plan={flujoTesis?.elegibilidad?.configuracion?.materias_plan || []}/><EtapaTesisEnAvance flujo={flujoTesis} onOpenThesis={() => setSeccion('tesis')} onOpenCourses={() => setSeccion('materias')}/><TablaHerramientas control={calificacionesTabla} filtros={[{clave: 'periodo', etiqueta: etiquetasFiltro.period}, {clave: 'estado', etiqueta: etiquetasFiltro.status}]} /><div className="subject-list tabla-scroll-lista">{calificacionesTabla.visibles.length ? calificacionesTabla.visibles.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>{copy.common.noCourses}</p>}</div><TablaPaginacion control={calificacionesTabla} /></div>;
     if (seccion === 'horario' || seccion === 'tramites') {
       const inscripcionesConPeriodo = inscripciones.filter(materia => materia.periodo_inscripcion && materia.periodo_nombre);
       const periodoActualId = periodoInscripcion?.activo ? periodoInscripcion.id : null;
@@ -472,12 +558,14 @@ export default function PanelAlumno({session, onLogout}) {
         {id: 'oficiales', titulo: copy.docs.officialDocuments, icono: '▤'},
         {id: 'inscripcion', titulo: copy.docs.enrollmentDocuments, icono: '▦'},
       ];
+      const sinValidar = inscripciones.filter(item => esDelPeriodoActivo(item) && item.validacion_servicios !== 'validada').length;
       return <div className="alumno-procedures-view">
         <section className="alumno-schedule-summary panel-card">
           <div className="alumno-schedule-summary-copy">
             <p className="panel-kicker">{copy.docs.documentsAndProcedures}</p>
             <h3>{copy.docs.documentsAndProcedures}</h3>
             <p>{copy.docs.intro}</p>
+            {sinValidar > 0 && <p className="form-hint">{copy.extra.review.pendingValidation.replace('{count}', sinValidar)} {copy.extra.review.validationHint}</p>}
           </div>
           <div className="alumno-schedule-count"><strong>{documentosDisponibles.length}</strong><span>{copy.docs.documentCount}</span></div>
         </section>
@@ -512,7 +600,8 @@ export default function PanelAlumno({session, onLogout}) {
       </section>
       <section className="panel-card alumno-request-history">
         <div className="alumno-section-title"><div><p className="panel-kicker">{copy.requests.title}</p><h3>{copy.requests.history}</h3></div><Badge tone="info">{solicitudes.length}</Badge></div>
-        {solicitudes.length ? <div className="alumno-request-list">{solicitudes.map(item => {
+        <TablaHerramientas control={solicitudesTabla} filtros={[{clave: 'estado', etiqueta: etiquetasFiltro.status, formato: value => copy.requests[value] || etiquetaEstado(value, copy)}, {clave: 'tipo', etiqueta: etiquetasFiltro.type, formato: value => copy.requests.types[value] || value}]} />
+        {solicitudesTabla.visibles.length ? <div className="alumno-request-list tabla-scroll-lista">{solicitudesTabla.visibles.map(item => {
           const statusLabel = copy.requests[item.estado] || etiquetaEstado(item.estado, copy);
           return <article className={`alumno-request-item alumno-request-item--${item.estado}`} key={item.id}>
             <div className="alumno-request-item-heading"><div><strong>{copy.requests.types[item.tipo] || item.tipo_label}</strong><small>{copy.requests.requestedOn}: {formatoFecha(item.created_at, copy.locale, '—')}</small></div><Badge tone={item.estado === 'aceptado' ? 'success' : item.estado === 'rechazado' ? 'danger' : 'warning'}>{statusLabel}</Badge></div>
@@ -520,28 +609,32 @@ export default function PanelAlumno({session, onLogout}) {
             {item.respuesta_revision ? <div className="alumno-request-response"><strong>{copy.requests.reviewerResponse}</strong><p>{item.respuesta_revision}</p>{item.resuelta_por_nombre && <small>{copy.requests.reviewedBy}: {item.resuelta_por_nombre}</small>}</div> : item.estado === 'pendiente' && <p className="alumno-request-pending">{copy.requests.emptyResponse}</p>}
           </article>;
         })}</div> : <div className="alumno-request-empty"><span aria-hidden="true">✉</span><strong>{copy.requests.noRequests}</strong></div>}
+        <TablaPaginacion control={solicitudesTabla} />
       </section>
     </div>;
-    if (seccion === 'entrevistas') return <div className="panel-card entrevistas-alumno-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.communication.kicker}</p><h3>{copy.communication.title}</h3></div><Badge tone="info">{entrevistas.length} {entrevistas.length === 1 ? copy.communication.countOne : copy.communication.countMany}</Badge></div>{entrevistas.length ? <div className="entrevistas-alumno-list">{entrevistas.map(i => <article className="entrevista-alumno-item" key={i.id}><div className="entrevista-alumno-main"><div className="entrevista-alumno-heading"><strong>{i.titulo || copy.communication.virtualInterview}</strong><Badge tone={i.color || 'neutral'}>{etiquetaEstado(i.estado, copy)}</Badge></div><p>{i.proposito_label || i.proposito}</p>{i.descripcion && <small>{i.descripcion}</small>}<div className="interview-meta"><span><strong>{copy.common.date}:</strong> {formatoFecha(i.fecha_programada, copy.locale, copy.communication.datePending)}</span><span><strong>{copy.common.duration}:</strong> {i.duracion_minutos || 30} {copy.common.minutes}</span></div>{i.retroalimentacion && <div className="entrevista-feedback"><strong>{copy.communication.teacherFeedback}</strong><p>{i.retroalimentacion}</p></div>}</div><div className="entrevista-alumno-actions">{i.estado === 'iniciada' && i.jitsi_room_link ? <a className="btn-primary" href={i.jitsi_room_link} target="_blank" rel="noopener noreferrer">{copy.communication.join}</a> : i.estado === 'programada' ? <span className="form-hint">{copy.communication.availableWhenStarted}</span> : i.estado === 'completada' ? <span className="form-hint">{copy.communication.completed}</span> : <span className="form-hint">{copy.communication.cancelled}</span>}</div></article>)}</div> : <div className="empty-state"><strong>{copy.communication.noScheduled}</strong><p>{copy.communication.emptyText}</p></div>}</div>;
+    if (seccion === 'entrevistas') return <div className="panel-card entrevistas-alumno-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.communication.kicker}</p><h3>{copy.communication.title}</h3></div><Badge tone="info">{entrevistas.length} {entrevistas.length === 1 ? copy.communication.countOne : copy.communication.countMany}</Badge></div><TablaHerramientas control={entrevistasTabla} filtros={[{clave: 'estado', etiqueta: etiquetasFiltro.status, formato: value => etiquetaEstado(value, copy)}]} />{entrevistasTabla.visibles.length ? <div className="entrevistas-alumno-list tabla-scroll-lista">{entrevistasTabla.visibles.map(i => <article className="entrevista-alumno-item" key={i.id}><div className="entrevista-alumno-main"><div className="entrevista-alumno-heading"><strong>{i.titulo || copy.communication.virtualInterview}</strong><Badge tone={i.color || 'neutral'}>{etiquetaEstado(i.estado, copy)}</Badge></div><p>{i.proposito_label || i.proposito}</p>{i.descripcion && <small>{i.descripcion}</small>}<div className="interview-meta"><span><strong>{copy.common.date}:</strong> {formatoFecha(i.fecha_programada, copy.locale, copy.communication.datePending)}</span><span><strong>{copy.common.duration}:</strong> {i.duracion_minutos || 30} {copy.common.minutes}</span></div>{i.retroalimentacion && <div className="entrevista-feedback"><strong>{copy.communication.teacherFeedback}</strong><p>{i.retroalimentacion}</p></div>}</div><div className="entrevista-alumno-actions">{i.estado === 'iniciada' && i.jitsi_room_link ? <a className="btn-primary" href={i.jitsi_room_link} target="_blank" rel="noopener noreferrer">{copy.communication.join}</a> : i.estado === 'programada' ? <span className="form-hint">{copy.communication.availableWhenStarted}</span> : i.estado === 'completada' ? <span className="form-hint">{copy.communication.completed}</span> : <span className="form-hint">{copy.communication.cancelled}</span>}</div></article>)}</div> : <div className="empty-state"><strong>{copy.communication.noScheduled}</strong><p>{copy.communication.emptyText}</p></div>}<TablaPaginacion control={entrevistasTabla} /></div>;
     if (seccion === 'tesis') return <div className="tesis-view">
       <div className="panel-card">
         <div className="alumno-section-title"><div><p className="panel-kicker">{copy.thesis.thesisKicker}</p><h3>{copy.thesis.projectTitle}</h3></div><span className="badge badge--info">{copy.thesis.lida}</span></div>
         <p>{copy.thesis.projectIntro}</p>
-        <form className="tesis-form" onSubmit={event => guardarProyecto(event, false)}>
+        {flujoTesis?.director_tesis && <p><strong>{copy.extra.review.assignedDirector}:</strong> {flujoTesis.director_tesis.nombre}</p>}
+        {!proyectoForm.id && proyectoActivo && <p className="form-hint">{ESTADOS_EDITABLES_PROYECTO.includes(proyectoActivo.estado) ? copy.extra.review.activeProject : copy.extra.review.projectLocked.replace('{estado}', etiquetaEstado(proyectoActivo.estado, copy))}</p>}
+        {(proyectoForm.id || !proyectoActivo) && <form className="tesis-form" onSubmit={event => guardarProyecto(event, false)}>
           <label>{copy.thesis.title}<input required minLength="10" value={proyectoForm.titulo} onChange={event => setProyectoForm({...proyectoForm, titulo:event.target.value})} placeholder={copy.thesis.titlePlaceholder}/></label>
           <label>{copy.thesis.line}<input value={proyectoForm.linea_investigacion} onChange={event => setProyectoForm({...proyectoForm, linea_investigacion:event.target.value})} placeholder={copy.thesis.linePlaceholder}/></label>
           <label>{copy.thesis.summary}<textarea required minLength="30" rows="4" value={proyectoForm.resumen} onChange={event => setProyectoForm({...proyectoForm, resumen:event.target.value})} placeholder={copy.thesis.summaryPlaceholder}/></label>
           <label>{copy.thesis.objectives}<textarea rows="3" value={proyectoForm.objetivos} onChange={event => setProyectoForm({...proyectoForm, objetivos:event.target.value})} placeholder={copy.thesis.objectivesPlaceholder}/></label>
           <label>{copy.thesis.methodology}<textarea rows="3" value={proyectoForm.metodologia} onChange={event => setProyectoForm({...proyectoForm, metodologia:event.target.value})} placeholder={copy.thesis.methodologyPlaceholder}/></label>
-          <div className="tesis-form-actions"><button type="submit" className="btn-secondary">{copy.thesis.saveDraft}</button><button type="button" className="btn-primary" onClick={event => guardarProyecto(event, true)}>{copy.thesis.sendReview}</button>{proyectoForm.id && <button type="button" className="link-btn" onClick={() => setProyectoForm({titulo:'', resumen:'', linea_investigacion:'', objetivos:'', metodologia:''})}>{copy.extra.thesis.clear}</button>}</div>
-        </form>
-        {proyectosTesis.length ? <div className="tesis-list">{proyectosTesis.map(proyecto => <article key={proyecto.id}><div><strong>{proyecto.titulo}</strong><small>{etiquetaEstado(proyecto.estado, copy)} · {proyecto.director_nombre || copy.common.notAssigned}</small><p>{proyecto.resumen}</p></div><div className="tesis-list-actions"><button type="button" className="btn-secondary" onClick={() => setProyectoForm({...proyecto})}>{copy.extra.thesis.edit}</button></div></article>)}</div> : <p>{copy.diploma.noProjects}</p>}
+          <div className="tesis-form-actions"><button type="submit" className="btn-secondary" disabled={guardandoProyecto}>{copy.thesis.saveDraft}</button><button type="button" className="btn-primary" disabled={guardandoProyecto} onClick={event => guardarProyecto(event, true)}>{copy.thesis.sendReview}</button>{proyectoForm.id && <button type="button" className="link-btn" onClick={() => setProyectoForm(PROYECTO_VACIO)}>{copy.extra.thesis.clear}</button>}</div>
+        </form>}
+        {proyectosTesis.length ? <div className="tesis-list">{proyectosTesis.map(proyecto => <article key={proyecto.id}><div><strong>{proyecto.titulo}</strong><small>{etiquetaEstado(proyecto.estado, copy)} · {proyecto.director_nombre || copy.common.notAssigned}</small><p>{proyecto.resumen}</p>{proyecto.comentarios_revision && <p><strong>{copy.thesis.comments}:</strong> {proyecto.comentarios_revision}</p>}</div>{ESTADOS_EDITABLES_PROYECTO.includes(proyecto.estado) && <div className="tesis-list-actions"><button type="button" className="btn-secondary" onClick={() => setProyectoForm(CAMPOS_PROYECTO.reduce((acc, campo) => ({...acc, [campo]: proyecto[campo] || ''}), {id: proyecto.id}))}>{copy.extra.thesis.edit}</button></div>}</article>)}</div> : <p>{copy.diploma.noProjects}</p>}
       </div>
       <div className="panel-card">
-        <div className="alumno-section-title"><div><p className="panel-kicker">{copy.extra.plagiarism.kicker}</p><h3>{copy.extra.plagiarism.title}</h3></div><Badge tone={revisionAntiplagio ? (revisionAntiplagio.estado === 'rechazado' ? 'danger' : revisionAntiplagio.estado === 'observado' ? 'warning' : 'success') : 'neutral'}>{revisionAntiplagio ? etiquetaEstado(revisionAntiplagio.estado, copy) : copy.extra.plagiarism.none}</Badge></div>
+        <div className="alumno-section-title"><div><p className="panel-kicker">{copy.extra.plagiarism.kicker}</p><h3>{copy.extra.plagiarism.title}</h3></div><Badge tone={ultimaRevision ? (ultimaRevision.estado === 'rechazado' ? 'danger' : ultimaRevision.estado === 'observado' ? 'warning' : 'success') : 'neutral'}>{ultimaRevision ? etiquetaEstado(ultimaRevision.estado, copy) : copy.extra.plagiarism.none}</Badge></div>
         <p>{copy.extra.plagiarism.intro}</p>
-        <form className="tesis-form" onSubmit={subirRevisionAntiplagio}><label>{copy.extra.plagiarism.provider}<select value={antiplagioForm.proveedor} onChange={event => setAntiplagioForm({...antiplagioForm, proveedor: event.target.value})}><option value="turnitin">Turnitin</option><option value="copyleaks">Copyleaks</option><option value="manual">{copy.extra.plagiarism.manual}</option></select></label><label>{copy.extra.plagiarism.file}<input type="file" accept="application/pdf" onChange={event => setAntiplagioForm({...antiplagioForm, archivo: event.target.files?.[0] || null})}/></label><div className="tesis-form-actions"><button type="submit" className="btn-primary" disabled={subiendoAntiplagio}>{subiendoAntiplagio ? copy.extra.plagiarism.submitting : copy.extra.plagiarism.submit}</button></div></form>
-        {revisionAntiplagio && <div className="request-list"><article><strong>{copy.common.result}: {revisionAntiplagio.porcentaje_similitud}% {copy.plagiarism.similarity}</strong><p>{revisionAntiplagio.observaciones || copy.extra.plagiarism.noObservations}</p><p><strong>{copy.extra.plagiarism.provider}:</strong> {revisionAntiplagio.proveedor} · <strong>{copy.common.status}:</strong> {etiquetaEstado(revisionAntiplagio.estado, copy)}</p></article></div>}
+        <p className="form-hint">{copy.extra.review.plagiarismHint}</p>
+        {proyectoAntiplagio ? <form className="tesis-form" onSubmit={subirRevisionAntiplagio}><label>{copy.extra.plagiarism.provider}<select value={antiplagioForm.proveedor} onChange={event => setAntiplagioForm({...antiplagioForm, proveedor: event.target.value})}><option value="turnitin">Turnitin</option><option value="copyleaks">Copyleaks</option><option value="manual">{copy.extra.plagiarism.manual}</option></select></label><label>{copy.extra.plagiarism.file}<input key={archivoAntiplagioKey} type="file" accept="application/pdf" onChange={event => setAntiplagioForm({...antiplagioForm, archivo: event.target.files?.[0] || null})}/></label><div className="tesis-form-actions"><button type="submit" className="btn-primary" disabled={subiendoAntiplagio}>{subiendoAntiplagio ? copy.extra.plagiarism.submitting : copy.extra.plagiarism.submit}</button></div></form> : <p className="form-hint">{copy.extra.review.plagiarismUnavailable}</p>}
+        {revisionesAntiplagio.length > 0 && <div className="request-list"><h4>{copy.extra.review.plagiarismHistory}</h4>{revisionesAntiplagio.map(revision => <article key={revision.id}><strong>{copy.common.result}: {revision.porcentaje_similitud}% {copy.plagiarism.similarity}</strong><p>{revision.observaciones || copy.extra.plagiarism.noObservations}</p><p><strong>{copy.extra.plagiarism.provider}:</strong> {revision.proveedor} · <strong>{copy.common.status}:</strong> {etiquetaEstado(revision.estado, copy)} · {formatoFecha(revision.created_at, copy.locale, '—')}</p></article>)}</div>}
       </div>
     </div>;
     return <div><PerfilAspirante perfil={perfil} session={session} onActualizado={data => { setPerfil(actual => ({...actual, ...data})); setMessage(copy.extra.profileSaved); }}/><div className="panel-card alumno-profile-summary"><h3>{copy.grade.title}</h3><div className="info-grid"><InfoRow label={copy.summary.program} value={perfil.programa}/><InfoRow label={copy.summary.unit} value={perfil.unidad}/><InfoRow label={copy.common.grade} value={perfil.promedio ? Number(perfil.promedio).toFixed(2) : '-'}/><InfoRow label={copy.summary.average} value={promedio || '—'}/></div></div></div>;
@@ -575,8 +668,8 @@ export default function PanelAlumno({session, onLogout}) {
     {loading && !perfil && <div className="panel-card">{copy.loadingData}</div>}
     {perfil && <div className="alumno-layout">
       <aside className="alumno-sidebar"><div className="alumno-sidebar-user"><span className="alumno-avatar" style={{position:'relative',overflow:'hidden'}}>{(perfil.nombre || 'A').charAt(0).toUpperCase()}{perfil.profile_photo && <img src={fotoUrl(perfil.profile_photo)} alt="" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} onError={event => {event.currentTarget.style.display = 'none';}}/>}</span><div><strong>{perfil.nombre || copy.summary.student}</strong><small>{perfil.programa || copy.summary.program}</small></div></div>
-        <nav className="alumno-nav" aria-label={copy.panel}>{MENU.map(group => <div className="alumno-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button type="button" key={id} className={`alumno-nav-item ${seccion === id ? 'is-active' : ''}`} onClick={() => setSeccion(id)}><span className="alumno-nav-icon">{icon}</span><span>{copy.menu[id]}</span>{id === 'materias' && <b>{inscripciones.length}</b>}{id === 'solicitudes' && <b>{solicitudes.length}</b>}{id === 'entrevistas' && <b>{entrevistas.length}</b>}</button>)}</div>)}</nav>
-        <button className="sidebar-logout" onClick={() => onLogout(copy.logout)}>{copy.logout}</button>
+        <nav className="alumno-nav" aria-label={copy.panel}>{MENU.map(group => <div className="alumno-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.filter(([id]) => id !== 'predoctoral' || esDoctorado).map(([id, , icon]) => <button type="button" key={id} className={`alumno-nav-item ${seccion === id ? 'is-active' : ''}`} onClick={() => setSeccion(id)}><span className="alumno-nav-icon">{icon}</span><span>{copy.menu[id]}</span>{id === 'materias' && <b>{inscripciones.length}</b>}{id === 'solicitudes' && <b>{solicitudes.length}</b>}{id === 'entrevistas' && <b>{entrevistas.length}</b>}{id === 'examenes' && examenesPendientes > 0 && <b>{examenesPendientes}</b>}</button>)}</div>)}</nav>
+        <button className="sidebar-logout" onClick={() => onLogout(copy.extra.review.sessionClosed)}>{copy.logout}</button>
       </aside>
       <div className="alumno-content">
         <div className="alumno-section-header"><div><p className="panel-kicker">{copy.panel}</p><h2>{titulo}</h2></div>{loading && <span className="panel-sub">{copy.loading}</span>}</div>

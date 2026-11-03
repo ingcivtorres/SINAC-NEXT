@@ -7,7 +7,7 @@ function tamano(bytes) {
   return bytes ? `${(bytes / (1024 * 1024)).toFixed(2)} MB` : '';
 }
 
-export default function DocumentosAspirante({session}) {
+export default function DocumentosAspirante({session, soloLectura = false}) {
   const copy = useApplicantCopy();
   const text = copy.documents;
   const [documentos, setDocumentos] = useState([]);
@@ -34,7 +34,7 @@ export default function DocumentosAspirante({session}) {
       if (!Array.isArray(data)) throw new Error(text.invalidResponse);
       setDocumentos(data);
     } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message || 'No se pudieron cargar tus documentos.');
+      if (err.name !== 'AbortError') setError(err.message || text.loadError);
     } finally {
       if (!signal.aborted) setCargando(false);
     }
@@ -103,7 +103,10 @@ export default function DocumentosAspirante({session}) {
     setError('');
     try {
       const response = await fetch(`/api/preregistro/documentos/${documento.id}/`, {method: 'DELETE', headers: {Authorization: `Bearer ${session.access}`}});
-      if (!response.ok) throw new Error(text.deleteError);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || text.deleteError);
+      }
       setDocumentos((actual) => actual.filter((item) => item.id !== documento.id));
       setModal({kind: 'deleted', nombre: documento.nombre_original});
     } catch (err) {
@@ -128,12 +131,12 @@ export default function DocumentosAspirante({session}) {
   }
 
   return <div id="panel-documentos" role="tabpanel" className="documentos-panel">
-    <div className="panel-card panel-card--wide"><h3>{text.title}</h3><p className="documentos-intro">{text.intro}</p>{error && <div className="api-error" role="alert">{error}</div>}{cargando ? <p>{copy.loading}</p> : <div className="documentos-grid">{TIPOS_REQUISITO.map((tipo, index) => {
+    <div className="panel-card panel-card--wide"><h3>{text.title}</h3><p className="documentos-intro">{soloLectura ? text.locked : text.intro}</p>{error && <div className="api-error" role="alert">{error}</div>}{cargando ? <p>{copy.loading}</p> : <div className="documentos-grid">{TIPOS_REQUISITO.map((tipo, index) => {
       const [titulo, descripcion] = text.requirements[index];
       const requisito = {tipo, titulo, descripcion};
       const documento = documentos.find((item) => item.tipo === requisito.tipo);
       const ocupado = subiendo === requisito.tipo;
-      return <article className="documento-card" key={requisito.tipo}><div><h4>{requisito.titulo}</h4><p>{requisito.descripcion}</p></div>{documento ? <div className="documento-cargado"><span className="documento-ok">{text.loaded}</span><button type="button" className="documento-link" onClick={() => descargar(documento)}>{documento.nombre_original}</button><small>{tamano(documento.tamano)} · {documento.lida_notificado ? text.notified : text.pendingNotice}</small><div><button type="button" className="link-btn" onClick={() => inputRefs.current[requisito.tipo]?.click()}>{text.replace}</button><button type="button" className="documento-delete" onClick={() => setModal({kind: 'delete', documento})}>{text.delete}</button></div></div> : <button type="button" className="documento-upload" disabled={ocupado} onClick={() => inputRefs.current[requisito.tipo]?.click()}>{ocupado ? text.uploading : text.choosePdf}</button>}<input ref={(element) => { inputRefs.current[requisito.tipo] = element; }} type="file" accept="application/pdf,.pdf" hidden onChange={(event) => seleccionarArchivo(requisito.tipo, event.target.files?.[0], documento)}/></article>;
+      return <article className="documento-card" key={requisito.tipo}><div><h4>{requisito.titulo}</h4><p>{requisito.descripcion}</p></div>{documento ? <div className="documento-cargado"><span className="documento-ok">{text.loaded}<span className={`documento-estado${documento.revisado ? ' is-ok' : ''}`}>{documento.revisado ? text.reviewed : text.pendingReview}</span></span><button type="button" className="documento-link" onClick={() => descargar(documento)}>{documento.nombre_original}</button><small>{tamano(documento.tamano)} · {documento.lida_notificado ? text.notified : text.pendingNotice}</small>{!soloLectura && <div><button type="button" className="link-btn" disabled={ocupado} onClick={() => inputRefs.current[requisito.tipo]?.click()}>{ocupado ? text.uploading : text.replace}</button><button type="button" className="documento-delete" disabled={ocupado} onClick={() => setModal({kind: 'delete', documento})}>{text.delete}</button></div>}</div> : soloLectura ? null : <button type="button" className="documento-upload" disabled={ocupado} onClick={() => inputRefs.current[requisito.tipo]?.click()}>{ocupado ? text.uploading : text.choosePdf}</button>}{!soloLectura && <input ref={(element) => { inputRefs.current[requisito.tipo] = element; }} type="file" accept="application/pdf,.pdf" hidden onChange={(event) => seleccionarArchivo(requisito.tipo, event.target.files?.[0], documento)}/>}</article>;
     })}</div>}</div>
     {modal && (() => {
       const confirmando = modal.kind === 'delete' || modal.kind === 'replace';

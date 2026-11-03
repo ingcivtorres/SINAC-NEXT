@@ -12,6 +12,8 @@ from .tesis_flujo_views import evaluar_elegibilidad_tesis, tiene_match_tesis
 
 ESTADOS_EDITABLES_ALUMNO = {'borrador', 'observado'}
 ESTADOS_PROYECTO = {estado for estado, _ in ProyectoTesis.ESTADOS}
+DICTAMENES_DIRECTOR = {'observado', 'aprobado', 'rechazado'}
+CAMPOS_DIRECTOR = {'estado', 'comentarios_revision', 'avance_porcentaje'}
 
 
 def _rol(user):
@@ -26,25 +28,11 @@ def _es_director(user):
     return _rol(user) in {'director', 'director de tesis'}
 
 
-def _tesistas_director(user):
-    nombre = (getattr(user, 'nombre', '') or '').strip()
-    usuario = (getattr(user, 'usuario', '') or '').strip()
-    filtro = Q(director_tesis=user) | Q(director_tesis__isnull=False, director_tesis=user)
-    if nombre:
-        filtro |= Q(tutor_propuesto__iexact=nombre)
-    if usuario:
-        filtro |= Q(tutor_propuesto__iexact=usuario)
-    return Aspirante.objects.filter(filtro, is_staff=False).exclude(rol__in=('docente', 'director', 'servicios')).distinct()
-
-
 def _proyectos_visibles(user):
     if _es_coordinacion(user):
         return ProyectoTesis.objects.select_related('alumno', 'director').all()
     if _es_director(user):
-        tesistas = _tesistas_director(user)
-        return ProyectoTesis.objects.select_related('alumno', 'director').filter(
-            Q(director=user) | Q(alumno__in=tesistas)
-        ).distinct()
+        return ProyectoTesis.objects.select_related('alumno', 'director').filter(alumno__director_tesis=user)
     if _rol(user) == 'alumno':
         return ProyectoTesis.objects.select_related('alumno', 'director').filter(alumno=user)
     return ProyectoTesis.objects.none()
@@ -95,14 +83,20 @@ class ProyectoTesisView(APIView):
                 return Response({'detail': 'El proyecto se habilita después de que tú y tu Director confirmen el match.'}, status=status.HTTP_400_BAD_REQUEST)
         if _es_director(user) and not tiene_match_tesis(alumno):
             return Response({'detail': 'El proyecto se habilita después de que el tesista y tú confirmen el match.'}, status=status.HTTP_400_BAD_REQUEST)
-        if _es_director(user) and alumno not in _tesistas_director(user):
+        if _es_director(user) and alumno.director_tesis_id != user.id:
             return Response({'detail': 'El alumno no pertenece a tus tesistas asignados.'}, status=status.HTTP_403_FORBIDDEN)
+        if ProyectoTesis.objects.filter(alumno=alumno).exclude(estado='rechazado').exists():
+            return Response(
+                {'detail': 'El alumno ya tiene un proyecto de tesis activo. Edita ese proyecto en lugar de registrar uno nuevo.'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         data = request.data.copy()
         data['alumno'] = alumno.id
         if rol == 'alumno':
             data['director'] = alumno.director_tesis_id or None
             data['estado'] = 'en_revision' if data.get('enviar_revision') else 'borrador'
+            data.pop('avance_porcentaje', None)
         elif _es_director(user):
             data['director'] = user.id
             data['estado'] = 'en_revision'
@@ -125,7 +119,7 @@ class ProyectoTesisView(APIView):
         user = request.user
         rol = _rol(user)
         es_coord = _es_coordinacion(user)
-        es_director_proyecto = _es_director(user) and (proyecto.director_id == user.id or proyecto.alumno in _tesistas_director(user))
+        es_director_proyecto = _es_director(user) and proyecto.alumno.director_tesis_id == user.id
         es_alumno = rol == 'alumno' and proyecto.alumno_id == user.id
         if not (es_coord or es_director_proyecto or es_alumno):
             return Response({'detail': 'No tienes permisos sobre este proyecto.'}, status=status.HTTP_403_FORBIDDEN)
@@ -137,15 +131,30 @@ class ProyectoTesisView(APIView):
         if es_alumno and (proyecto.estado not in ESTADOS_EDITABLES_ALUMNO or requested_state not in (None, 'en_revision', 'borrador', 'observado')):
             return Response({'detail': 'Solo puedes editar un borrador u observación y enviarlo a revisión.'}, status=status.HTTP_400_BAD_REQUEST)
         if es_director_proyecto and not es_coord:
-            allowed = {'en_revision', 'observado', 'aprobado', 'rechazado'}
-            if requested_state and requested_state not in allowed:
-                return Response({'detail': 'El director solo puede dictaminar la revisión académica.'}, status=status.HTTP_400_BAD_REQUEST)
-            data.pop('alumno', None)
-            data.pop('director', None)
+            no_permitidos = set(data) - CAMPOS_DIRECTOR
+            if no_permitidos:
+                return Response(
+                    {'detail': 'El director solo puede dictaminar, comentar y registrar el avance; el contenido del proyecto lo edita el tesista.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if requested_state == proyecto.estado:
+                data.pop('estado', None)
+            elif requested_state:
+                if proyecto.estado != 'en_revision' or requested_state not in DICTAMENES_DIRECTOR:
+                    return Response(
+                        {'detail': 'Solo puedes dictaminar proyectos en revisión: aprobar, solicitar ajustes o rechazar.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if requested_state in {'observado', 'rechazado'} and not str(data.get('comentarios_revision') or '').strip():
+                    return Response(
+                        {'comentarios_revision': 'Explica al tesista el motivo de las observaciones o del rechazo.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
         if es_alumno:
             for field in ('alumno', 'director', 'estado', 'comentarios_revision'):
                 if field in data and field not in ('estado',):
                     data.pop(field, None)
+            data.pop('avance_porcentaje', None)
             if request.data.get('enviar_revision'):
                 data['estado'] = 'en_revision'
                 data['fecha_presentacion'] = timezone.now()
@@ -157,7 +166,14 @@ class ProyectoTesisView(APIView):
         serializer = ProyectoTesisSerializer(proyecto, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         anterior = proyecto.estado
-        proyecto = serializer.save()
+        avance_anterior = proyecto.avance_porcentaje
+        extra = {'director': user} if es_director_proyecto and not es_coord else {}
+        proyecto = serializer.save(**extra)
         if proyecto.estado != anterior:
             _notificar_proyecto(proyecto, f'El proyecto “{proyecto.titulo}” cambió a estado: {proyecto.get_estado_display()}.')
+        if proyecto.avance_porcentaje != avance_anterior:
+            _notificar_proyecto(
+                proyecto,
+                f'El avance del proyecto “{proyecto.titulo}” se actualizó a {proyecto.avance_porcentaje}%.',
+            )
         return Response(ProyectoTesisSerializer(proyecto).data)

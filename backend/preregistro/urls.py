@@ -1,7 +1,6 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
-from .views import PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, NotificacionMasivaCoordinacionView, DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView
-from .docente_views import PanelDocenteView, DocenteCatalogoMateriasView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
+from .views import RenovarTokenView, PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, NotificacionMasivaCoordinacionView, DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView
+from .docente_views import PanelDocenteView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
 from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, InscripcionCoordinacionView, BoletaInscripcionCoordinacionView, InscripcionExtemporaneaView, CoordinacionReporteView
 from .servicios_views import ServiciosEscolaresPanelView, ServiciosEscolaresAlumnoView, ServiciosEscolaresValidacionView, ServiciosEscolaresReporteView, ServiciosEscolaresDocumentoView, SolicitudesExtemporaneasServiciosView, OficioInscripcionExtemporaneaView, OficioInscripcionExtemporaneaCoordinacionView
 from .admin_views import AdminUsuariosView, AdminUsuarioDetailView, AdminCatalogosView, AdminAlumnosView, AdminDocentesView, AdminReportesView, AdminAuditoriaView, AdminConfiguracionView
@@ -14,7 +13,7 @@ from .jurado_views import JuradoProyectoView, DefensaTesisView, JuradosDisponibl
 from .diploma_views import DiplomaDigitalView
 from .expediente_central_views import ExpedienteCentralizadoView, ExpedientePDFView
 from .egresados_views import EgresadosView, EgresadoDetailView
-from .historico_views import HistoricoPersonasView
+from .historico_views import HistoricoPersonaDetalleView, HistoricoPersonasView
 from .docentes_views import ServiciosDocentesView, ServiciosDocenteDetailView
 from .examenes_gestion_views import ExamenesGestionView, ExamenesGestionDetailView, ExamenesCandidatosView
 
@@ -35,6 +34,7 @@ urlpatterns = [
     path('examenes-gestion/candidatos/', ExamenesCandidatosView.as_view(), name='examenes-candidatos'),
     path('examenes-gestion/<int:pk>/', ExamenesGestionDetailView.as_view(), name='examenes-gestion-detail'),
     path('historico/', HistoricoPersonasView.as_view(), name='historico-personas'),
+    path('historico/personas/<int:pk>/', HistoricoPersonaDetalleView.as_view(), name='historico-persona-detalle'),
     path('egresados/', EgresadosView.as_view(), name='egresados'),
     path('egresados/<int:pk>/', EgresadoDetailView.as_view(), name='egresado-detail'),
     path('expedientes/<int:pk>/centralizado/', ExpedienteCentralizadoView.as_view(), name='expediente-centralizado'),
@@ -79,8 +79,6 @@ urlpatterns = [
     path('coordinacion/aspirantes/<int:pk>/dar_baja/', DarBajaView.as_view(), name='coordinacion-dar-baja'),
     path('coordinacion/aspirantes/<int:pk>/convertir/',           ConvertirAlumnoView.as_view(), name='coordinacion-convertir-alumno'),
     path('docente/panel/', PanelDocenteView.as_view(), name='docente-panel'),
-    path('docente/catalogo-materias/', DocenteCatalogoMateriasView.as_view(), name='docente-catalogo-materias'),
-    path('docente/catalogo-materias/<int:pk>/', DocenteCatalogoMateriasView.as_view(), name='docente-seleccionar-materia'),
     path('docente/materias/<int:pk>/', DocenteMateriaView.as_view(), name='docente-materia'),
     path('docente/calificaciones/', CalificacionesView.as_view(), name='docente-calificaciones'),
     path('docente/calificaciones/<int:pk>/', CalificacionesView.as_view(), name='docente-calificacion-update'),
@@ -114,8 +112,8 @@ urlpatterns = [
     path('preregistro/solicitudes-academicas/', SolicitudAcademicaView.as_view(), name='solicitudes-academicas'),
     path('preregistro/solicitudes-academicas/<int:pk>/', SolicitudAcademicaView.as_view(), name='solicitud-academica-detail'),
     path('preregistro/horario/download/', HorarioFormalDescargaView.as_view(), name='horario-descarga'),
-    path('preregistro/reinscripcion/download/', BoletaInscripcionView.as_view(), name='reinscripcion-descarga'),
+    path('preregistro/reinscripcion/download/', ReinscripcionDescargaView.as_view(), name='reinscripcion-descarga'),
     path('preregistro/boleta-inscripcion/download/', BoletaInscripcionView.as_view(), name='boleta-inscripcion-descarga'),
     path('auth/login/',     InicioSesionView.as_view(),       name='token-obtain'),
-    path('auth/refresh/',   TokenRefreshView.as_view(),      name='token-refresh'),
+    path('auth/refresh/',   RenovarTokenView.as_view(),      name='token-refresh'),
 ]

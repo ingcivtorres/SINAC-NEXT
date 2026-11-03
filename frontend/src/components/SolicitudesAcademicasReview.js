@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useLanguage} from '../translations';
 import './SolicitudesAcademicasReview.css';
+import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from './TablaControles';
 
 const translations = {
   es: {title:'Solicitudes académicas', intro:'Revisa las solicitudes asignadas a tu área. Cada resolución requiere una respuesta para que el alumno conozca el resultado.', loading:'Cargando solicitudes...', retry:'Reintentar', refresh:'Actualizar', pending:'Pendiente', accepted:'Aceptada', rejected:'Rechazada', type:{historial:'Historial académico', reinscripcion:'Reinscripción', ajuste_materias:'Ajuste de materias'}, student:'Alumno', submitted:'Enviada', request:'Solicitud', response:'Respuesta al alumno', responseHint:'Escribe una respuesta clara (mínimo 5 caracteres, máximo 2000).', responsePlaceholder:'Explica la resolución y los pasos siguientes, si aplica.', approve:'Aceptar solicitud', reject:'Rechazar solicitud', saving:'Guardando...', empty:'No hay solicitudes académicas asignadas a tu área.', loadError:'No se pudieron cargar las solicitudes académicas.', saveError:'No se pudo resolver la solicitud.', required:'Escribe una respuesta de al menos 5 caracteres.', saved:'La respuesta quedó registrada y se notificó al alumno.', resolvedBy:'Resuelta por'},
@@ -20,6 +21,11 @@ export default function SolicitudesAcademicasReview({session, onLogout}) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const headers = useMemo(() => ({Authorization: `Bearer ${session.access}`}), [session.access]);
+  const etiquetasFiltro = useEtiquetasFiltro();
+  const solicitudesTabla = useTablaControl(solicitudes, {
+    campos: item => [item.aspirante?.nombre, item.aspirante?.usuario, item.comentario, item.respuesta_revision, item.tipo_label],
+    filtros: {estado: item => item.estado, tipo: item => item.tipo},
+  });
 
   const cargarSolicitudes = useCallback(async () => {
     setLoading(true);
@@ -70,6 +76,7 @@ export default function SolicitudesAcademicasReview({session, onLogout}) {
 
   const formatoFecha = value => value ? new Intl.DateTimeFormat(language, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value)) : '—';
   const pendientes = solicitudes.filter(item => item.estado === 'pendiente').length;
+  const etiquetaEstado = {pendiente: copy.pending, aceptado: copy.accepted, aceptada: copy.accepted, rechazado: copy.rejected, rechazada: copy.rejected};
 
   return <section className="academic-requests-review">
     <header className="academic-requests-review-head">
@@ -78,8 +85,11 @@ export default function SolicitudesAcademicasReview({session, onLogout}) {
     </header>
     {error && <div className="api-error" role="alert">{error}</div>}
     {message && <div className="academic-requests-review-success" role="status">{message}</div>}
-    {loading ? <div className="academic-requests-review-empty" role="status">{copy.loading}</div> : error && !solicitudes.length ? <div className="academic-requests-review-empty"><button type="button" className="btn-secondary" onClick={cargarSolicitudes}>{copy.retry}</button></div> : solicitudes.length ? <div className="academic-requests-review-list">
-      {solicitudes.map(solicitud => {
+    {loading ? <div className="academic-requests-review-empty" role="status">{copy.loading}</div> : error && !solicitudes.length ? <div className="academic-requests-review-empty"><button type="button" className="btn-secondary" onClick={cargarSolicitudes}>{copy.retry}</button></div> : solicitudes.length ? <><TablaHerramientas control={solicitudesTabla} filtros={[
+      {clave: 'estado', etiqueta: etiquetasFiltro.status, formato: value => etiquetaEstado[value] || value},
+      {clave: 'tipo', etiqueta: etiquetasFiltro.type, formato: value => copy.type[value] || value},
+    ]}/><div className="academic-requests-review-list tabla-scroll-lista">
+      {solicitudesTabla.visibles.map(solicitud => {
         const estado = solicitud.estado;
         const estadoLabel = copy[estado] || solicitud.estado_label || estado;
         return <article className="academic-request-review-card" key={solicitud.id}>
@@ -94,6 +104,6 @@ export default function SolicitudesAcademicasReview({session, onLogout}) {
           </div> : <div className="academic-request-review-response"><strong>{copy.response}</strong><p>{solicitud.respuesta_revision}</p>{solicitud.resuelta_por_nombre && <small>{copy.resolvedBy}: {solicitud.resuelta_por_nombre}</small>}</div>}
         </article>;
       })}
-    </div> : <div className="academic-requests-review-empty">{copy.empty}<button type="button" className="btn-secondary" onClick={cargarSolicitudes}>{copy.retry}</button></div>}
+    </div><TablaPaginacion control={solicitudesTabla}/></> : <div className="academic-requests-review-empty">{copy.empty}<button type="button" className="btn-secondary" onClick={cargarSolicitudes}>{copy.retry}</button></div>}
   </section>;
 }

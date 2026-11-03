@@ -1,5 +1,7 @@
 from django.db import models
+from django.utils.functional import cached_property
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 
 class AspiranteManager(BaseUserManager):
@@ -228,6 +230,10 @@ class ProyectoTesis(models.Model):
     objetivos = models.TextField(blank=True)
     metodologia = models.TextField(blank=True)
     comentarios_revision = models.TextField(blank=True)
+    avance_porcentaje = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     estado = models.CharField(max_length=20, choices=ESTADOS, default='borrador')
     fecha_presentacion = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -412,10 +418,20 @@ class SeguimientoSolicitud(models.Model):
 
 class HistorialPersona(models.Model):
     """Bitácora de cambios de alumnos, docentes y directores de tesis."""
+    CATEGORIAS = [
+        ('cuenta', 'Cuenta y datos'),
+        ('academico', 'Académico'),
+        ('tesis', 'Tesis'),
+        ('documentos', 'Documentos'),
+        ('egreso', 'Egreso'),
+    ]
+
     persona = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='historial')
     rol = models.CharField(max_length=20, blank=True)
+    categoria = models.CharField(max_length=20, choices=CATEGORIAS, default='cuenta', db_index=True)
     evento = models.CharField(max_length=30)
     campo = models.CharField(max_length=60, blank=True)
+    detalle = models.CharField(max_length=255, blank=True)
     valor_anterior = models.CharField(max_length=255, blank=True)
     valor_nuevo = models.CharField(max_length=255, blank=True)
     realizado_por = models.ForeignKey(Aspirante, on_delete=models.SET_NULL, null=True, blank=True, related_name='historial_realizado')
@@ -648,6 +664,34 @@ class Inscripcion(models.Model):
     def __str__(self):
         return f'{self.aspirante.usuario} - {self.materia.clave} ({self.estado})'
 
+    @cached_property
+    def detalle_carga(self):
+        """Grupo publicado en la carga académica del periodo de esta inscripción."""
+        if not self.periodo_inscripcion_id:
+            return None
+        return CargaAcademicaMateria.objects.filter(
+            carga__estado='publicada',
+            carga__periodo_inscripcion_id=self.periodo_inscripcion_id,
+            materia_id=self.materia_id,
+        ).select_related('docente').first()
+
+    @property
+    def profesor_asignado(self):
+        detalle = self.detalle_carga
+        if detalle and detalle.docente_id:
+            return detalle.docente.nombre
+        return self.materia.profesor
+
+    @property
+    def horario_asignado(self):
+        detalle = self.detalle_carga
+        return self.horario or (detalle.horario if detalle else '') or self.materia.horario
+
+    @property
+    def salon_asignado(self):
+        detalle = self.detalle_carga
+        return detalle.get_salon_display() if detalle else self.materia.get_salon_display()
+
     def estado_academico(self):
         if self.calificacion is None:
             return 'pendiente'
@@ -779,6 +823,11 @@ class ExamenEnLinea(models.Model):
     intentos = models.PositiveIntegerField(default=0)
     max_intentos = models.PositiveIntegerField(default=3)
     retroalimentacion = models.TextField(blank=True)
+    evaluador = models.ForeignKey(
+        Aspirante, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='examenes_evaluados',
+        help_text='Docente autorizado para ajustar la calificación del examen.',
+    )
     
     # Auditoría
     created_at = models.DateTimeField(auto_now_add=True)
@@ -832,6 +881,10 @@ class EntrevistaVirtual(models.Model):
     ]
 
     aspirante = models.ForeignKey(Aspirante, on_delete=models.CASCADE, related_name='entrevistas_virtuales')
+    docente = models.ForeignKey(
+        Aspirante, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='entrevistas_conducidas',
+    )
     proposito = models.CharField(max_length=20, choices=PROPOSITO_ENTREVISTA)
     titulo = models.CharField(max_length=255, default='Entrevista virtual')
     descripcion = models.TextField(blank=True)

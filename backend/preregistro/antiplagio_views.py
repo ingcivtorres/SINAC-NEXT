@@ -11,7 +11,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import ProyectoTesis, RevisionAntiplagio
+from .seguridad import nombre_archivo_seguro, validar_pdf
 from .serializers import RevisionAntiplagioSerializer
+
+
+ESTADOS_REVISABLES = {'borrador', 'en_revision', 'observado'}
 
 
 def _estado_por_porcentaje(porcentaje):
@@ -91,30 +95,35 @@ class RevisionAntiplagioView(APIView):
     """Endpoint para enviar un documento de tesis a revisión anti-plagio."""
     permission_classes = [permissions.IsAuthenticated]
 
-    def _es_alumno(self, user):
-        return str(getattr(user, 'rol', '') or '').strip().lower() == 'alumno'
-
-    def _es_director_o_coordinacion(self, user):
+    def _puede_revisar(self, user, proyecto):
         rol = str(getattr(user, 'rol', '') or '').strip().lower()
-        return user.is_staff or rol in {'director', 'director de tesis', 'coordinacion', 'coordinador'}
+        if user.is_staff or rol in {'coordinacion', 'coordinador'}:
+            return True
+        if rol in {'director', 'director de tesis'}:
+            return proyecto.alumno.director_tesis_id == user.id
+        return rol == 'alumno' and proyecto.alumno_id == user.id
 
     def post(self, request, pk):
         proyecto = ProyectoTesis.objects.filter(pk=pk).select_related('alumno', 'director').first()
         if not proyecto:
             return Response({'detail': 'Proyecto de tesis no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if self._es_alumno(request.user) and proyecto.alumno_id != request.user.id:
-            return Response({'detail': 'Solo puedes revisar tu propio proyecto.'}, status=status.HTTP_403_FORBIDDEN)
-
-        if not (self._es_alumno(request.user) or self._es_director_o_coordinacion(request.user)):
-            return Response({'detail': 'No tienes permisos para ejecutar esta revisión.'}, status=status.HTTP_403_FORBIDDEN)
+        if not self._puede_revisar(request.user, proyecto):
+            return Response({'detail': 'No tienes permisos para revisar este proyecto.'}, status=status.HTTP_403_FORBIDDEN)
+        if proyecto.estado not in ESTADOS_REVISABLES:
+            return Response(
+                {'detail': 'La revisión anti-plagio solo aplica a proyectos en borrador, en revisión o con observaciones.'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         archivo = request.FILES.get('archivo')
         proveedor = (request.data.get('proveedor') or 'turnitin').strip().lower()
         if not archivo:
             return Response({'archivo': 'Debes adjuntar un archivo PDF.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not archivo.name.lower().endswith('.pdf'):
-            return Response({'archivo': 'Solo se permiten archivos PDF.'}, status=status.HTTP_400_BAD_REQUEST)
+        error_archivo = validar_pdf(archivo)
+        if error_archivo:
+            return Response({'archivo': error_archivo}, status=status.HTTP_400_BAD_REQUEST)
+        archivo.name = nombre_archivo_seguro(archivo.name, 'tesis')
 
         if proveedor not in {valor for valor, _ in RevisionAntiplagio.PROVEEDORES}:
             return Response({'proveedor': 'Proveedor no válido.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -150,10 +159,6 @@ class RevisionAntiplagioView(APIView):
             },
         )
 
-        proyecto.estado = 'en_revision' if estado in {'observado', 'pendiente'} else 'aprobado' if estado == 'aprobado' else 'rechazado'
-        proyecto.comentarios_revision = observaciones
-        proyecto.save(update_fields=['estado', 'comentarios_revision', 'updated_at'])
-
         return Response(
             {
                 'id': revision.pk,
@@ -164,6 +169,7 @@ class RevisionAntiplagioView(APIView):
                 'estado': revision.estado,
                 'observaciones': revision.observaciones,
                 'resultados': revision.resultados,
+                'created_at': revision.created_at,
             },
             status=status.HTTP_201_CREATED,
         )

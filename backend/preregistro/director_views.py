@@ -1,10 +1,10 @@
-from django.db.models import Q
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, ExpedienteDigital, Inscripcion, ProyectoTesis, SolicitudDireccionTesis
+from .models import Aspirante, ConfiguracionPrograma, ExpedienteDigital, Inscripcion, ProyectoTesis, SolicitudDireccionTesis
 from .serializers import ExpedienteDigitalSerializer, FirmaElectronicaSerializer, InscripcionSerializer, ProyectoTesisSerializer
+from .seguridad import url_media
 
 
 def _es_director(user):
@@ -12,13 +12,57 @@ def _es_director(user):
 
 
 def _tesistas_del_director(user):
-    """Usa la relación formal y conserva compatibilidad con tutor_propuesto legado."""
-    nombre = (getattr(user, 'nombre', '') or '').strip()
-    usuario = (getattr(user, 'usuario', '') or '').strip()
-    filtro = Q(director_tesis=user) | Q(tutor_propuesto__iexact=nombre)
-    if usuario:
-        filtro |= Q(tutor_propuesto__iexact=usuario)
-    return Aspirante.objects.filter(filtro, is_staff=False).exclude(rol__in=('docente', 'director', 'servicios')).select_related('director_tesis').order_by('nombre').distinct()
+    """Alumnos cuyo Director de Tesis formal (confirmado por match) es el usuario.
+
+    No se usa ``tutor_propuesto``: es texto libre capturado por el aspirante y
+    no acredita la dirección de tesis.
+    """
+    if not getattr(user, 'pk', None):
+        return Aspirante.objects.none()
+    return Aspirante.objects.filter(director_tesis=user, rol='alumno', is_staff=False).select_related('director_tesis').order_by('nombre')
+
+
+def programas_doctorado():
+    return {
+        programa.strip().lower()
+        for programa in ConfiguracionPrograma.objects.filter(grado='doctorado').values_list('programa', flat=True)
+    }
+
+
+def es_programa_doctorado(programa, doctorados=None):
+    nombre = (programa or '').strip().lower()
+    if not nombre:
+        return False
+    if doctorados is None:
+        doctorados = programas_doctorado()
+    return nombre in doctorados or 'doctorado' in nombre
+
+
+ESTADOS_SIN_CURSAR = {'baja', 'egresado', 'inactivo', 'suspendido'}
+
+
+def periodo_inicio_tesis(configuracion):
+    """Primer periodo del segundo año: 4.º semestre o 4.º cuatrimestre."""
+    periodicidad = getattr(configuracion, 'periodicidad', None)
+    return (3 if periodicidad == 'cuatrimestral' else 2) + 1
+
+
+def requisitos_predoctoral(alumno, doctorados=None):
+    """Motivos por los que aún no se puede programar el predoctoral; lista vacía si está habilitado."""
+    from .tesis_flujo_views import tiene_match_tesis
+
+    if not es_programa_doctorado(alumno.programa, doctorados):
+        return ['El examen predoctoral solo aplica a alumnos de doctorado.']
+    motivos = []
+    if not alumno.is_active or str(alumno.proceso_estado or '').strip().lower() in ESTADOS_SIN_CURSAR:
+        motivos.append('El alumno no está cursando actualmente el doctorado (baja, egreso o inactividad).')
+    configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
+    minimo = periodo_inicio_tesis(configuracion)
+    if (alumno.numero_periodo_actual or 0) < minimo:
+        motivos.append(f'El alumno debe cursar al menos el periodo {minimo} del doctorado.')
+    if not alumno.director_tesis_id or not tiene_match_tesis(alumno):
+        motivos.append('El alumno necesita un Director de Tesis con match confirmado.')
+    return motivos
 
 
 def _estado_materia(inscripcion):
@@ -51,9 +95,8 @@ class DirectorPanelView(APIView):
             .select_related('aspirante')
             .prefetch_related('firmas__firmante')
         )
-        proyectos = ProyectoTesis.objects.filter(
-            Q(director=request.user) | Q(alumno_id__in=tesista_ids)
-        ).select_related('alumno', 'director').distinct()
+        proyectos = ProyectoTesis.objects.filter(alumno_id__in=tesista_ids).select_related('alumno', 'director')
+        doctorados = programas_doctorado()
         solicitudes_direccion = SolicitudDireccionTesis.objects.filter(
             director_asignado=request.user, estado='pendiente_director',
         ).select_related('alumno', 'director_sugerido', 'director_asignado')
@@ -74,6 +117,8 @@ class DirectorPanelView(APIView):
                 'programa': tesista.programa,
                 'departamento': tesista.departamento,
                 'proceso_estado': tesista.proceso_estado,
+                'es_doctorado': es_programa_doctorado(tesista.programa, doctorados),
+                'predoctoral_motivos': requisitos_predoctoral(tesista, doctorados),
                 'materias': InscripcionSerializer(materias, many=True).data,
                 'total_materias': len(materias),
                 'materias_aprobadas': sum(1 for item in materias if _estado_materia(item) == 'aprobada'),
@@ -97,7 +142,7 @@ class DirectorPanelView(APIView):
                 'correo': request.user.correo,
                 'departamento': request.user.departamento,
                 'programa': request.user.programa,
-                'profile_photo': request.user.profile_photo.url if request.user.profile_photo else None,
+                'profile_photo': url_media(request.user.profile_photo),
             },
             'tesistas': tesistas_data,
             'expedientes': expedientes_data,

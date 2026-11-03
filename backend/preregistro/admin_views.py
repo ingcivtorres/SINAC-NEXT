@@ -30,6 +30,7 @@ from .models import (
     DocumentoAspirante, AuditoriaSistema, ConfiguracionSistema,
 )
 from .configuracion_sistema import DEFAULTS as SYSTEM_CONFIG_DEFAULTS, parse_password_policy, password_meets_policy
+from .seguridad import celda_segura
 
 
 ROLE_ALIASES = {
@@ -155,7 +156,7 @@ def _admin_report_xlsx(data):
     sheet.title = 'Resumen'
     sheet.append(['Indicador', 'Valor'])
     for row in _admin_report_rows(data):
-        sheet.append(row)
+        sheet.append([celda_segura(valor) for valor in row])
     header_fill = PatternFill('solid', fgColor='007F73')
     for cell in sheet[1]:
         cell.font = Font(color='FFFFFF', bold=True)
@@ -546,7 +547,7 @@ class AdminReportesView(APIView):
             writer = csv.writer(response)
             writer.writerow(['Indicador', 'Valor'])
             for key in ('usuarios_total', 'usuarios_activos', 'usuarios_inactivos', 'usuarios_activos_pct', 'alumnos', 'docentes', 'aspirantes', 'inscripciones', 'documentos', 'documentos_pendientes', 'promedio_general', 'registros_mes_actual', 'registros_mes_anterior', 'usuarios_variacion_pct', 'aspirantes_aceptados', 'auditoria_ultimos_30_dias'):
-                writer.writerow([key, data[key]])
+                writer.writerow([celda_segura(key), celda_segura(data[key])])
             return response
         return Response(data)
 
@@ -569,7 +570,7 @@ class AdminDocentesView(APIView):
         docentes = []
         for persona in qs:
             materias = list(Materia.objects.filter(profesor__iexact=persona.nombre).values('id', 'clave', 'nombre', 'horario', 'creditos'))
-            tesistas = list(Aspirante.objects.filter(Q(director_tesis=persona) | Q(tutor_propuesto__iexact=persona.nombre)).values('id', 'nombre', 'matricula', 'programa', 'proceso_estado').distinct()) if persona.rol == 'director' else []
+            tesistas = list(Aspirante.objects.filter(director_tesis=persona, rol='alumno', is_staff=False).values('id', 'nombre', 'matricula', 'programa', 'proceso_estado')) if persona.rol == 'director' else []
             docentes.append({
                 'id': persona.id, 'nombre': persona.nombre, 'usuario': persona.usuario,
                 'correo': persona.correo, 'rol': persona.rol, 'unidad': persona.unidad,

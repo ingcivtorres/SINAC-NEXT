@@ -1,13 +1,27 @@
+x-backend-env: &backend-env
+  CAMUNDA_URL: http://camunda:8080
+  CAMUNDA_REST_URL: http://camunda:8080/engine-rest
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-}
+  DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  DJANGO_HTTPS: ${DJANGO_HTTPS:-false}
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_NAME: ${POSTGRES_DB:-camunda}
+  DB_USER: ${POSTGRES_USER:-camunda}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
+
 services:
   postgres:
     image: postgres:15
     container_name: camunda-postgres
     environment:
-      POSTGRES_DB: camunda
-      POSTGRES_USER: camunda
-      POSTGRES_PASSWORD: camunda
+      POSTGRES_DB: ${POSTGRES_DB:-camunda}
+      POSTGRES_USER: ${POSTGRES_USER:-camunda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -18,11 +32,11 @@ services:
       - postgres
     environment:
       DB_DRIVER: org.postgresql.Driver
-      DB_URL: jdbc:postgresql://postgres:5432/camunda
-      DB_USERNAME: camunda
-      DB_PASSWORD: camunda
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-camunda}
+      DB_USERNAME: ${POSTGRES_USER:-camunda}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ./camunda:/camunda/configuration/resources
     restart: unless-stopped
@@ -32,18 +46,13 @@ services:
       context: ./backend
     container_name: sinac-backend
     environment:
-      CAMUNDA_URL: http://camunda:8080
-      CAMUNDA_REST_URL: http://camunda:8080/engine-rest
-      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: camunda
-      DB_USER: camunda
-      DB_PASSWORD: camunda
-    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
+      <<: *backend-env
+    command: >-
+      sh -c "python manage.py migrate --noinput &&
+      if [ \"$${DJANGO_DEBUG:-true}\" = \"true\" ]; then python manage.py runserver 0.0.0.0:8000;
+      else gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers $${GUNICORN_WORKERS:-3} --timeout 120 --forwarded-allow-ips='*'; fi"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - postgres
     volumes:
@@ -55,21 +64,14 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
 
   alertas:
     build:
       context: ./backend
     container_name: sinac-alertas
     environment:
-      CAMUNDA_URL: http://camunda:8080
-      CAMUNDA_REST_URL: http://camunda:8080/engine-rest
-      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: camunda
-      DB_USER: camunda
-      DB_PASSWORD: camunda
+      <<: *backend-env
       TZ: America/Mexico_City
     command: sh -c "while true; do if python manage.py generar_alertas_automatizadas; then sleep 3600; else sleep 60; fi; done"
     depends_on:
@@ -86,7 +88,8 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
-  documentos_media:
+  postgres_data: {}
+  documentos_media: {}

@@ -1,75 +1,120 @@
 """Panel de docentes y endpoints para gestión de calificaciones y cursos."""
 import logging
+import uuid
+from collections import Counter
 
+from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 import requests
-from django.conf import settings
-from .models import Aspirante, Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual
-from .serializers import MateriaSerializer, InscripcionSerializer, SolicitudAcademicaSerializer, ExamenEnLineaSerializer, EntrevistaVirtualSerializer, CalificacionExamenDocenteSerializer
+
+from .models import (
+    Aspirante, CargaAcademicaMateria, EntrevistaVirtual, ExamenEnLinea, Inscripcion, PeriodoInscripcion,
+)
+from .serializers import (
+    CalificacionExamenDocenteSerializer, EntrevistaVirtualSerializer, ExamenEnLineaSerializer,
+    InscripcionSerializer, MateriaSerializer,
+)
 from .views import _registrar_seguimiento
+from .seguridad import url_media
 
 logger = logging.getLogger(__name__)
 
+ROLES_DOCENTE = ('docente', 'teacher', 'investigador', 'director')
+
 
 def _es_docente(user):
-    return bool(user and str(getattr(user, 'rol', '')).strip().lower() in ('docente', 'teacher'))
+    return bool(user and str(getattr(user, 'rol', '')).strip().lower() in ROLES_DOCENTE)
+
+
+def _asignaciones(docente):
+    """Grupos asignados al docente en cargas académicas publicadas."""
+    return CargaAcademicaMateria.objects.filter(
+        carga__estado='publicada',
+        carga__periodo_inscripcion__isnull=False,
+        docente=docente,
+    ).select_related('materia', 'carga__periodo_inscripcion').order_by(
+        '-carga__periodo_inscripcion__apertura', 'materia__clave',
+    )
+
+
+def _inscripciones_docente(docente, asignaciones=None):
+    filtro = Q(pk__in=[])
+    for asignacion in (asignaciones if asignaciones is not None else _asignaciones(docente)):
+        filtro |= Q(materia_id=asignacion.materia_id, periodo_inscripcion_id=asignacion.carga.periodo_inscripcion_id)
+    return Inscripcion.objects.filter(filtro)
+
+
+def _periodo_en_curso():
+    """Último periodo cuya inscripción ya abrió: es el que se está impartiendo."""
+    return PeriodoInscripcion.objects.filter(apertura__lte=timezone.now()).order_by('-apertura').first()
+
+
+def _error_calificacion(docente, inscripcion):
+    if not _inscripciones_docente(docente).filter(pk=inscripcion.pk).exists():
+        return Response({'error': 'Esta inscripción no pertenece a tus grupos asignados.'}, status=status.HTTP_403_FORBIDDEN)
+    periodo = _periodo_en_curso()
+    if not periodo or inscripcion.periodo_inscripcion_id != periodo.id:
+        return Response({'error': 'Solo puedes calificar inscripciones del periodo en curso.'}, status=status.HTTP_409_CONFLICT)
+    if inscripcion.validacion_servicios != 'validada':
+        return Response({'error': 'La inscripción aún no está validada por Servicios Escolares.'}, status=status.HTTP_409_CONFLICT)
+    return None
+
+
+def _serializar_asignacion(asignacion, inscritos, periodo_en_curso):
+    periodo = asignacion.carga.periodo_inscripcion
+    data = MateriaSerializer(asignacion.materia).data
+    data.update({
+        'asignacion_id': asignacion.id,
+        'profesor': asignacion.docente.nombre if asignacion.docente else '',
+        'horario': asignacion.horario,
+        'salon': asignacion.salon,
+        'salon_label': asignacion.get_salon_display(),
+        'capacidad': asignacion.capacidad,
+        'modalidad': asignacion.modalidad,
+        'inscritos': inscritos.get((asignacion.materia_id, periodo.id), 0),
+        'periodo_inscripcion': periodo.id,
+        'periodo_nombre': periodo.nombre,
+        'calificable': bool(periodo_en_curso and periodo.id == periodo_en_curso.id),
+    })
+    return data
+
+
+def _entrevistas_docente(docente, estudiante_ids):
+    # Las entrevistas previas a registrar al docente responsable siguen
+    # visibles para los docentes del alumno.
+    return EntrevistaVirtual.objects.filter(
+        Q(docente=docente) | Q(docente__isnull=True, aspirante_id__in=estudiante_ids)
+    ).select_related('aspirante').order_by('-fecha_programada')
 
 
 def _entrevista_permitida(docente, entrevista):
-    return Inscripcion.objects.filter(
-        materia__profesor__iexact=(docente.nombre or '').strip(),
-        aspirante=entrevista.aspirante,
-    ).exists()
+    if entrevista.docente_id:
+        return entrevista.docente_id == docente.id
+    return _inscripciones_docente(docente).filter(aspirante_id=entrevista.aspirante_id).exists()
 
 
 class PanelDocenteView(APIView):
-    """Panel del docente: obtiene sus cursos, estudiantes e inscripciones."""
+    """Panel del docente: grupos asignados, estudiantes, exámenes y entrevistas."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Obtiene información del panel del docente."""
         docente = request.user
-        
-        # Verificar que sea docente
-        if str(getattr(docente, 'rol', '')).lower() not in ('docente', 'teacher'):
-            return Response(
-                {'error': 'No tienes permisos de docente.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not _es_docente(docente):
+            return Response({'error': 'No tienes permisos de docente.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Obtener cursos del docente (materias donde es profesor)
-        nombre_docente = (docente.nombre or '').strip()
-        materias = Materia.objects.filter(profesor__iexact=nombre_docente).order_by('clave') if nombre_docente else Materia.objects.none()
-        
-        # Obtener inscripciones en esos cursos
-        inscripciones = Inscripcion.objects.filter(
-            materia__in=materias
-        ).select_related('aspirante', 'materia').order_by('-created_at')
-
-        # Las solicitudes y evaluaciones del panel deben pertenecer a los
-        # estudiantes inscritos en las materias del docente, no a todo el
-        # padrón institucional.
-        estudiante_ids = inscripciones.values_list('aspirante_id', flat=True)
-        solicitudes_query = SolicitudAcademica.objects.filter(
-            aspirante_id__in=estudiante_ids
-        ).select_related('aspirante').order_by('-created_at')
-        
-        solicitudes = solicitudes_query[:10]
-
-        # Obtener exámenes en línea del docente
-        examenes = ExamenEnLinea.objects.filter(
-            aspirante_id__in=estudiante_ids
-        ).select_related('aspirante').order_by('-fecha_programada')
-
-        # Obtener entrevistas virtuales de estudiantes del docente
-        aspirantes = Aspirante.objects.filter(
-            id__in=inscripciones.values_list('aspirante_id', flat=True)
-        )
-        entrevistas = EntrevistaVirtual.objects.filter(
-            aspirante__in=aspirantes
-        ).order_by('-fecha_programada')
+        asignaciones = list(_asignaciones(docente))
+        inscripciones = _inscripciones_docente(docente, asignaciones).select_related(
+            'aspirante', 'materia', 'periodo_inscripcion',
+        ).order_by('-created_at')
+        inscritos = Counter(inscripciones.values_list('materia_id', 'periodo_inscripcion_id'))
+        periodo_en_curso = _periodo_en_curso()
+        estudiante_ids = set(inscripciones.values_list('aspirante_id', flat=True))
+        examenes = ExamenEnLinea.objects.filter(evaluador=docente).exclude(tipo='predoctoral').select_related('aspirante').order_by('-fecha_programada')
+        entrevistas = _entrevistas_docente(docente, estudiante_ids)
 
         return Response({
             'docente': {
@@ -78,19 +123,19 @@ class PanelDocenteView(APIView):
                 'usuario': docente.usuario,
                 'programa': docente.programa,
                 'unidad': docente.unidad,
-                'profile_photo': docente.profile_photo.url if docente.profile_photo else None,
+                'profile_photo': url_media(docente.profile_photo),
             },
-            'materias': MateriaSerializer(materias, many=True).data,
+            'periodo_en_curso': {'id': periodo_en_curso.id, 'nombre': periodo_en_curso.nombre} if periodo_en_curso else None,
+            'materias': [_serializar_asignacion(item, inscritos, periodo_en_curso) for item in asignaciones],
             'inscripciones': InscripcionSerializer(inscripciones, many=True).data,
-            'solicitudes': SolicitudAcademicaSerializer(solicitudes, many=True).data,
             'examenes': ExamenEnLineaSerializer(examenes, many=True).data,
             'entrevistas': EntrevistaVirtualSerializer(entrevistas, many=True).data,
             'resumen': {
-                'total_materias': materias.count(),
+                'total_materias': len(asignaciones),
+                'total_estudiantes': len(estudiante_ids),
                 'total_inscripciones': inscripciones.count(),
                 'inscripciones_aprobadas': inscripciones.filter(estado='aprobada').count(),
                 'inscripciones_reprobadas': inscripciones.filter(estado='reprobada').count(),
-                'solicitudes_pendientes': solicitudes_query.filter(estado='pendiente').count(),
                 'examenes_total': examenes.count(),
                 'examenes_programados': examenes.filter(estado='programado').count(),
                 'examenes_completados': examenes.filter(estado__in=['aprobado', 'reprobado']).count(),
@@ -102,54 +147,22 @@ class PanelDocenteView(APIView):
         })
 
 
-class DocenteCatalogoMateriasView(APIView):
-    """Permite al docente elegir una materia del catálogo y proponer su horario."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request):
-        if not _es_docente(request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        return Response(MateriaSerializer(Materia.objects.all().order_by('clave'), many=True).data)
-
-    def patch(self, request, pk):
-        if not _es_docente(request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        try:
-            materia = Materia.objects.get(pk=pk)
-        except Materia.DoesNotExist:
-            return Response({'detail': 'Materia no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
-        if materia.profesor and materia.profesor.lower() != request.user.nombre.lower():
-            return Response({'detail': 'Esta materia ya fue asignada a otro docente.'}, status=status.HTTP_409_CONFLICT)
-        salon = (request.data.get('salon') or '').strip()
-        if salon not in dict(Materia.SALONES):
-            return Response({'salon': 'Selecciona un salón válido.'}, status=status.HTTP_400_BAD_REQUEST)
-        materia.profesor = request.user.nombre
-        materia.horario = (request.data.get('horario') or '').strip()
-        materia.salon = salon
-        materia.capacidad = 42
-        materia.save(update_fields=['profesor', 'horario', 'salon', 'capacidad'])
-        return Response(MateriaSerializer(materia).data)
-
-
 class DocenteMateriaView(APIView):
-    """Obtiene detalles de una materia específica del docente."""
+    """Estudiantes inscritos en un grupo asignado al docente."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
-        """Obtiene estudiantes inscritos en una materia."""
         docente = request.user
         if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            materia = Materia.objects.get(pk=pk, profesor__iexact=docente.nombre)
-        except Materia.DoesNotExist:
+        asignaciones = [item for item in _asignaciones(docente) if item.materia_id == pk]
+        if not asignaciones:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        inscripciones = Inscripcion.objects.filter(materia=materia).select_related('aspirante')
-        
+        inscripciones = _inscripciones_docente(docente, asignaciones).select_related('aspirante')
         return Response({
-            'materia': MateriaSerializer(materia).data,
+            'materia': MateriaSerializer(asignaciones[0].materia).data,
             'inscripciones': InscripcionSerializer(inscripciones, many=True).data,
             'estadisticas': {
                 'total': inscripciones.count(),
@@ -161,11 +174,19 @@ class DocenteMateriaView(APIView):
 
 
 class CalificacionesView(APIView):
-    """Permite al docente registrar o actualizar calificaciones."""
+    """Permite al docente registrar calificaciones de sus grupos del periodo en curso."""
     permission_classes = [permissions.IsAuthenticated]
 
+    @staticmethod
+    def _obtener(docente, pk):
+        try:
+            inscripcion = Inscripcion.objects.select_related('materia').get(pk=pk)
+        except (Inscripcion.DoesNotExist, TypeError, ValueError):
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        error = _error_calificacion(docente, inscripcion)
+        return (None, error) if error else (inscripcion, None)
+
     def post(self, request):
-        """Registra o actualiza calificaciones de estudiantes."""
         docente = request.user
         if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
@@ -180,12 +201,9 @@ class CalificacionesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            inscripcion = Inscripcion.objects.select_related('materia').get(pk=inscripcion_id)
-            if inscripcion.materia.profesor.lower() != docente.nombre.lower():
-                return Response(status=status.HTTP_403_FORBIDDEN)
-        except Inscripcion.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+        inscripcion, error = self._obtener(docente, inscripcion_id)
+        if error:
+            return error
 
         if parcial is not None:
             try:
@@ -217,105 +235,70 @@ class CalificacionesView(APIView):
         return Response(InscripcionSerializer(inscripcion).data)
 
     def put(self, request, pk):
-        """Actualiza calificación de una inscripción específica."""
         docente = request.user
         if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            inscripcion = Inscripcion.objects.select_related('materia').get(pk=pk)
-            if inscripcion.materia.profesor.lower() != docente.nombre.lower():
-                return Response(status=status.HTTP_403_FORBIDDEN)
-        except Inscripcion.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+        inscripcion, error = self._obtener(docente, pk)
+        if error:
+            return error
 
         if 'calificacion' in request.data:
             try:
                 calificacion = float(request.data['calificacion'])
-                if not (0 <= calificacion <= 10):
-                    raise ValueError('La calificación debe estar entre 0 y 10.')
-                inscripcion.calificacion = calificacion
-                
-                # Actualizar estado basado en calificación
-                if calificacion < 7:
-                    inscripcion.estado = 'reprobada'
-                else:
-                    inscripcion.estado = 'aprobada'
-            except ValueError as e:
-                return Response(
-                    {'error': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if 'horario' in request.data:
-            inscripcion.horario = request.data['horario']
-
-        inscripcion.save()
+            except (TypeError, ValueError):
+                return Response({'error': 'La calificación final no es válida.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not 0 <= calificacion <= 10:
+                return Response({'error': 'La calificación debe estar entre 0 y 10.'}, status=status.HTTP_400_BAD_REQUEST)
+            inscripcion.calificacion = calificacion
+            inscripcion.estado = 'reprobada' if calificacion < 7 else 'aprobada'
+            inscripcion.save()
         return Response(InscripcionSerializer(inscripcion).data)
 
 
 class ActasCalificacionesView(APIView):
-    """Genera actas de calificaciones para descarga."""
+    """Genera actas de calificaciones de un grupo asignado al docente."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, materia_id):
-        """Genera un acta de calificaciones de una materia."""
         docente = request.user
         if not _es_docente(docente):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            materia = Materia.objects.get(pk=materia_id, profesor__iexact=docente.nombre)
-        except Materia.DoesNotExist:
+        asignaciones = [item for item in _asignaciones(docente) if item.materia_id == materia_id]
+        if not asignaciones:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        asignacion = asignaciones[0]
+        inscripciones = _inscripciones_docente(docente, [asignacion]).select_related('aspirante')
 
-        inscripciones = Inscripcion.objects.filter(materia=materia).select_related('aspirante')
-        
-        # Preparar datos para el acta
-        acta_data = {
+        return Response({
             'materia': {
-                'clave': materia.clave,
-                'nombre': materia.nombre,
-                'profesor': materia.profesor,
-                'horario': materia.horario,
+                'clave': asignacion.materia.clave,
+                'nombre': asignacion.materia.nombre,
+                'profesor': docente.nombre,
+                'horario': asignacion.horario,
+                'periodo': asignacion.carga.periodo_inscripcion.nombre,
             },
-            'calificaciones': []
-        }
-
-        for inscripcion in inscripciones:
-            acta_data['calificaciones'].append({
+            'calificaciones': [{
                 'estudiante': inscripcion.aspirante.nombre,
                 'usuario': inscripcion.aspirante.usuario,
                 'calificacion': inscripcion.calificacion,
                 'estado': inscripcion.estado,
                 'programa': inscripcion.aspirante.programa,
-            })
-
-        return Response(acta_data)
+            } for inscripcion in inscripciones],
+        })
 
 
 class DocenteExamenView(APIView):
-    """Lista exámenes en línea asociados al docente."""
+    """Lista los exámenes en línea en los que el docente es evaluador."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Lista todos los exámenes en línea asociados al docente."""
         docente = request.user
         if not _es_docente(docente):
-            return Response(
-                {'error': 'No tienes permisos de docente.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({'error': 'No tienes permisos de docente.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Obtener exámenes de los estudiantes inscritos en las materias del docente
-        materias = Materia.objects.filter(profesor__iexact=docente.nombre)
-        inscripciones = Inscripcion.objects.filter(materia__in=materias)
-        aspirantes = inscripciones.values_list('aspirante_id', flat=True).distinct()
-        
-        examenes = ExamenEnLinea.objects.filter(
-            aspirante_id__in=aspirantes
-        ).select_related('aspirante').order_by('-fecha_programada')
-
+        examenes = ExamenEnLinea.objects.filter(evaluador=docente).exclude(tipo='predoctoral').select_related('aspirante').order_by('-fecha_programada')
         return Response({
             'total': examenes.count(),
             'examenes': ExamenEnLineaSerializer(examenes, many=True).data,
@@ -329,8 +312,9 @@ class DocenteExamenView(APIView):
             }
         })
 
+
 class DocenteExamenDetailView(APIView):
-    """Consulta y ajusta la calificación de un examen del alumno."""
+    """Consulta y ajusta la calificación de un examen asignado al docente."""
     permission_classes = [permissions.IsAuthenticated]
 
     def _get_examen(self, request, pk):
@@ -343,14 +327,11 @@ class DocenteExamenDetailView(APIView):
         except ExamenEnLinea.DoesNotExist:
             return None, Response(status=status.HTTP_404_NOT_FOUND)
 
-        materias = Materia.objects.filter(profesor__iexact=docente.nombre)
-        inscripciones = Inscripcion.objects.filter(
-            aspirante=examen.aspirante,
-            materia__in=materias
-        )
-        if not inscripciones.exists():
-            return None, Response(status=status.HTTP_403_FORBIDDEN)
-
+        if examen.evaluador_id != docente.id:
+            return None, Response(
+                {'error': 'Solo el docente evaluador asignado puede consultar este examen.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         return examen, None
 
     def get(self, request, pk):
@@ -412,11 +393,11 @@ class DocenteExamenDetailView(APIView):
 
 class DocenteEntrevistaView(APIView):
     """API para gestión de entrevistas virtuales por docentes."""
-    
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Obtener lista de entrevistas de los estudiantes del docente."""
+        """Obtener lista de entrevistas a cargo del docente."""
         try:
             docente = request.user
             if not isinstance(docente, Aspirante) or not _es_docente(docente):
@@ -424,35 +405,17 @@ class DocenteEntrevistaView(APIView):
                     {'error': 'Usuario no válido'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            
-            # Obtener materias donde es profesor
-            materias = Materia.objects.filter(profesor__iexact=docente.nombre)
-            
-            # Obtener todas las inscripciones (estudiantes) en esas materias
-            inscripciones = Inscripcion.objects.filter(materia__in=materias)
-            aspirantes = Aspirante.objects.filter(
-                id__in=inscripciones.values_list('aspirante_id', flat=True)
-            )
-            
-            # Obtener entrevistas para esos estudiantes
-            entrevistas = EntrevistaVirtual.objects.filter(
-                aspirante__in=aspirantes
-            ).order_by('-fecha_programada')
-            
-            # Estadísticas
-            entrevistas_total = entrevistas.count()
-            entrevistas_programadas = entrevistas.filter(estado='programada').count()
-            entrevistas_iniciadas = entrevistas.filter(estado='iniciada').count()
-            entrevistas_completadas = entrevistas.filter(estado='completada').count()
-            
+
+            estudiante_ids = set(_inscripciones_docente(docente).values_list('aspirante_id', flat=True))
+            entrevistas = _entrevistas_docente(docente, estudiante_ids)
             serializer = EntrevistaVirtualSerializer(entrevistas, many=True)
             return Response({
                 'entrevistas': serializer.data,
                 'resumen': {
-                    'entrevistas_total': entrevistas_total,
-                    'entrevistas_programadas': entrevistas_programadas,
-                    'entrevistas_iniciadas': entrevistas_iniciadas,
-                    'entrevistas_completadas': entrevistas_completadas,
+                    'entrevistas_total': entrevistas.count(),
+                    'entrevistas_programadas': entrevistas.filter(estado='programada').count(),
+                    'entrevistas_iniciadas': entrevistas.filter(estado='iniciada').count(),
+                    'entrevistas_completadas': entrevistas.filter(estado='completada').count(),
                 }
             })
         except Exception:
@@ -471,53 +434,42 @@ class DocenteEntrevistaView(APIView):
                     {'error': 'Usuario no válido'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            
+
             aspirante_id = request.data.get('aspirante_id')
             if not aspirante_id:
                 return Response(
                     {'error': 'aspirante_id es requerido'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             try:
                 aspirante = Aspirante.objects.get(id=aspirante_id)
-            except Aspirante.DoesNotExist:
+            except (Aspirante.DoesNotExist, TypeError, ValueError):
                 return Response(
                     {'error': 'Aspirante no encontrado'},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            
-            # Verificar que el docente tenga relación con el estudiante
-            materias = Materia.objects.filter(profesor__iexact=docente.nombre)
-            inscripciones = Inscripcion.objects.filter(
-                materia__in=materias,
-                aspirante=aspirante
-            )
-            if not inscripciones.exists():
+
+            if not _inscripciones_docente(docente).filter(aspirante=aspirante).exists():
                 return Response(
                     {'error': 'No tienes permiso para crear entrevista para este estudiante'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            
-            # Generar Jitsi room ID
-            import uuid
+
             jitsi_room_id = str(uuid.uuid4())[:8]
             jitsi_room_link = f"https://meet.jitsi.si/sinac-{jitsi_room_id}"
-            
-            # Crear entrevista
+
             entrevista_data = request.data.copy()
-            entrevista_data['jitsi_room_id'] = jitsi_room_id
-            entrevista_data['jitsi_room_link'] = jitsi_room_link
             entrevista_data['aspirante'] = aspirante.id
-            entrevista_data['estado'] = 'programada'  # Estado inicial
-            
+            entrevista_data['estado'] = 'programada'
+
             serializer = EntrevistaVirtualSerializer(data=entrevista_data)
             if serializer.is_valid():
-                # Los datos de la videoconferencia son generados por el servidor;
-                # al ser campos de solo lectura del serializer deben pasarse
-                # explícitamente al guardar la entrevista.
+                # Los datos de la videoconferencia y el docente responsable los
+                # define el servidor; son campos de solo lectura del serializer.
                 entrevista = serializer.save(
                     aspirante=aspirante,
+                    docente=docente,
                     jitsi_room_id=jitsi_room_id,
                     jitsi_room_link=jitsi_room_link,
                 )
@@ -531,7 +483,7 @@ class DocenteEntrevistaView(APIView):
                         pass
                 _registrar_seguimiento(aspirante, 'entrevista_programada', f'Entrevista virtual programada para {entrevista.fecha_programada or "fecha pendiente"}.', 'Docencia', notificar=False)
                 return Response(EntrevistaVirtualSerializer(entrevista).data, status=status.HTTP_201_CREATED)
-            
+
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.exception('Error al crear entrevista para el docente %s', request.user.pk)
@@ -549,18 +501,16 @@ class DocenteEntrevistaView(APIView):
                 {'error': 'Entrevista no encontrada'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        
-        # Verificar permisos
+
         docente = request.user
         if not isinstance(docente, Aspirante) or not _es_docente(docente):
             return Response({'error': 'Solo un docente puede actualizar entrevistas.'}, status=status.HTTP_403_FORBIDDEN)
         if not _entrevista_permitida(docente, entrevista):
             return Response(
-                {'error': 'No tienes permiso para actualizar esta entrevista'},
+                {'error': 'Solo el docente responsable puede actualizar esta entrevista.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        
-        # Actualizar campos permitidos
+
         if 'estado' in request.data:
             estado = request.data.get('estado')
             valid_estados = ['programada', 'iniciada', 'completada', 'cancelada']
@@ -579,27 +529,28 @@ class DocenteEntrevistaView(APIView):
                 return Response({'error': f'No se puede pasar de {entrevista.get_estado_display()} a {dict(EntrevistaVirtual.ESTADOS_ENTREVISTA).get(estado, estado)}.'}, status=status.HTTP_400_BAD_REQUEST)
             entrevista.estado = estado
             if estado == 'iniciada' and not entrevista.fecha_inicio:
-                from django.utils import timezone
                 entrevista.fecha_inicio = timezone.now()
             if estado in ('completada', 'cancelada') and not entrevista.fecha_fin:
-                from django.utils import timezone
                 entrevista.fecha_fin = timezone.now()
-        
+
         if 'notas_docente' in request.data:
             entrevista.notas_docente = request.data.get('notas_docente')
-        
+
         if 'retroalimentacion' in request.data:
             entrevista.retroalimentacion = request.data.get('retroalimentacion')
-        
+
         if 'recording_link' in request.data:
             entrevista.recording_link = request.data.get('recording_link')
-        
+
         if 'fecha_inicio' in request.data:
             entrevista.fecha_inicio = request.data.get('fecha_inicio')
-        
+
         if 'fecha_fin' in request.data:
             entrevista.fecha_fin = request.data.get('fecha_fin')
-        
+
+        if not entrevista.docente_id:
+            entrevista.docente = docente
+
         try:
             entrevista.save()
         except Exception as e:
@@ -607,14 +558,14 @@ class DocenteEntrevistaView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         _registrar_seguimiento(entrevista.aspirante, f'entrevista_{entrevista.estado}', f'La entrevista “{entrevista.titulo}” ahora está {entrevista.get_estado_display().lower()}.', 'Docencia', notificar=False)
         return Response(EntrevistaVirtualSerializer(entrevista).data)
 
 
 class DocenteEntrevistaDetailView(APIView):
     """API para detalle de entrevista virtual."""
-    
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
@@ -626,14 +577,13 @@ class DocenteEntrevistaDetailView(APIView):
                 {'error': 'Entrevista no encontrada'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        
-        # Verificar permisos
+
         docente = request.user
         if not isinstance(docente, Aspirante) or not _es_docente(docente):
             return Response({'error': 'Solo un docente puede consultar entrevistas.'}, status=status.HTTP_403_FORBIDDEN)
         if not _entrevista_permitida(docente, entrevista):
             return Response(status=status.HTTP_403_FORBIDDEN)
-        
+
         return Response(EntrevistaVirtualSerializer(entrevista).data)
 
     def put(self, request, pk):

@@ -1,0 +1,11 @@
+proxy_pass http://backend:8000;
+proxy_http_version 1.1;
+proxy_set_header Host $http_host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header Connection $sinac_connection_upgrade;
+proxy_hide_header X-Powered-By;
+proxy_hide_header Server;
+proxy_read_timeout 120s;
+proxy_send_timeout 120s;

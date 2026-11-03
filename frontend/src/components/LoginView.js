@@ -8,6 +8,7 @@ const ROLE_IDS = [
   'alumno',
   'coordinacion',
   'docente',
+  'investigador',
   'director',
   'admin',
 ];
@@ -50,9 +51,9 @@ export default function LoginView({onBackHome, onLoginSuccess}){
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({usuario: normalizedUsuario, password}),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.detail || t('login.errorCredentials'));
+        setError(res.status === 429 ? t('login.errorThrottled') : data.detail || t('login.errorCredentials'));
         setLoading(false);
         return;
       }

@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
-from django.conf import settings
-from django.conf.urls.static import static
+
+from preregistro.seguridad import servir_media
 
 
 def health(request):
@@ -12,7 +12,10 @@ urlpatterns = [
     path('admin/',    admin.site.urls),
     path('health/',   health),
     path('api/',      include('preregistro.urls')),
+    path('media/<path:ruta>', servir_media, name='media-firmada'),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+handler400 = 'config.errores.error_400'
+handler403 = 'config.errores.error_403'
+handler404 = 'config.errores.error_404'
+handler500 = 'config.errores.error_500'

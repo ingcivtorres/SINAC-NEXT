@@ -3,6 +3,13 @@ import {PROGRAMAS, gradoDePrograma} from "./programasCatalogo";
 import {useCoordinationCopy} from "./coordinationPanelTranslations";
 
 const predeterminados = (grado, periodicidad) => (grado === "doctorado" ? 4 : 2) * (periodicidad === "cuatrimestral" ? 3 : 2);
+const ETIQUETAS_CREADOR = {
+  es: "Preparada por",
+  en: "Prepared by",
+  de: "Erstellt von",
+  zh: "创建人",
+  pt: "Preparada por",
+};
 
 function nuevoPlan() {
   return {
@@ -249,6 +256,8 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
   if (loading) return <div className="servicios-empty-card">{copy.loading}</div>;
 
   if (section === "cargas") {
+    const idioma = copy.locale.split("-")[0];
+    const etiquetaCreador = ETIQUETAS_CREADOR[idioma] || ETIQUETAS_CREADOR.es;
     const estados = {
       borrador: copy.loadReview.statusDraft,
       en_revision: copy.loadReview.statusReview,
@@ -266,7 +275,11 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
         {cargas.length ? cargas.map(carga => (
           <article className="servicios-card" key={carga.id}>
             <div className="servicios-card-heading">
-              <div><h4>{carga.periodo}</h4><p>{copy.loads.created}: {carga.created_at ? new Intl.DateTimeFormat(copy.locale, {dateStyle: "medium", timeStyle: "short"}).format(new Date(carga.created_at)) : "—"} · {carga.materias.length} {copy.loadReview.courseCount}</p></div>
+              <div>
+                <h4>{carga.periodo}</h4>
+                <p>{etiquetaCreador}: <strong>{carga.creador_nombre || "—"}</strong></p>
+                <p>{copy.loads.created}: {carga.created_at ? new Intl.DateTimeFormat(copy.locale, {dateStyle: "medium", timeStyle: "short"}).format(new Date(carga.created_at)) : "—"} · {carga.materias.length} {copy.loadReview.courseCount}</p>
+              </div>
               <span className={`servicios-status servicios-status--${carga.estado}`}>{estados[carga.estado] || carga.estado}</span>
             </div>
             <div className="servicios-row-actions">

@@ -2,12 +2,13 @@ import React from 'react';
 import {useApplicantCopy} from './aspirantPanelTranslations';
 
 function fecha(valor, locale) {
-  return new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(valor));
+  try { return new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(valor)); } catch (e) { return valor; }
 }
 
-export default function SeguimientoSolicitud({seguimiento, cargando = false, onActualizar}) {
+export default function SeguimientoSolicitud({seguimiento, evaluaciones = [], cargando = false, onActualizar}) {
   const copy = useApplicantCopy();
   const labelEstado = (estado) => copy.stages[estado] || estado;
+  const dictamen = evaluaciones[0];
   return <div id="panel-proceso" role="tabpanel" className="panel-grid">
     <div className="panel-card panel-card--wide">
       <div className="seguimiento-head">
@@ -38,6 +39,14 @@ export default function SeguimientoSolicitud({seguimiento, cargando = false, onA
         </div>
       )}
     </div>
+    {dictamen && (
+      <div className="panel-card colegio-dictamen">
+        <h3>{copy.colegio.title}</h3>
+        <p><span className={`estado-badge estado-${dictamen.estado}`}>{copy.colegio.states[dictamen.estado] || dictamen.estado_label}</span></p>
+        {dictamen.fecha_evaluacion && <p><small>{copy.colegio.date}: {fecha(dictamen.fecha_evaluacion, copy.locale)}</small></p>}
+        {dictamen.dictamen && <p>{dictamen.dictamen}</p>}
+      </div>
+    )}
     {seguimiento && (
       <div className="panel-card">
         <h3>{copy.followup.lida}</h3>

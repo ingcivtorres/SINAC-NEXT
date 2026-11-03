@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
 import DashboardAnalitico from './DashboardAnalitico';
 import {useAdminCopy} from './adminPanelTranslations';
+import {TablaHerramientas, TablaPaginacion, normalizarTexto, useTablaControl} from './TablaControles';
 
 const ESTADOS = ['pendiente', 'iniciado', 'revision', 'aceptado'];
 const MENU_GROUPS = [
@@ -35,19 +36,6 @@ const SALONES = [
 
 function etiquetaEstado(estado, copy) {
   return copy.status[estado] || estado || copy.common.pending;
-}
-
-function getStatusLabel(rawStatus, copy) {
-  const status = String(rawStatus || '').toLowerCase();
-  if (status === 'aceptado') return copy.status.activo;
-  return copy.status[status] || copy.common.pending;
-}
-
-function getUserStatus(aspirante, copy) {
-  if (typeof aspirante?.is_active === 'boolean') {
-    return aspirante.is_active ? copy.common.active : copy.common.inactive;
-  }
-  return getStatusLabel(aspirante?.proceso_estado, copy);
 }
 
 function roleLabel(role, copy) {
@@ -242,38 +230,33 @@ export default function PanelAdministrador({session, onLogout}) {
     return () => controller.abort();
   }, [activeSection, session.access]);
 
-  const apiUsers = (datos?.aspirantes || []).map((aspirante, index) => ({
-    id: aspirante.id || index + 1,
-    name: aspirante.nombre || copy.messages.unnamedUser,
-    usuario: aspirante.usuario || '',
-    email: aspirante.correo || 'correo@sinac.edu.mx',
-    role: roleLabel(aspirante.rol, copy), rawRole: aspirante.rol || 'Aspirante',
-    area: aspirante.programa || aspirante.unidad || copy.common.general,
-    status: getUserStatus(aspirante, copy),
-    rawStatus: typeof aspirante.is_active === 'boolean'
-      ? aspirante.is_active ? 'Activo' : 'Inactivo'
-      : aspirante.proceso_estado === 'aceptado' ? 'Activo'
-        : aspirante.proceso_estado === 'revision' ? 'En revisión'
-          : aspirante.proceso_estado === 'iniciado' ? 'En proceso' : 'Pendiente',
-    isActive: typeof aspirante.is_active === 'boolean' ? aspirante.is_active : true,
-    isLocked: false,
-    lastLogin: copy.messages.recent,
-  }));
-
-  const dashboardUsers = usuariosCargados ? users : (apiUsers.length ? apiUsers : users);
+  const dashboardUsers = usuariosCargados ? users : [];
   const visibleUsers = dashboardUsers.filter((user) => {
-    const query = userSearch.trim().toLowerCase();
-    return !query || [user.name, user.usuario, user.email, user.role, user.area].some((value) => String(value || '').toLowerCase().includes(query));
+    const query = normalizarTexto(userSearch);
+    return !query || [user.name, user.usuario, user.email, user.role, user.area].some((value) => normalizarTexto(value).includes(query));
   });
   const visibleAlumnos = alumnosAdmin.filter((alumno) => {
-    const query = studentSearch.trim().toLowerCase();
-    const matchesText = !query || [alumno.nombre, alumno.usuario, alumno.matricula, alumno.programa, alumno.departamento].some((value) => String(value || '').toLowerCase().includes(query));
+    const query = normalizarTexto(studentSearch);
+    const matchesText = !query || [alumno.nombre, alumno.usuario, alumno.matricula, alumno.programa, alumno.departamento].some((value) => normalizarTexto(value).includes(query));
     const matchesStatus = !studentStatus || alumno.proceso_estado === studentStatus || (studentStatus === 'inactivo' && !alumno.is_active);
     return matchesText && matchesStatus;
   });
   const visibleDocentes = docentesAdmin.filter((persona) => {
-    const query = facultySearch.trim().toLowerCase();
-    return !query || [persona.nombre, persona.usuario, persona.correo, persona.rol, persona.departamento, persona.programa].some((value) => String(value || '').toLowerCase().includes(query));
+    const query = normalizarTexto(facultySearch);
+    return !query || [persona.nombre, persona.usuario, persona.correo, persona.rol, persona.departamento, persona.programa].some((value) => normalizarTexto(value).includes(query));
+  });
+  const rolDocente = (persona) => persona.rol === 'director' ? copy.roles.director : persona.rol === 'investigador' ? copy.roles.investigador : copy.roles.docente;
+  const usersTabla = useTablaControl(visibleUsers, {filtros: {role: user => user.role, area: user => user.area, status: user => user.status}});
+  const alumnosTabla = useTablaControl(visibleAlumnos, {filtros: {programa: alumno => alumno.programa, departamento: alumno => alumno.departamento}});
+  const docentesTabla = useTablaControl(visibleDocentes, {filtros: {rol: rolDocente, departamento: persona => persona.departamento, programa: persona => persona.programa}});
+  const materiasTabla = useTablaControl(catalogos.materias, {
+    campos: materia => [materia.clave, materia.nombre, materia.profesor, materia.horario],
+    filtros: {creditos: materia => materia.creditos, salon: materia => copy.catalogs.rooms[SALONES.find((salon) => salon.value === materia.salon)?.labelKey] || copy.catalogs.roomPending, profesor: materia => materia.profesor || copy.common.toAssign},
+  });
+  const periodosTabla = useTablaControl(catalogos.periodos, {campos: periodo => [periodo.nombre], filtros: {estado: periodo => periodo.activo ? 'activo' : 'inactivo'}});
+  const auditoriaTabla = useTablaControl(auditoria, {
+    campos: item => [item.usuario, item.accion, item.modelo, item.objeto_id, item.ip, JSON.stringify(item.anteriores), JSON.stringify(item.nuevos)],
+    filtros: {usuario: item => item.usuario, accion: item => item.accion, modelo: item => item.modelo},
   });
 
   const cargarDetalleAlumno = async (id) => {
@@ -345,6 +328,10 @@ export default function PanelAdministrador({session, onLogout}) {
     String(aspirante.rol || '').trim().toLowerCase() === 'aspirante'
     && (filtro === 'todos' || aspirante.proceso_estado === filtro)
   ));
+  const aspirantesTabla = useTablaControl(aspirantes, {
+    campos: aspirante => [aspirante.nombre, aspirante.correo, aspirante.usuario, aspirante.programa, aspirante.unidad],
+    filtros: {programa: aspirante => aspirante.programa, unidad: aspirante => aspirante.unidad},
+  });
   const requestItems = (datos?.aspirantes || [])
     .filter((aspirante) => String(aspirante.rol || '').trim().toLowerCase() === 'aspirante')
     .slice(0, 3)
@@ -493,6 +480,7 @@ export default function PanelAdministrador({session, onLogout}) {
       }
 
       const result = await response.json();
+      const wasEditing = Boolean(editingUser);
 
       if (editingUser) {
         setUsers((prev) => prev.map((user) => user.id === editingUser ? {
@@ -527,6 +515,7 @@ export default function PanelAdministrador({session, onLogout}) {
       setEditingUser(null);
       setFormData({name: '', usuario: '', email: '', password: '', role: 'Alumno', area: 'Sistemas', status: 'Activo'});
       setError('');
+      setMessage(wasEditing ? copy.messages.userUpdated : copy.messages.userCreated);
       await cargarAdministracion();
       await cargarPanel(new AbortController().signal);
     } catch (err) {
@@ -756,8 +745,9 @@ export default function PanelAdministrador({session, onLogout}) {
                 </label>
               </div>
 
-              {aspirantes.length === 0 ? <p className="empty-state">{copy.messages.noApplicants}</p> : (
-                <div className="admin-table-wrap">
+              {aspirantes.length === 0 ? <p className="empty-state">{copy.messages.noApplicants}</p> : (<>
+                <TablaHerramientas control={aspirantesTabla} placeholder={copy.users.searchPlaceholder} filtros={[{clave: 'programa', etiqueta: copy.common.program}, {clave: 'unidad', etiqueta: copy.common.unit}]} />
+                <div className="admin-table-wrap tabla-scroll">
                   <table className="admin-table">
                     <thead>
                       <tr>
@@ -770,7 +760,7 @@ export default function PanelAdministrador({session, onLogout}) {
                       </tr>
                     </thead>
                     <tbody>
-                      {aspirantes.map((aspirante) => (
+                      {aspirantesTabla.visibles.map((aspirante) => (
                         <tr key={aspirante.id}>
                           <td>
                             <strong>{aspirante.nombre}</strong><br />
@@ -786,7 +776,8 @@ export default function PanelAdministrador({session, onLogout}) {
                     </tbody>
                   </table>
                 </div>
-              )}
+                <TablaPaginacion control={aspirantesTabla} />
+              </>)}
             </div>
           </>
         )}
@@ -802,8 +793,10 @@ export default function PanelAdministrador({session, onLogout}) {
             </div>
 
             <div className="filter-inline" style={{marginBottom: '16px'}}><label htmlFor="admin-user-search">{copy.users.search}</label><input id="admin-user-search" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder={copy.users.searchPlaceholder} /></div>
+            {!usuariosCargados && !cargando && <p className="form-hint">{copy.messages.loadModules}</p>}
+            <TablaHerramientas control={usersTabla} filtros={[{clave: 'role', etiqueta: copy.common.role}, {clave: 'area', etiqueta: copy.common.area}, {clave: 'status', etiqueta: copy.common.status}]} />
 
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap tabla-scroll">
               <table className="admin-table">
                 <thead>
                   <tr>
@@ -817,7 +810,7 @@ export default function PanelAdministrador({session, onLogout}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleUsers.length ? visibleUsers.map((user) => (
+                  {usersTabla.visibles.length ? usersTabla.visibles.map((user) => (
                     <tr key={user.id}>
                       <td><strong>{user.name}</strong></td>
                       <td>{user.email}</td>
@@ -837,6 +830,7 @@ export default function PanelAdministrador({session, onLogout}) {
                 </tbody>
               </table>
             </div>
+            <TablaPaginacion control={usersTabla} />
           </div>
         )}
 
@@ -854,9 +848,11 @@ export default function PanelAdministrador({session, onLogout}) {
                 <option value="">{copy.common.all} {copy.common.status.toLowerCase()}</option><option value="aceptado">{copy.students.activeAccepted}</option><option value="inactivo">{copy.common.inactive}</option><option value="baja">{copy.status.baja}</option>
               </select>
             </div>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.common.name}</th><th>{copy.common.enrollment}</th><th>{copy.common.program}</th><th>{copy.common.department}</th><th>{copy.students.subjects}</th><th>{copy.common.credits}</th><th>{copy.students.average}</th><th>{copy.students.action}</th></tr></thead><tbody>
-              {visibleAlumnos.length ? visibleAlumnos.map((alumno) => <tr key={alumno.id}><td><strong>{alumno.nombre}</strong><br /><small>{alumno.correo}</small></td><td>{alumno.matricula || copy.common.pendingValue}</td><td>{alumno.programa || copy.common.noProgram}</td><td>{alumno.departamento || copy.common.noDepartment}</td><td>{alumno.materias_inscritas}</td><td>{alumno.creditos}</td><td>{alumno.promedio == null ? '—' : alumno.promedio.toFixed(2)}</td><td><button type="button" className="icon-btn" onClick={() => cargarDetalleAlumno(alumno.id)}>{copy.students.viewRecord}</button></td></tr>) : <tr><td colSpan="8">{copy.messages.noStudents}</td></tr>}
+            <TablaHerramientas control={alumnosTabla} filtros={[{clave: 'programa', etiqueta: copy.common.program}, {clave: 'departamento', etiqueta: copy.common.department}]} />
+            <div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.common.name}</th><th>{copy.common.enrollment}</th><th>{copy.common.program}</th><th>{copy.common.department}</th><th>{copy.students.subjects}</th><th>{copy.common.credits}</th><th>{copy.students.average}</th><th>{copy.students.action}</th></tr></thead><tbody>
+              {alumnosTabla.visibles.length ? alumnosTabla.visibles.map((alumno) => <tr key={alumno.id}><td><strong>{alumno.nombre}</strong><br /><small>{alumno.correo}</small></td><td>{alumno.matricula || copy.common.pendingValue}</td><td>{alumno.programa || copy.common.noProgram}</td><td>{alumno.departamento || copy.common.noDepartment}</td><td>{alumno.materias_inscritas}</td><td>{alumno.creditos}</td><td>{alumno.promedio == null ? '—' : alumno.promedio.toFixed(2)}</td><td><button type="button" className="icon-btn" onClick={() => cargarDetalleAlumno(alumno.id)}>{copy.students.viewRecord}</button></td></tr>) : <tr><td colSpan="8">{copy.messages.noStudents}</td></tr>}
             </tbody></table></div>
+            <TablaPaginacion control={alumnosTabla} />
             {alumnoSeleccionado && (
               <div className="admin-card" style={{marginTop: '18px'}}>
                 <div className="admin-card-head">
@@ -892,9 +888,11 @@ export default function PanelAdministrador({session, onLogout}) {
           <div className="admin-card">
             <div className="admin-card-head"><div><p className="panel-kicker">{copy.faculty.affiliation}</p><h3>{copy.faculty.title}</h3></div><span className="pill success">{visibleDocentes.length} {copy.common.records}</span></div>
             <div className="filter-inline" style={{marginBottom: '16px'}}><label htmlFor="admin-faculty-search">{copy.common.search}</label><input id="admin-faculty-search" value={facultySearch} onChange={(event) => setFacultySearch(event.target.value)} placeholder={copy.users.searchPlaceholder} /></div>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.faculty.name}</th><th>{copy.faculty.role}</th><th>{copy.common.department}</th><th>{copy.common.program}</th><th>{copy.faculty.subjects}</th><th>{copy.faculty.schedules}</th><th>{copy.faculty.thesisStudents}</th></tr></thead><tbody>
-              {visibleDocentes.length ? visibleDocentes.map((persona) => <tr key={persona.id}><td><strong>{persona.nombre}</strong><br /><small>{persona.correo}</small></td><td>{persona.rol === 'director' ? copy.roles.director : persona.rol === 'investigador' ? copy.roles.investigador : copy.roles.docente}</td><td>{persona.departamento || copy.common.noDepartment}</td><td>{persona.programa || copy.common.noProgram}</td><td>{persona.total_materias}</td><td>{persona.materias.map((materia) => `${materia.clave}: ${materia.horario || copy.common.toAssign}`).join(' · ') || copy.messages.noCourseAssignments}</td><td>{persona.rol === 'director' ? persona.total_tesistas : '—'}</td></tr>) : <tr><td colSpan="7">{copy.messages.noFaculty}</td></tr>}
+            <TablaHerramientas control={docentesTabla} filtros={[{clave: 'rol', etiqueta: copy.faculty.role}, {clave: 'departamento', etiqueta: copy.common.department}, {clave: 'programa', etiqueta: copy.common.program}]} />
+            <div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.faculty.name}</th><th>{copy.faculty.role}</th><th>{copy.common.department}</th><th>{copy.common.program}</th><th>{copy.faculty.subjects}</th><th>{copy.faculty.schedules}</th><th>{copy.faculty.thesisStudents}</th></tr></thead><tbody>
+              {docentesTabla.visibles.length ? docentesTabla.visibles.map((persona) => <tr key={persona.id}><td><strong>{persona.nombre}</strong><br /><small>{persona.correo}</small></td><td>{rolDocente(persona)}</td><td>{persona.departamento || copy.common.noDepartment}</td><td>{persona.programa || copy.common.noProgram}</td><td>{persona.total_materias}</td><td>{(persona.materias || []).map((materia) => `${materia.clave}: ${materia.horario || copy.common.toAssign}`).join(' · ') || copy.messages.noCourseAssignments}</td><td>{persona.rol === 'director' ? persona.total_tesistas : '—'}</td></tr>) : <tr><td colSpan="7">{copy.messages.noFaculty}</td></tr>}
             </tbody></table></div>
+            <TablaPaginacion control={docentesTabla} />
             <p className="empty-state">{copy.messages.facultyNote}</p>
           </div>
         )}
@@ -988,7 +986,9 @@ export default function PanelAdministrador({session, onLogout}) {
                 <label className="config-item">{copy.catalogs.capacity}<input type="number" min="1" max="32767" value={catalogForm.capacidad} onChange={(e) => setCatalogForm({...catalogForm, capacidad: Number(e.target.value)})} required /></label>
                 <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{catalogEditing ? copy.users.saveChanges : copy.catalogs.saveSubject}</button></div>
               </form>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.catalogs.key}</th><th>{copy.common.subject}</th><th>{copy.common.credits}</th><th>{copy.common.professor}</th><th>{copy.common.schedule}</th><th>{copy.catalogs.room}</th><th>{copy.common.capacity}</th><th>{copy.common.actions}</th></tr></thead><tbody>{catalogos.materias.length ? catalogos.materias.map((materia) => <tr key={materia.id}><td>{materia.clave}</td><td>{materia.nombre}</td><td>{materia.creditos}</td><td>{materia.profesor || copy.common.toAssign}</td><td>{materia.horario || copy.common.toAssign}</td><td>{copy.catalogs.rooms[SALONES.find((salon) => salon.value === materia.salon)?.labelKey] || copy.catalogs.roomPending}</td><td>{materia.capacidad ?? '—'}</td><td><button type="button" className="icon-btn" onClick={() => editarMateria(materia)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="8">{copy.common.noRecords}</td></tr>}</tbody></table></div>
+              <TablaHerramientas control={materiasTabla} filtros={[{clave: 'creditos', etiqueta: copy.common.credits}, {clave: 'salon', etiqueta: copy.catalogs.room}, {clave: 'profesor', etiqueta: copy.common.professor}]} />
+              <div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.catalogs.key}</th><th>{copy.common.subject}</th><th>{copy.common.credits}</th><th>{copy.common.professor}</th><th>{copy.common.schedule}</th><th>{copy.catalogs.room}</th><th>{copy.common.capacity}</th><th>{copy.common.actions}</th></tr></thead><tbody>{materiasTabla.visibles.length ? materiasTabla.visibles.map((materia) => <tr key={materia.id}><td>{materia.clave}</td><td>{materia.nombre}</td><td>{materia.creditos}</td><td>{materia.profesor || copy.common.toAssign}</td><td>{materia.horario || copy.common.toAssign}</td><td>{copy.catalogs.rooms[SALONES.find((salon) => salon.value === materia.salon)?.labelKey] || copy.catalogs.roomPending}</td><td>{materia.capacidad ?? '—'}</td><td><button type="button" className="icon-btn" onClick={() => editarMateria(materia)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="8">{copy.common.noRecords}</td></tr>}</tbody></table></div>
+              <TablaPaginacion control={materiasTabla} />
             </div>
             <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.catalogs.catalogs}</p><h3>{copy.catalogs.departmentsPrograms}</h3></div></div><p><strong>{copy.catalogs.departments}</strong> {catalogos.departamentos.join(', ') || copy.common.noRecords}</p><p><strong>{copy.catalogs.programs}</strong> {catalogos.programas.join(', ') || copy.common.noRecords}</p><p><strong>{copy.catalogs.roles}</strong> {catalogos.roles.join(', ')}</p></div>
           </div>
@@ -1004,12 +1004,14 @@ export default function PanelAdministrador({session, onLogout}) {
               <label className="config-item">{copy.common.status}<select value={periodoForm.activo ? 'true' : 'false'} onChange={(e) => setPeriodoForm({...periodoForm, activo: e.target.value === 'true'})}><option value="true">{copy.common.active}</option><option value="false">{copy.common.inactive}</option></select></label>
               <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{periodoEditing ? copy.users.saveChanges : copy.periods.save}</button></div>
             </form>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.periods.period}</th><th>{copy.periods.opening}</th><th>{copy.periods.closing}</th><th>{copy.common.status}</th><th>{copy.common.actions}</th></tr></thead><tbody>{catalogos.periodos.length ? catalogos.periodos.map((periodo) => <tr key={periodo.id}><td><strong>{periodo.nombre}</strong></td><td>{new Date(periodo.apertura).toLocaleString(copy.locale)}</td><td>{new Date(periodo.cierre).toLocaleString(copy.locale)}</td><td><span className={`estado-badge ${periodo.activo ? 'estado-aceptado' : 'estado-pendiente'}`}>{periodo.activo ? copy.common.active : copy.common.inactive}</span></td><td><button type="button" className="icon-btn" onClick={() => editarPeriodo(periodo)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="5">{copy.common.noRecords}</td></tr>}</tbody></table></div>
+            <TablaHerramientas control={periodosTabla} filtros={[{clave: 'estado', etiqueta: copy.common.status, opciones: [{value: 'activo', label: copy.common.active}, {value: 'inactivo', label: copy.common.inactive}]}]} />
+            <div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.periods.period}</th><th>{copy.periods.opening}</th><th>{copy.periods.closing}</th><th>{copy.common.status}</th><th>{copy.common.actions}</th></tr></thead><tbody>{periodosTabla.visibles.length ? periodosTabla.visibles.map((periodo) => <tr key={periodo.id}><td><strong>{periodo.nombre}</strong></td><td>{new Date(periodo.apertura).toLocaleString(copy.locale)}</td><td>{new Date(periodo.cierre).toLocaleString(copy.locale)}</td><td><span className={`estado-badge ${periodo.activo ? 'estado-aceptado' : 'estado-pendiente'}`}>{periodo.activo ? copy.common.active : copy.common.inactive}</span></td><td><button type="button" className="icon-btn" onClick={() => editarPeriodo(periodo)}>{copy.users.edit}</button></td></tr>) : <tr><td colSpan="5">{copy.common.noRecords}</td></tr>}</tbody></table></div>
+            <TablaPaginacion control={periodosTabla} />
           </div>
         )}
 
         {activeSection === 'audit' && (
-          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.audit.traceability}</p><h3>{copy.audit.title}</h3></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>{copy.audit.date}</th><th>{copy.audit.user}</th><th>{copy.audit.action}</th><th>{copy.audit.object}</th><th>{copy.audit.ip}</th><th>{copy.audit.changes}</th></tr></thead><tbody>{auditoria.length ? auditoria.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString(copy.locale)}</td><td>{item.usuario}</td><td>{item.accion}</td><td>{item.modelo} #{item.objeto_id}</td><td>{item.ip || '—'}</td><td><small>{copy.audit.before}: {JSON.stringify(item.anteriores)}<br />{copy.audit.after}: {JSON.stringify(item.nuevos)}</small></td></tr>) : <tr><td colSpan="6">{copy.messages.noAudit}</td></tr>}</tbody></table></div></div>
+          <div className="admin-card"><div className="admin-card-head"><div><p className="panel-kicker">{copy.audit.traceability}</p><h3>{copy.audit.title}</h3></div></div><TablaHerramientas control={auditoriaTabla} filtros={[{clave: 'usuario', etiqueta: copy.audit.user}, {clave: 'accion', etiqueta: copy.audit.action}, {clave: 'modelo', etiqueta: copy.audit.object}]} /><div className="admin-table-wrap tabla-scroll"><table className="admin-table"><thead><tr><th>{copy.audit.date}</th><th>{copy.audit.user}</th><th>{copy.audit.action}</th><th>{copy.audit.object}</th><th>{copy.audit.ip}</th><th>{copy.audit.changes}</th></tr></thead><tbody>{auditoriaTabla.visibles.length ? auditoriaTabla.visibles.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString(copy.locale)}</td><td>{item.usuario}</td><td>{item.accion}</td><td>{item.modelo} #{item.objeto_id}</td><td>{item.ip || '—'}</td><td><small>{copy.audit.before}: {JSON.stringify(item.anteriores)}<br />{copy.audit.after}: {JSON.stringify(item.nuevos)}</small></td></tr>) : <tr><td colSpan="6">{copy.messages.noAudit}</td></tr>}</tbody></table></div><TablaPaginacion control={auditoriaTabla} /></div>
         )}
 
         {activeSection === 'security' && (

@@ -7,6 +7,7 @@ import ExamenesGestionPanel from "./ExamenesGestionPanel";
 import SolicitudesAcademicasReview from "./SolicitudesAcademicasReview";
 import SchoolAcademicConfiguration from "./SchoolAcademicConfiguration";
 import {useSchoolServicesCopy} from "./schoolServicesPanelTranslations";
+import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from "./TablaControles";
 
 const buildMenu = (copy) => [
   {label: copy.groups.panorama, items: [["resumen", copy.menu.resumen, "▦"], ["alumnos", copy.menu.alumnos, "♙"], ["docentes", copy.menu.docentes, "♜"]]},
@@ -15,11 +16,14 @@ const buildMenu = (copy) => [
   {label: copy.groups.institutional, items: [["reportes", copy.menu.reportes, "▥"]]},
 ];
 
+const ALTA_VACIA = {nombre: "", usuario: "", correo: "", curp: "", password: "", telefono: "", matricula: "", programa: "", departamento: ""};
+
 const estadoTexto = (estado, copy) => ({
   activo: copy.status.activo,
   baja: copy.status.baja,
   inactivo: copy.status.inactivo,
   egresado: copy.status.egresado,
+  reingreso: copy.movement.readmission,
   cursando: copy.status.cursando,
   aprobada: copy.status.aprobada,
   reprobada: copy.status.reprobada,
@@ -49,7 +53,9 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   const [formAlumno, setFormAlumno] = useState(null);
   const [movimiento, setMovimiento] = useState({estado: "", detalle: ""});
   const [altaAbierta, setAltaAbierta] = useState(false);
-  const [alta, setAlta] = useState({nombre: "", usuario: "", correo: "", curp: "", password: "", telefono: "", matricula: "", programa: "", departamento: ""});
+  const [alta, setAlta] = useState(ALTA_VACIA);
+  const [guardando, setGuardando] = useState(false);
+  const [observacion, setObservacion] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -61,6 +67,21 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   const headers = useMemo(() => ({Authorization: `Bearer ${session.access}`}), [session.access]);
   const alumno = useMemo(() => datos.alumnos.find(item => item.id === selectedId) || null, [datos.alumnos, selectedId]);
   const inscripciones = useMemo(() => datos.alumnos.flatMap(item => (item.inscripciones || []).map(inscripcion => ({...inscripcion, alumno: item}))), [datos.alumnos]);
+  const etiquetasFiltro = useEtiquetasFiltro();
+  const estadoAlumno = item => item.is_active ? item.proceso_estado || "activo" : "inactivo";
+  const alumnosTabla = useTablaControl(datos.alumnos, {
+    campos: item => [item.nombre, item.correo, item.matricula, item.usuario, item.programa, item.departamento],
+    filtros: {programa: item => item.programa, departamento: item => item.departamento, estado: estadoAlumno},
+    sinFiltros: active === "alumnos",
+  });
+  const materiasAlumnoTabla = useTablaControl(alumno?.inscripciones, {
+    campos: item => [item.materia_clave, item.materia_nombre, item.materia_profesor, item.periodo],
+    filtros: {estado: item => item.estado, validacion: item => item.validacion_servicios || "pendiente", tipo: item => item.extemporanea ? "extemporanea" : "regular"},
+  });
+  const extemporaneasTabla = useTablaControl(solicitudesExtemporaneas, {
+    campos: item => [item.alumno_nombre, item.alumno_matricula, item.folio, item.periodo, item.programa, item.motivo],
+    filtros: {estado: item => item.estado, periodo: item => item.periodo, programa: item => item.programa},
+  });
 
   async function cargar(signal) {
     const id = ++cargaId.current;
@@ -87,11 +108,16 @@ export default function PanelServiciosEscolares({session, onLogout}) {
     const controller = new AbortController();
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
     fetch(`/api/servicios-escolares/reportes/?${params.toString()}`, {headers, signal: controller.signal})
-      .then(response => response.ok ? response.json() : Promise.reject(new Error(copy.messages.loadReports)))
-      .then(data => setReportes(data))
+      .then(response => {
+        if (response.status === 401) { onLogout(copy.messages.sessionExpired); return null; }
+        return response.ok ? response.json() : Promise.reject(new Error(copy.messages.loadReports));
+      })
+      .then(data => { if (data) setReportes(data); })
       .catch(err => { if (err.name !== "AbortError") setError(err.message); });
     return () => controller.abort();
   }, [active, session.access]);
+
+  useEffect(() => { setMessage(""); setError(""); }, [active]);
 
   useEffect(() => {
     if (active !== "extemporaneas") return;
@@ -120,49 +146,67 @@ export default function PanelServiciosEscolares({session, onLogout}) {
 
   async function guardarAlumno(event) {
     event.preventDefault();
-    if (!alumno || !formAlumno) return;
-    setError("");
+    if (!alumno || !formAlumno || guardando) return;
+    setError(""); setMessage("");
+    setGuardando(true);
     try {
       const response = await fetch(`/api/servicios-escolares/alumnos/${alumno.id}/`, {method: "PATCH", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify(formAlumno)});
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || copy.messages.dataSaveError);
-      setMessage(copy.messages.movementSaved);
+      setMessage(copy.messages.dataSaved);
       await cargar();
     } catch (err) { setError(err.message || copy.messages.dataSaveError); }
+    finally { setGuardando(false); }
   }
 
   async function darDeAlta(event) {
     event.preventDefault();
+    if (guardando) return;
+    setError(""); setMessage("");
+    setGuardando(true);
     try {
       const response = await fetch("/api/servicios-escolares/panel/", {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify(alta)});
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.detail || copy.messages.studentCreated);
-      setAlta({nombre: "", usuario: "", correo: "", curp: "", password: "", telefono: "", matricula: "", programa: "", departamento: ""});
+      if (!response.ok) throw new Error(body.detail || copy.messages.studentCreateError);
+      setAlta(ALTA_VACIA);
       setAltaAbierta(false);
       setMessage(copy.messages.studentCreated);
       await cargar();
-    } catch (err) { setError(err.message || copy.messages.studentCreated); }
+    } catch (err) { setError(err.message || copy.messages.studentCreateError); }
+    finally { setGuardando(false); }
   }
 
   async function registrarMovimiento(event) {
     event.preventDefault();
     if (!alumno || !movimiento.detalle.trim()) return setError(copy.messages.describeMovement);
+    if (guardando) return;
+    setError(""); setMessage("");
+    setGuardando(true);
     try {
-      const response = await fetch(`/api/servicios-escolares/alumnos/${alumno.id}/`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify(movimiento)});
+      const response = await fetch(`/api/servicios-escolares/alumnos/${alumno.id}/`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({...movimiento, detalle: movimiento.detalle.trim()})});
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || body.detalle || copy.messages.movementError);
       setMovimiento({estado: "", detalle: ""});
       setMessage(copy.messages.movementSaved);
       await cargar();
+      if (body.alumno) seleccionar(body.alumno);
     } catch (err) { setError(err.message || copy.messages.movementError); }
+    finally { setGuardando(false); }
   }
 
-  async function validarInscripcion(inscripcionId, validar = true) {
+  async function validarInscripcion(inscripcionId, validar = true, comentario = "") {
     if (!alumno) return;
+    if (!validar && !comentario.trim()) return setError(copy.enrollment.observeReasonRequired);
     try {
-      const response = await fetch(`/api/servicios-escolares/alumnos/${alumno.id}/validar-inscripcion/`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({inscripcion_id: inscripcionId, validar})});
+      setError(""); setMessage("");
+      const response = await fetch(`/api/servicios-escolares/alumnos/${alumno.id}/validar-inscripcion/`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({inscripcion_id: inscripcionId, validar, ...(validar ? {} : {comentario: comentario.trim()})})});
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.detail || copy.messages.invalidInscription);
+      if (!response.ok) throw new Error(body.detail || body.comentario || copy.messages.invalidInscription);
+      setObservacion(null);
       setMessage(validar ? copy.messages.validInscription : copy.messages.invalidForReview);
       await cargar();
     } catch (err) { setError(err.message || copy.messages.invalidInscription); }
@@ -172,7 +216,11 @@ export default function PanelServiciosEscolares({session, onLogout}) {
     if (!id) return setError(copy.messages.noStudentSelected);
     try {
       const response = await fetch(`/api/servicios-escolares/alumnos/${id}/documentos/${tipo}/`, {headers});
-      if (!response.ok) throw new Error(copy.messages.documentError);
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || copy.messages.documentError);
+      }
       const url = URL.createObjectURL(await response.blob());
       const enlace = document.createElement("a");
       enlace.href = url;
@@ -197,6 +245,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
         headers: {...headers, "Content-Type": "application/json"},
         body: JSON.stringify({estado, comentario_revision}),
       });
+      if (response.status === 401) return onLogout(copy.messages.sessionExpired);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || copy.extemporaneas.updateError);
       setSolicitudesExtemporaneas(items => items.map(item => item.id === body.id ? body : item));
@@ -227,8 +276,13 @@ export default function PanelServiciosEscolares({session, onLogout}) {
   const mostrarDetalle = Boolean(alumno);
 
   function tablaAlumnos() {
-    return (
-      <div className="servicios-table-wrap">
+    return (<>
+      {active !== "alumnos" && <TablaHerramientas control={alumnosTabla} placeholder={copy.table.searchPlaceholder} filtros={[
+        {clave: "programa", etiqueta: copy.table.program},
+        {clave: "departamento", etiqueta: copy.table.department},
+        {clave: "estado", etiqueta: copy.table.status, formato: value => estadoTexto(value, copy)},
+      ]} />}
+      <div className="servicios-table-wrap tabla-scroll">
         <table className="admin-table servicios-table">
           <thead>
             <tr>
@@ -241,20 +295,21 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             </tr>
           </thead>
           <tbody>
-            {datos.alumnos.length ? datos.alumnos.map(item => (
+            {alumnosTabla.visibles.length ? alumnosTabla.visibles.map(item => (
               <tr key={item.id}>
                 <td><strong>{item.nombre}</strong><small>{item.correo}</small></td>
                 <td>{item.matricula || copy.common.noEnrollment}</td>
                 <td>{item.programa || copy.common.noProgram}</td>
                 <td>{item.departamento || copy.common.noDepartment}</td>
-                <td><Estado copy={copy} value={item.is_active ? item.proceso_estado || "activo" : "inactivo"} /></td>
-                <td><button type="button" className="servicios-link" onClick={() => seleccionar(item)}>{copy.table.consult}</button></td>
+                <td><Estado copy={copy} value={estadoAlumno(item)} /></td>
+                <td><button type="button" className="servicios-link" onClick={() => { seleccionar(item); if (active === "resumen") setActive("alumnos"); }}>{copy.table.consult}</button></td>
               </tr>
             )) : <tr><td colSpan="6" className="servicios-empty">{copy.common.noResults}</td></tr>}
           </tbody>
         </table>
       </div>
-    );
+      <TablaPaginacion control={alumnosTabla} />
+    </>);
   }
 
   function detalleAlumnoBase() {
@@ -286,7 +341,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
         <form className="servicios-card servicios-form" onSubmit={guardarAlumno}>
           <div className="servicios-card-heading">
             <div><span className="panel-kicker">{copy.academic.management}</span><h3>{copy.academic.administrativeData}</h3></div>
-            <button type="submit" className="btn-primary">{copy.common.save}</button>
+            <button type="submit" className="btn-primary" disabled={guardando}>{copy.common.save}</button>
           </div>
           <div className="servicios-form-grid">
             <label>{copy.academic.name}<input value={formAlumno?.nombre || ""} onChange={e => setFormAlumno({...formAlumno, nombre: e.target.value})}/></label>
@@ -296,7 +351,23 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             <label>{copy.academic.email}<input type="email" value={formAlumno?.correo || ""} onChange={e => setFormAlumno({...formAlumno, correo: e.target.value})}/></label>
             <label>{copy.academic.phone}<input value={formAlumno?.telefono || ""} onChange={e => setFormAlumno({...formAlumno, telefono: e.target.value})}/></label>
             <label>{copy.academic.unit}<input value={formAlumno?.unidad || ""} onChange={e => setFormAlumno({...formAlumno, unidad: e.target.value})}/></label>
-            <label>{copy.academic.average}<input value={formAlumno?.promedio_academico ?? formAlumno?.promedio ?? ""} onChange={e => setFormAlumno({...formAlumno, promedio_academico: e.target.value})}/></label>
+          </div>
+        </form>
+
+        <form className="servicios-card servicios-form" onSubmit={registrarMovimiento}>
+          <div className="servicios-card-heading">
+            <div><span className="panel-kicker">{copy.movement.kicker}</span><h3>{copy.movement.title}</h3></div>
+            <button type="submit" className="btn-primary" disabled={guardando || !movimiento.detalle.trim()}>{copy.movement.submit}</button>
+          </div>
+          <div className="servicios-form-grid">
+            <label>{copy.movement.state}<select value={movimiento.estado} onChange={e => setMovimiento({...movimiento, estado: e.target.value})}>
+              <option value="">{copy.movement.noChange}</option>
+              <option value="activo">{copy.status.activo}</option>
+              <option value="reingreso">{copy.movement.readmission}</option>
+              <option value="inactivo">{copy.status.inactivo}</option>
+              <option value="baja">{copy.status.baja}</option>
+            </select><small>{copy.movement.graduationHint}</small></label>
+            <label>{copy.movement.detail}<textarea required rows="3" maxLength="2000" value={movimiento.detalle} placeholder={copy.movement.placeholder} onChange={e => setMovimiento({...movimiento, detalle: e.target.value})}/></label>
           </div>
         </form>
       </div>
@@ -354,15 +425,21 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                 <label>{copy.academic.studentName}<input required value={alta.nombre} onChange={e => setAlta({...alta, nombre: e.target.value})}/></label>
                 <label>{copy.academic.institutionUser}<input required value={alta.usuario} onChange={e => setAlta({...alta, usuario: e.target.value})}/></label>
                 <label>{copy.academic.institutionalEmail}<input required type="email" value={alta.correo} onChange={e => setAlta({...alta, correo: e.target.value})}/></label>
-                <label>{copy.academic.curp}<input required maxLength="18" value={alta.curp} onChange={e => setAlta({...alta, curp: e.target.value})}/></label>
+                <label>{copy.academic.curp}<input required minLength="18" maxLength="18" value={alta.curp} onChange={e => setAlta({...alta, curp: e.target.value.toUpperCase()})}/></label>
+                <label>{copy.academic.password}<input required type="password" autoComplete="new-password" minLength="8" pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}" title={copy.academic.passwordHint} value={alta.password} onChange={e => setAlta({...alta, password: e.target.value})}/><small>{copy.academic.passwordHint}</small></label>
                 <label>{copy.academic.phone}<input value={alta.telefono} onChange={e => setAlta({...alta, telefono: e.target.value})}/></label>
                 <label>{copy.academic.matricula}<input value={alta.matricula} onChange={e => setAlta({...alta, matricula: e.target.value})}/></label>
                 <label>{copy.academic.program}<input value={alta.programa} onChange={e => setAlta({...alta, programa: e.target.value})}/></label>
                 <label>{copy.academic.department}<input value={alta.departamento} onChange={e => setAlta({...alta, departamento: e.target.value})}/></label>
               </div>
-              <button type="submit" className="btn-primary">{copy.common.save}</button>
+              <button type="submit" className="btn-primary" disabled={guardando}>{copy.common.save}</button>
             </form>
           )}
+          {alumno && <>
+            <div className="servicios-row-actions"><button type="button" className="btn-secondary" onClick={() => setSelectedId(null)}>{copy.movement.close}</button></div>
+            {detalleAlumno()}
+          </>}
+          {tablaAlumnos()}
         </>
       );
     }
@@ -379,7 +456,13 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             <div><span className="panel-kicker">{copy.extemporaneas.kicker}</span><h3>{copy.extemporaneas.title}</h3><p>{copy.extemporaneas.intro}</p></div>
             <button type="button" className="btn-secondary" onClick={() => setRecargaExtemporaneas(count => count + 1)}>{copy.refresh}</button>
           </div>
-          {solicitudesExtemporaneas.length ? solicitudesExtemporaneas.map(solicitud => (
+          {solicitudesExtemporaneas.length > 0 && <TablaHerramientas control={extemporaneasTabla} filtros={[
+            {clave: "estado", etiqueta: copy.table.status, formato: value => etiquetasEstado[value] || value},
+            {clave: "periodo", etiqueta: etiquetasFiltro.period},
+            {clave: "programa", etiqueta: copy.table.program},
+          ]} />}
+          <div className="tabla-scroll-lista">
+          {extemporaneasTabla.visibles.length ? extemporaneasTabla.visibles.map(solicitud => (
             <article className="servicios-card" key={solicitud.id}>
               <div className="servicios-card-heading">
                 <div><h4>{solicitud.alumno_nombre} · {solicitud.alumno_matricula || copy.common.noEnrollment}</h4><p>{copy.extemporaneas.folio}: {solicitud.folio} · {solicitud.periodo} · {solicitud.programa}</p></div>
@@ -398,6 +481,8 @@ export default function PanelServiciosEscolares({session, onLogout}) {
               {solicitud.estado === "aprobada" && <button type="button" className="btn-primary" onClick={() => descargarOficioExtemporanea(solicitud)}>{copy.extemporaneas.downloadOffice}</button>}
             </article>
           )) : <p className="servicios-muted">{copy.extemporaneas.empty}</p>}
+          </div>
+          <TablaPaginacion control={extemporaneasTabla} />
         </section>
       );
     }
@@ -409,8 +494,13 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             <div><span className="panel-kicker">{copy.enrollment.title.toUpperCase()}</span><h3>{alumno ? `${copy.table.viewStudentData} ${alumno.nombre}` : copy.common.registeredStudents}</h3></div>
             {alumno && <button className="btn-secondary" onClick={() => setSelectedId(null)}>{copy.enrollment.review}</button>}
           </div>
-          {alumno ? (
-            <div className="servicios-table-wrap">
+          {alumno ? (<>
+            <TablaHerramientas control={materiasAlumnoTabla} filtros={[
+              {clave: "estado", etiqueta: copy.table.status, formato: value => estadoTexto(value, copy)},
+              {clave: "validacion", etiqueta: copy.table.validation, formato: value => estadoTexto(value, copy)},
+              {clave: "tipo", etiqueta: copy.enrollment.enrollmentType, opciones: [{value: "regular", label: copy.enrollment.regular}, {value: "extemporanea", label: copy.enrollment.extemporaneous}]},
+            ]} />
+            <div className="servicios-table-wrap tabla-scroll">
               <table className="admin-table">
                 <thead>
                   <tr>
@@ -425,7 +515,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {alumno.inscripciones.length ? alumno.inscripciones.map(item => (
+                  {materiasAlumnoTabla.visibles.length ? materiasAlumnoTabla.visibles.map(item => (
                     <tr key={item.id}>
                       <td>{item.materia_clave}</td>
                       <td>{item.materia_nombre}</td>
@@ -439,8 +529,17 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                           <Estado copy={copy} value={item.validacion_servicios || "pendiente"}/>
                           <div className="servicios-row-actions">
                             <button type="button" className="servicios-link" onClick={() => validarInscripcion(item.id, true)} disabled={item.validacion_servicios === "validada"}>{copy.table.validate}</button>
-                            <button type="button" className="servicios-link" onClick={() => validarInscripcion(item.id, false)} disabled={item.validacion_servicios === "observada"}>{copy.table.observe}</button>
+                            <button type="button" className="servicios-link" onClick={() => setObservacion({id: item.id, comentario: ""})} disabled={item.validacion_servicios === "observada"}>{copy.table.observe}</button>
                           </div>
+                          {observacion?.id === item.id && (
+                            <div className="servicios-form">
+                              <label>{copy.enrollment.observeReason}<textarea rows="2" maxLength="1000" required autoFocus value={observacion.comentario} placeholder={copy.enrollment.observeReasonHint} onChange={e => setObservacion({...observacion, comentario: e.target.value})}/></label>
+                              <div className="servicios-row-actions">
+                                <button type="button" className="btn-primary" disabled={!observacion.comentario.trim()} onClick={() => validarInscripcion(item.id, false, observacion.comentario)}>{copy.table.observe}</button>
+                                <button type="button" className="btn-secondary" onClick={() => setObservacion(null)}>{copy.common.cancel}</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -448,7 +547,8 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                 </tbody>
               </table>
             </div>
-          ) : <><p className="servicios-muted">{copy.enrollment.selectStudent}</p>{tablaAlumnos()}</>}
+            <TablaPaginacion control={materiasAlumnoTabla} />
+          </>) : <><p className="servicios-muted">{copy.enrollment.selectStudent}</p>{tablaAlumnos()}</>}
         </div>
       );
     }
@@ -470,7 +570,8 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                 <div><strong>{alumno.creditos_obtenidos}</strong><span>{copy.table.creditsEarned}</span></div>
                 <div><strong>{alumno.promedio_academico ?? "—"}</strong><span>{copy.table.finalAverage}</span></div>
               </div>
-              <div className="servicios-table-wrap">
+              <TablaHerramientas control={materiasAlumnoTabla} filtros={[{clave: "estado", etiqueta: copy.table.status, formato: value => estadoTexto(value, copy)}]} />
+              <div className="servicios-table-wrap tabla-scroll">
                 <table className="admin-table">
                   <thead>
                     <tr>
@@ -485,7 +586,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                     </tr>
                   </thead>
                   <tbody>
-                    {alumno.inscripciones.length ? alumno.inscripciones.map(item => (
+                    {materiasAlumnoTabla.visibles.length ? materiasAlumnoTabla.visibles.map(item => (
                       <tr key={item.id}>
                         <td>{item.materia_clave}</td>
                         <td>{item.materia_nombre}</td>
@@ -500,6 +601,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
                   </tbody>
                 </table>
               </div>
+              <TablaPaginacion control={materiasAlumnoTabla} />
               <p className="servicios-note">{copy.academic.noteAcademicValidation}</p>
             </>
           ) : <><p className="servicios-muted">{copy.messages.noAcademicData}</p>{tablaAlumnos()}</>}
@@ -666,10 +768,10 @@ export default function PanelServiciosEscolares({session, onLogout}) {
             <h1>{label}</h1>
             <p>{copy.common.institutionalManagement}</p>
           </div>
-          <button type="button" className="btn-secondary" onClick={cargar}>{copy.refresh}</button>
+          <button type="button" className="btn-secondary" onClick={() => cargar()}>{copy.refresh}</button>
         </header>
-        {message && <div className="api-success">{message}</div>}
-        {error && <div className="api-error" role="alert">{error}<button type="button" className="link-btn" onClick={() => setError(copy.common.close)}>{copy.common.close}</button></div>}
+        {message && <div className="api-success" role="status">{message}</div>}
+        {error && <div className="api-error" role="alert">{error}<button type="button" className="link-btn" onClick={() => setError("")}>{copy.common.close}</button></div>}
         {loading && !datos.alumnos.length ? <div className="servicios-empty-card">{copy.loading}</div> : contenido()}
       </main>
     </section>

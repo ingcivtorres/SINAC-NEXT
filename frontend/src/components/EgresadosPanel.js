@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useLanguage} from '../translations';
 import {fotoUrl} from './PerfilAspirante';
 import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
+import {TablaPaginacion, useTablaControl} from './TablaControles';
 
 const COPY = {
   es: {title: 'Egresados', subtitle: 'Registro oficial de egresados con su expediente.', search: 'Buscar por nombre, matrícula o tesis', allPrograms: 'Todos los programas', allGenerations: 'Todas las generaciones', register: '+ Registrar egreso', cancel: 'Cancelar', save: 'Guardar egreso', student: 'Alumno', select: 'Selecciona un alumno', date: 'Fecha de egreso', generation: 'Generación', average: 'Promedio final', thesis: 'Título de tesis', notes: 'Observaciones', exception: 'Motivo de excepción', exceptionHint: 'El alumno no cumple la prevalidación. Para registrarlo indica un motivo de excepción:', empty: 'No hay egresados registrados.', loading: 'Cargando egresados...', back: '← Volver al listado', matricula: 'Matrícula', program: 'Programa', department: 'Departamento', email: 'Correo', phone: 'Teléfono', folio: 'Folio de expediente', registeredBy: 'Registrado por', noPhoto: 'Sin foto', saved: 'Egreso registrado correctamente.', updated: 'Datos actualizados.', edit: 'Guardar cambios', error: 'No se pudo cargar la información.', expired: 'Tu sesión expiró.', record: 'Expediente', details: 'Datos del egresado', exceptionLabel: 'Registrado por excepción'},
@@ -42,6 +43,7 @@ export default function EgresadosPanel({session, onLogout}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const egresadosTabla = useTablaControl(datos.egresados, {porPagina: 25});
 
   const logoutRef = React.useRef(onLogout);
   logoutRef.current = onLogout;
@@ -163,9 +165,9 @@ export default function EgresadosPanel({session, onLogout}) {
         <select value={filters.programa} onChange={e => setFilters({...filters, programa: e.target.value})}><option value="">{t.allPrograms}</option>{datos.filtros.programas.map(v => <option key={v} value={v}>{v}</option>)}</select>
         <select value={filters.generacion} onChange={e => setFilters({...filters, generacion: e.target.value})}><option value="">{t.allGenerations}</option>{datos.filtros.generaciones.map(v => <option key={v} value={v}>{v}</option>)}</select>
       </div>
-      {loading && !datos.egresados.length ? <p>{t.loading}</p> : datos.egresados.length === 0 ? <p>{t.empty}</p> : (
-        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14}}>
-          {datos.egresados.map(item => (
+      {loading && !datos.egresados.length ? <p>{t.loading}</p> : datos.egresados.length === 0 ? <p>{t.empty}</p> : (<>
+        <div className="tabla-scroll-lista" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14}}>
+          {egresadosTabla.visibles.map(item => (
             <button type="button" key={item.id} onClick={() => { setSelected(item); setMessage(''); setError(''); }} style={{display: 'flex', gap: 12, alignItems: 'center', textAlign: 'left', padding: 12, border: '1px solid #d0d7e2', borderRadius: 10, background: '#fff', cursor: 'pointer'}}>
               <Foto item={item}/>
               <span>
@@ -176,7 +178,8 @@ export default function EgresadosPanel({session, onLogout}) {
             </button>
           ))}
         </div>
-      )}
+        <TablaPaginacion control={egresadosTabla}/>
+      </>)}
     </div>
   );
 }

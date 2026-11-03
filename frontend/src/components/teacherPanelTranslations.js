@@ -71,11 +71,74 @@ const filterLabels = {
   pt: {all: 'Todos', allSubjects: 'Todas as disciplinas', selectSubject: 'Selecione uma disciplina', subject: 'Disciplina', type: 'Tipo', status: 'Status', student: 'Aluno', purpose: 'Finalidade', feedback: 'Feedback', cohortNote: 'Ao filtrar por disciplina, provas e entrevistas são contadas para os alunos inscritos nela.', noResults: 'Nenhum resultado corresponde a esses filtros.'},
 };
 
+const extraLabels = {
+  es: {
+    period: 'Periodo', currentPeriod: 'Periodo en curso', noPeriod: 'Sin periodo en curso', room: 'Salón', modality: 'Modalidad', capacity: 'Cupo',
+    coursesIntro: 'Grupos asignados por Coordinación Académica en las cargas académicas publicadas.',
+    closedPeriod: 'Periodo cerrado: solo consulta.', validation: 'Validación', validada: 'Validada', observada: 'Observada', pendingValidation: 'Pendiente de validación',
+    gradableHint: 'Solo se califican inscripciones del periodo en curso validadas por Servicios Escolares.',
+    noGradable: 'No hay inscripciones calificables en el periodo en curso.',
+    gradeSaved: 'Calificación registrada.', examSaved: 'Calificación del examen actualizada.',
+    interviewScheduled: 'Entrevista programada.', interviewUpdated: 'Entrevista actualizada.',
+    finishTitle: 'Finalizar entrevista', notesLabel: 'Notas de la entrevista (opcional)', confirmFinish: 'Finalizar entrevista',
+    examsIntro: 'Exámenes en los que Coordinación Académica te asignó como docente evaluador.',
+    upcoming: 'Próximas entrevistas', noUpcoming: 'Sin entrevistas programadas', close: 'Cerrar',
+  },
+  en: {
+    period: 'Term', currentPeriod: 'Current term', noPeriod: 'No current term', room: 'Room', modality: 'Modality', capacity: 'Capacity',
+    coursesIntro: 'Groups assigned by Academic Coordination in published teaching loads.',
+    closedPeriod: 'Closed term: read only.', validation: 'Validation', validada: 'Validated', observada: 'Flagged', pendingValidation: 'Pending validation',
+    gradableHint: 'Only enrollments from the current term validated by School Services can be graded.',
+    noGradable: 'There are no gradable enrollments in the current term.',
+    gradeSaved: 'Grade recorded.', examSaved: 'Exam grade updated.',
+    interviewScheduled: 'Interview scheduled.', interviewUpdated: 'Interview updated.',
+    finishTitle: 'Finish interview', notesLabel: 'Interview notes (optional)', confirmFinish: 'Finish interview',
+    examsIntro: 'Exams where Academic Coordination assigned you as the evaluating teacher.',
+    upcoming: 'Upcoming interviews', noUpcoming: 'No scheduled interviews', close: 'Close',
+  },
+  de: {
+    period: 'Zeitraum', currentPeriod: 'Laufender Zeitraum', noPeriod: 'Kein laufender Zeitraum', room: 'Raum', modality: 'Modalität', capacity: 'Plätze',
+    coursesIntro: 'Von der Akademischen Koordination in veröffentlichten Lehrdeputaten zugewiesene Gruppen.',
+    closedPeriod: 'Abgeschlossener Zeitraum: nur Ansicht.', validation: 'Validierung', validada: 'Validiert', observada: 'Beanstandet', pendingValidation: 'Validierung ausstehend',
+    gradableHint: 'Bewertet werden nur Einschreibungen des laufenden Zeitraums, die von der Studierendenverwaltung validiert wurden.',
+    noGradable: 'Im laufenden Zeitraum gibt es keine bewertbaren Einschreibungen.',
+    gradeSaved: 'Note erfasst.', examSaved: 'Prüfungsnote aktualisiert.',
+    interviewScheduled: 'Gespräch geplant.', interviewUpdated: 'Gespräch aktualisiert.',
+    finishTitle: 'Gespräch beenden', notesLabel: 'Gesprächsnotizen (optional)', confirmFinish: 'Gespräch beenden',
+    examsIntro: 'Prüfungen, für die Sie die Akademische Koordination als prüfende Lehrkraft eingeteilt hat.',
+    upcoming: 'Anstehende Gespräche', noUpcoming: 'Keine geplanten Gespräche', close: 'Schließen',
+  },
+  zh: {
+    period: '学期', currentPeriod: '当前学期', noPeriod: '暂无进行中的学期', room: '教室', modality: '授课方式', capacity: '名额',
+    coursesIntro: '教务协调处在已发布的教学安排中分配给你的班级。',
+    closedPeriod: '学期已结束：仅可查看。', validation: '验证', validada: '已验证', observada: '有异议', pendingValidation: '待验证',
+    gradableHint: '仅可为当前学期且已由学生事务服务验证的选课评分。',
+    noGradable: '当前学期没有可评分的选课。',
+    gradeSaved: '成绩已登记。', examSaved: '考试成绩已更新。',
+    interviewScheduled: '面谈已安排。', interviewUpdated: '面谈已更新。',
+    finishTitle: '结束面谈', notesLabel: '面谈记录（可选）', confirmFinish: '结束面谈',
+    examsIntro: '教务协调处指派你担任评审教师的考试。',
+    upcoming: '即将进行的面谈', noUpcoming: '暂无已安排的面谈', close: '关闭',
+  },
+  pt: {
+    period: 'Período', currentPeriod: 'Período em andamento', noPeriod: 'Sem período em andamento', room: 'Sala', modality: 'Modalidade', capacity: 'Vagas',
+    coursesIntro: 'Turmas atribuídas pela Coordenação Acadêmica nas cargas acadêmicas publicadas.',
+    closedPeriod: 'Período encerrado: somente consulta.', validation: 'Validação', validada: 'Validada', observada: 'Com observação', pendingValidation: 'Validação pendente',
+    gradableHint: 'Só podem ser avaliadas inscrições do período em andamento validadas pelos Serviços Escolares.',
+    noGradable: 'Não há inscrições avaliáveis no período em andamento.',
+    gradeSaved: 'Nota registrada.', examSaved: 'Nota do exame atualizada.',
+    interviewScheduled: 'Entrevista agendada.', interviewUpdated: 'Entrevista atualizada.',
+    finishTitle: 'Finalizar entrevista', notesLabel: 'Notas da entrevista (opcional)', confirmFinish: 'Finalizar entrevista',
+    examsIntro: 'Exames em que a Coordenação Acadêmica atribuiu você como docente avaliador.',
+    upcoming: 'Próximas entrevistas', noUpcoming: 'Sem entrevistas agendadas', close: 'Fechar',
+  },
+};
+
 export function useTeacherCopy() {
   const {language} = useLanguage();
   return useMemo(() => {
     const selectedCatalog = catalog[language] || catalog.es;
     const filterLanguage = language in filterLabels ? language : 'es';
-    return {...selectedCatalog, filters: filterLabels[filterLanguage]};
+    return {...selectedCatalog, filters: filterLabels[filterLanguage], extra: extraLabels[language] || extraLabels.en};
   }, [language]);
 }

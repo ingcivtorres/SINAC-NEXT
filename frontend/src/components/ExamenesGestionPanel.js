@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useLanguage} from '../translations';
 import './ExamenesGestionPanel.css';
+import {TablaPaginacion, useTablaControl} from './TablaControles';
 
 const COPY = {
   es: {
@@ -22,6 +23,9 @@ const COPY = {
     locked: 'Este examen ya fue iniciado: su contenido no se puede modificar.', detail: 'Detalle del examen', yourAnswer: 'Respuesta del aspirante', correctLabel: 'Respuesta correcta', noAnswer: 'Sin responder',
     rightWrong: {true: 'Correcta', false: 'Incorrecta'}, passNote: 'Aprobatoria mínima: 8.0', saveError: 'No se pudo guardar el examen.',
     states: {programado: 'Programado', iniciado: 'En curso', completado: 'Completado', aprobado: 'Aprobado', reprobado: 'Reprobado', cancelado: 'Cancelado'},
+    evaluator: 'Docente evaluador (opcional)', noEvaluator: 'Sin docente evaluador', assignEvaluator: 'Asignar evaluador', evaluatorSaved: 'Docente evaluador actualizado.',
+    evaluatorHint: 'Solo el docente evaluador puede ajustar la calificación final desde su panel.',
+    types: {admision: 'Examen de Admisión', seleccion: 'Examen de Selección', diagnostico: 'Examen de Diagnóstico', predoctoral: 'Examen predoctoral', otro: 'Otro'},
   },
   en: {
     kicker: 'ASSESSMENT', title: 'Online exams', intro: 'Create admission, selection or diagnostic exams, assign them to applicants and review their results.',
@@ -42,11 +46,85 @@ const COPY = {
     locked: 'This exam has already been started: its content cannot be changed.', detail: 'Exam details', yourAnswer: 'Applicant answer', correctLabel: 'Correct answer', noAnswer: 'Unanswered',
     rightWrong: {true: 'Correct', false: 'Incorrect'}, passNote: 'Minimum passing grade: 8.0', saveError: 'The exam could not be saved.',
     states: {programado: 'Scheduled', iniciado: 'In progress', completado: 'Completed', aprobado: 'Passed', reprobado: 'Failed', cancelado: 'Cancelled'},
+    evaluator: 'Evaluating teacher (optional)', noEvaluator: 'No evaluating teacher', assignEvaluator: 'Assign evaluator', evaluatorSaved: 'Evaluating teacher updated.',
+    evaluatorHint: 'Only the evaluating teacher can adjust the final grade from their panel.',
+    types: {admision: 'Admission exam', seleccion: 'Selection exam', diagnostico: 'Diagnostic exam', predoctoral: 'Predoctoral exam', otro: 'Other'},
+  },
+  de: {
+    kicker: 'BEWERTUNG', title: 'Online-Prüfungen', intro: 'Erstellen Sie Aufnahme-, Auswahl- oder Diagnoseprüfungen, weisen Sie sie Bewerbern zu und prüfen Sie die Ergebnisse.',
+    introReadOnly: 'Sehen Sie die Online-Prüfungen der Bewerber und ihre Ergebnisse ein. Erstellung und Bearbeitung obliegen der Akademischen Koordination.',
+    newExam: 'Neue Prüfung', refresh: 'Aktualisieren', search: 'Nach Titel oder Bewerber suchen', allStates: 'Alle Status', allTypes: 'Alle Typen',
+    loading: 'Wird geladen...', empty: 'Keine passenden Prüfungen.', loadError: 'Die Prüfungen konnten nicht geladen werden.',
+    cols: {exam: 'Prüfung', applicant: 'Bewerber', date: 'Geplantes Datum', status: 'Status', grade: 'Note', actions: 'Aktionen'},
+    questions: 'Fragen', minutes: 'Min.', attempts: 'Versuche', pending: 'Noch festzulegen',
+    view: 'Ansehen', edit: 'Bearbeiten', cancel: 'Prüfung absagen', remove: 'Löschen', anotherAttempt: 'Weiterer Versuch', close: 'Schließen', back: 'Zurück',
+    formNew: 'Neue Prüfung', formEdit: 'Prüfung bearbeiten', type: 'Typ', name: 'Titel', description: 'Beschreibung (optional)',
+    date: 'Datum und Uhrzeit der Verfügbarkeit', duration: 'Dauer (Minuten)', maxAttempts: 'Erlaubte Versuche',
+    applicants: 'Bewerber', applicantSearch: 'Bewerber nach Name, Benutzer oder E-Mail suchen', applicantHint: 'Für jeden ausgewählten Bewerber wird eine eigene Prüfung erstellt.',
+    noCandidates: 'Keine Ergebnisse.', selected: 'Ausgewählt', removeApplicant: 'Entfernen',
+    questionsTitle: 'Fragen', addQuestion: 'Frage hinzufügen', questionText: 'Fragetext', multiple: 'Multiple Choice', open: 'Offene Antwort',
+    option: 'Option', addOption: 'Option hinzufügen', correct: 'Richtig', correctAnswer: 'Richtige Antwort (Groß-/Kleinschreibung wird ignoriert)', removeQuestion: 'Frage entfernen',
+    save: 'Speichern', saving: 'Wird gespeichert...', created: 'Prüfung(en) erstellt:', updated: 'Prüfung aktualisiert.', removed: 'Prüfung gelöscht.',
+    confirmCancel: 'Diese Prüfung absagen? Der Bewerber kann sie dann nicht mehr ablegen.', confirmRemove: 'Diese Prüfung endgültig löschen?', confirmAttempt: 'Einen weiteren Versuch erlauben? Frühere Antworten werden gelöscht.',
+    locked: 'Diese Prüfung wurde bereits begonnen: Ihr Inhalt kann nicht geändert werden.', detail: 'Prüfungsdetails', yourAnswer: 'Antwort des Bewerbers', correctLabel: 'Richtige Antwort', noAnswer: 'Nicht beantwortet',
+    rightWrong: {true: 'Richtig', false: 'Falsch'}, passNote: 'Mindestnote zum Bestehen: 8,0', saveError: 'Die Prüfung konnte nicht gespeichert werden.',
+    states: {programado: 'Geplant', iniciado: 'Läuft', completado: 'Abgeschlossen', aprobado: 'Bestanden', reprobado: 'Nicht bestanden', cancelado: 'Abgesagt'},
+    evaluator: 'Prüfende Lehrkraft (optional)', noEvaluator: 'Keine prüfende Lehrkraft', assignEvaluator: 'Prüfer zuweisen', evaluatorSaved: 'Prüfende Lehrkraft aktualisiert.',
+    evaluatorHint: 'Nur die prüfende Lehrkraft kann die Endnote in ihrem Panel anpassen.',
+    types: {admision: 'Aufnahmeprüfung', seleccion: 'Auswahlprüfung', diagnostico: 'Diagnoseprüfung', predoctoral: 'Prädoktorale Prüfung', otro: 'Sonstige'},
+  },
+  zh: {
+    kicker: '评估', title: '在线考试', intro: '创建入学、选拔或诊断考试，分配给申请人并查看结果。',
+    introReadOnly: '查看申请人的在线考试及结果。考试的创建和编辑由教务协调处负责。',
+    newExam: '新建考试', refresh: '刷新', search: '按标题或申请人搜索', allStates: '所有状态', allTypes: '所有类型',
+    loading: '正在加载...', empty: '没有符合条件的考试。', loadError: '无法加载考试。',
+    cols: {exam: '考试', applicant: '申请人', date: '计划日期', status: '状态', grade: '成绩', actions: '操作'},
+    questions: '道题', minutes: '分钟', attempts: '尝试次数', pending: '待定',
+    view: '查看', edit: '编辑', cancel: '取消考试', remove: '删除', anotherAttempt: '再给一次机会', close: '关闭', back: '返回',
+    formNew: '新建考试', formEdit: '编辑考试', type: '类型', name: '标题', description: '说明（可选）',
+    date: '开放日期和时间', duration: '时长（分钟）', maxAttempts: '允许尝试次数',
+    applicants: '申请人', applicantSearch: '按姓名、用户名或邮箱搜索申请人', applicantHint: '将为每位所选申请人分别创建一场考试。',
+    noCandidates: '无结果。', selected: '已选择', removeApplicant: '移除',
+    questionsTitle: '题目', addQuestion: '添加题目', questionText: '题干', multiple: '单选题', open: '开放式回答',
+    option: '选项', addOption: '添加选项', correct: '正确', correctAnswer: '正确答案（不区分大小写）', removeQuestion: '移除题目',
+    save: '保存', saving: '正在保存...', created: '已创建考试：', updated: '考试已更新。', removed: '考试已删除。',
+    confirmCancel: '确定取消此考试吗？申请人将无法再参加。', confirmRemove: '确定永久删除此考试吗？', confirmAttempt: '确定再允许一次尝试吗？之前的答案将被清除。',
+    locked: '此考试已开始，内容无法修改。', detail: '考试详情', yourAnswer: '申请人的答案', correctLabel: '正确答案', noAnswer: '未作答',
+    rightWrong: {true: '正确', false: '错误'}, passNote: '最低及格分：8.0', saveError: '无法保存考试。',
+    states: {programado: '已安排', iniciado: '进行中', completado: '已完成', aprobado: '通过', reprobado: '未通过', cancelado: '已取消'},
+    evaluator: '评审教师（可选）', noEvaluator: '无评审教师', assignEvaluator: '指派评审', evaluatorSaved: '评审教师已更新。',
+    evaluatorHint: '只有评审教师可以在其面板中调整最终成绩。',
+    types: {admision: '入学考试', seleccion: '选拔考试', diagnostico: '诊断考试', predoctoral: '博士资格考试', otro: '其他'},
+  },
+  pt: {
+    kicker: 'AVALIAÇÃO', title: 'Exames on-line', intro: 'Crie exames de admissão, seleção ou diagnóstico, atribua-os aos candidatos e revise os resultados.',
+    introReadOnly: 'Consulte os exames on-line dos candidatos e seus resultados. A criação e a edição cabem à Coordenação Acadêmica.',
+    newExam: 'Novo exame', refresh: 'Atualizar', search: 'Buscar por título ou candidato', allStates: 'Todos os status', allTypes: 'Todos os tipos',
+    loading: 'Carregando...', empty: 'Nenhum exame corresponde.', loadError: 'Não foi possível carregar os exames.',
+    cols: {exam: 'Exame', applicant: 'Candidato', date: 'Data programada', status: 'Status', grade: 'Nota', actions: 'Ações'},
+    questions: 'perguntas', minutes: 'min', attempts: 'Tentativas', pending: 'A definir',
+    view: 'Ver', edit: 'Editar', cancel: 'Cancelar exame', remove: 'Excluir', anotherAttempt: 'Outra tentativa', close: 'Fechar', back: 'Voltar',
+    formNew: 'Novo exame', formEdit: 'Editar exame', type: 'Tipo', name: 'Título', description: 'Descrição (opcional)',
+    date: 'Data e hora de disponibilidade', duration: 'Duração (minutos)', maxAttempts: 'Tentativas permitidas',
+    applicants: 'Candidatos', applicantSearch: 'Buscar candidato por nome, usuário ou e-mail', applicantHint: 'Será criado um exame individual para cada candidato selecionado.',
+    noCandidates: 'Sem resultados.', selected: 'Selecionados', removeApplicant: 'Remover',
+    questionsTitle: 'Perguntas', addQuestion: 'Adicionar pergunta', questionText: 'Enunciado', multiple: 'Múltipla escolha', open: 'Resposta aberta',
+    option: 'Opção', addOption: 'Adicionar opção', correct: 'Correta', correctAnswer: 'Resposta correta (sem distinguir maiúsculas)', removeQuestion: 'Remover pergunta',
+    save: 'Salvar', saving: 'Salvando...', created: 'Exame(s) criado(s):', updated: 'Exame atualizado.', removed: 'Exame excluído.',
+    confirmCancel: 'Cancelar este exame? O candidato não poderá mais realizá-lo.', confirmRemove: 'Excluir este exame definitivamente?', confirmAttempt: 'Permitir outra tentativa? As respostas anteriores serão apagadas.',
+    locked: 'Este exame já foi iniciado: seu conteúdo não pode ser modificado.', detail: 'Detalhes do exame', yourAnswer: 'Resposta do candidato', correctLabel: 'Resposta correta', noAnswer: 'Sem resposta',
+    rightWrong: {true: 'Correta', false: 'Incorreta'}, passNote: 'Nota mínima para aprovação: 8,0', saveError: 'Não foi possível salvar o exame.',
+    states: {programado: 'Programado', iniciado: 'Em andamento', completado: 'Concluído', aprobado: 'Aprovado', reprobado: 'Reprovado', cancelado: 'Cancelado'},
+    evaluator: 'Docente avaliador (opcional)', noEvaluator: 'Sem docente avaliador', assignEvaluator: 'Atribuir avaliador', evaluatorSaved: 'Docente avaliador atualizado.',
+    evaluatorHint: 'Somente o docente avaliador pode ajustar a nota final em seu painel.',
+    types: {admision: 'Exame de admissão', seleccion: 'Exame de seleção', diagnostico: 'Exame de diagnóstico', predoctoral: 'Exame predoctoral', otro: 'Outro'},
   },
 };
 
+const LOCALES = {es: 'es-MX', en: 'en-US', de: 'de-DE', zh: 'zh-CN', pt: 'pt-BR'};
+
 const emptyQuestion = () => ({texto: '', abierta: false, opciones: ['', ''], correctIdx: 0, respuesta: ''});
-const emptyForm = () => ({tipo: 'admision', titulo: '', descripcion: '', fecha_programada: '', duracion_minutos: 90, max_intentos: 1, aspirantes: [], preguntas: [emptyQuestion()]});
+const emptyForm = () => ({tipo: 'admision', titulo: '', descripcion: '', fecha_programada: '', duracion_minutos: 90, max_intentos: 1, evaluador: '', aspirantes: [], preguntas: [emptyQuestion()]});
 
 const toLocalInput = (value) => {
   if (!value) return '';
@@ -109,7 +187,7 @@ function QuestionEditor({question, index, t, onChange, onRemove, canRemove}) {
   );
 }
 
-function ExamForm({t, tipos, headers, initial, editingId, onSaved, onCancel}) {
+function ExamForm({t, tipos, evaluadores, headers, initial, editingId, onSaved, onCancel}) {
   const [form, setForm] = useState(initial);
   const [candidates, setCandidates] = useState([]);
   const [query, setQuery] = useState('');
@@ -139,6 +217,7 @@ function ExamForm({t, tipos, headers, initial, editingId, onSaved, onCancel}) {
       tipo: form.tipo, titulo: form.titulo, descripcion: form.descripcion,
       fecha_programada: form.fecha_programada ? new Date(form.fecha_programada).toISOString() : '',
       duracion_minutos: Number(form.duracion_minutos), max_intentos: Number(form.max_intentos), preguntas,
+      evaluador: form.evaluador ? Number(form.evaluador) : null,
     };
     if (!editingId) body.aspirantes = form.aspirantes.map((a) => a.id);
     setSaving(true);
@@ -158,12 +237,19 @@ function ExamForm({t, tipos, headers, initial, editingId, onSaved, onCancel}) {
     <form className="exg-form" onSubmit={submit}>
       <h4>{editingId ? t.formEdit : t.formNew}</h4>
       <div className="exg-grid">
-        <label>{t.type}<select value={form.tipo} onChange={(e) => set({tipo: e.target.value})}>{tipos.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
+        <label>{t.type}<select value={form.tipo} onChange={(e) => set({tipo: e.target.value})}>{tipos.map((x) => <option key={x.value} value={x.value}>{t.types[x.value] || x.label}</option>)}</select></label>
         <label>{t.name}<input type="text" required maxLength={255} value={form.titulo} onChange={(e) => set({titulo: e.target.value})} /></label>
         <label>{t.date}<input type="datetime-local" required value={form.fecha_programada} onChange={(e) => set({fecha_programada: e.target.value})} /></label>
         <label>{t.duration}<input type="number" min="5" max="480" required value={form.duracion_minutos} onChange={(e) => set({duracion_minutos: e.target.value})} /></label>
         <label>{t.maxAttempts}<input type="number" min="1" max="5" required value={form.max_intentos} onChange={(e) => set({max_intentos: e.target.value})} /></label>
+        <label>{t.evaluator}
+          <select value={form.evaluador} onChange={(e) => set({evaluador: e.target.value})}>
+            <option value="">{t.noEvaluator}</option>
+            {evaluadores.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+          </select>
+        </label>
       </div>
+      <p className="exg-hint">{t.evaluatorHint}</p>
       <label className="exg-full">{t.description}<textarea rows="2" value={form.descripcion} onChange={(e) => set({descripcion: e.target.value})} /></label>
 
       {!editingId && (
@@ -206,17 +292,31 @@ function ExamForm({t, tipos, headers, initial, editingId, onSaved, onCancel}) {
   );
 }
 
-function ExamDetail({exam, t, locale, canManage, onBack, onEdit, onCancelExam, onAnotherAttempt, onRemove}) {
+function ExamDetail({exam, t, locale, canManage, evaluadores, onBack, onEdit, onCancelExam, onAnotherAttempt, onRemove, onAssignEvaluator}) {
   const finished = ['aprobado', 'reprobado', 'completado'].includes(exam.estado);
+  const [evaluador, setEvaluador] = useState(exam.evaluador?.id ? String(exam.evaluador.id) : '');
   return (
     <div className="exg-detail">
       <div className="exg-detail-head">
-        <div><h4>{exam.titulo}</h4><p>{exam.tipo_label} · {exam.duracion_minutos} {t.minutes} · {t.attempts}: {exam.intentos}/{exam.max_intentos}</p></div>
+        <div><h4>{exam.titulo}</h4><p>{t.types[exam.tipo] || exam.tipo_label} · {exam.duracion_minutos} {t.minutes} · {t.attempts}: {exam.intentos}/{exam.max_intentos}</p></div>
         <span className={`estado-badge estado-${exam.estado}`}>{t.states[exam.estado] || exam.estado_label}</span>
       </div>
       <p><strong>{exam.aspirante.nombre}</strong> · {exam.aspirante.correo}</p>
       <p>{formatDate(exam.fecha_programada, locale, t.pending)}</p>
       {exam.descripcion && <p>{exam.descripcion}</p>}
+      {canManage ? (
+        <div className="exg-grid">
+          <label>{t.evaluator}
+            <select value={evaluador} onChange={(e) => setEvaluador(e.target.value)}>
+              <option value="">{t.noEvaluator}</option>
+              {evaluadores.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+            </select>
+          </label>
+          <div className="exg-actions">
+            <button type="button" className="qa-btn" disabled={evaluador === String(exam.evaluador?.id ?? '')} onClick={() => onAssignEvaluator(evaluador ? Number(evaluador) : null)}>{t.assignEvaluator}</button>
+          </div>
+        </div>
+      ) : exam.evaluador && <p>{t.evaluator}: <strong>{exam.evaluador.nombre}</strong></p>}
       {finished && exam.calificacion !== null && <p>{t.cols.grade}: <strong>{exam.calificacion}</strong> <small>({t.passNote})</small></p>}
       {!exam.editable && canManage && <p className="exg-hint">{t.locked}</p>}
       <ol className="exg-detail-questions">
@@ -247,13 +347,14 @@ function ExamDetail({exam, t, locale, canManage, onBack, onEdit, onCancelExam, o
 export default function ExamenesGestionPanel({session}) {
   const {language} = useLanguage();
   const t = COPY[language] || COPY.es;
-  const locale = language === 'en' ? 'en-US' : 'es-MX';
+  const locale = LOCALES[language] || LOCALES.es;
   const headers = useMemo(() => ({Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'}), [session.access]);
-  const [data, setData] = useState({examenes: [], resumen: {}, tipos: [], puede_crear: false});
+  const [data, setData] = useState({examenes: [], resumen: {}, tipos: [], evaluadores: [], puede_crear: false});
   const [filters, setFilters] = useState({q: '', estado: '', tipo: ''});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
   const [view, setView] = useState({mode: 'list'});
+  const examenesTabla = useTablaControl(data.examenes);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -293,7 +394,7 @@ export default function ExamenesGestionPanel({session}) {
 
   const editInitial = (exam) => ({
     tipo: exam.tipo, titulo: exam.titulo, descripcion: exam.descripcion, fecha_programada: toLocalInput(exam.fecha_programada),
-    duracion_minutos: exam.duracion_minutos, max_intentos: exam.max_intentos, aspirantes: [],
+    duracion_minutos: exam.duracion_minutos, max_intentos: exam.max_intentos, evaluador: exam.evaluador?.id ? String(exam.evaluador.id) : '', aspirantes: [],
     preguntas: (exam.preguntas || []).map((p) => {
       const abierta = !p.opciones?.length;
       const idx = abierta ? 0 : p.opciones.findIndex((o) => o.toLowerCase() === String(p.respuesta_correcta).toLowerCase());
@@ -320,10 +421,11 @@ export default function ExamenesGestionPanel({session}) {
       </div>
       {message && <p className={`exg-notice exg-notice--${message.type}`} role={message.type === 'error' ? 'alert' : 'status'}>{message.text}</p>}
 
-      {view.mode === 'new' && <ExamForm t={t} tipos={data.tipos} headers={headers} initial={emptyForm()} onSaved={onSaved} onCancel={() => setView({mode: 'list'})} />}
-      {view.mode === 'edit' && <ExamForm t={t} tipos={data.tipos} headers={headers} initial={editInitial(view.exam)} editingId={view.exam.id} onSaved={onSaved} onCancel={() => setView({mode: 'detail', exam: view.exam})} />}
+      {view.mode === 'new' && <ExamForm t={t} tipos={data.tipos} evaluadores={data.evaluadores || []} headers={headers} initial={emptyForm()} onSaved={onSaved} onCancel={() => setView({mode: 'list'})} />}
+      {view.mode === 'edit' && <ExamForm t={t} tipos={data.tipos} evaluadores={data.evaluadores || []} headers={headers} initial={editInitial(view.exam)} editingId={view.exam.id} onSaved={onSaved} onCancel={() => setView({mode: 'detail', exam: view.exam})} />}
       {view.mode === 'detail' && (
-        <ExamDetail exam={view.exam} t={t} locale={locale} canManage={data.puede_crear} onBack={() => setView({mode: 'list'})}
+        <ExamDetail key={view.exam.id} exam={view.exam} t={t} locale={locale} canManage={data.puede_crear} evaluadores={data.evaluadores || []} onBack={() => setView({mode: 'list'})}
+          onAssignEvaluator={(evaluador) => act(view.exam, {method: 'PATCH', body: JSON.stringify({evaluador})}, null, t.evaluatorSaved)}
           onEdit={() => setView({mode: 'edit', exam: view.exam})}
           onCancelExam={() => act(view.exam, {method: 'PATCH', body: JSON.stringify({accion: 'cancelar'})}, t.confirmCancel, t.updated)}
           onAnotherAttempt={() => act(view.exam, {method: 'PATCH', body: JSON.stringify({accion: 'otro_intento'})}, t.confirmAttempt, t.updated)}
@@ -343,20 +445,20 @@ export default function ExamenesGestionPanel({session}) {
             <input type="search" placeholder={t.search} value={filters.q} onChange={(e) => setFilters((f) => ({...f, q: e.target.value}))} aria-label={t.search} />
             <select value={filters.tipo} onChange={(e) => setFilters((f) => ({...f, tipo: e.target.value}))} aria-label={t.allTypes}>
               <option value="">{t.allTypes}</option>
-              {data.tipos.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+              {data.tipos.map((x) => <option key={x.value} value={x.value}>{t.types[x.value] || x.label}</option>)}
             </select>
             <select value={filters.estado} onChange={(e) => setFilters((f) => ({...f, estado: e.target.value}))} aria-label={t.allStates}>
               <option value="">{t.allStates}</option>
               {Object.entries(t.states).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap tabla-scroll">
             <table className="admin-table">
               <thead><tr><th>{t.cols.exam}</th><th>{t.cols.applicant}</th><th>{t.cols.date}</th><th>{t.cols.status}</th><th>{t.cols.grade}</th><th>{t.cols.actions}</th></tr></thead>
               <tbody>
-                {loading && !data.examenes.length ? <tr><td colSpan="6">{t.loading}</td></tr> : data.examenes.length ? data.examenes.map((exam) => (
+                {loading && !data.examenes.length ? <tr><td colSpan="6">{t.loading}</td></tr> : examenesTabla.visibles.length ? examenesTabla.visibles.map((exam) => (
                   <tr key={exam.id}>
-                    <td><strong>{exam.titulo}</strong><small>{exam.tipo_label} · {exam.total_preguntas} {t.questions} · {exam.duracion_minutos} {t.minutes}</small></td>
+                    <td><strong>{exam.titulo}</strong><small>{t.types[exam.tipo] || exam.tipo_label} · {exam.total_preguntas} {t.questions} · {exam.duracion_minutos} {t.minutes}</small></td>
                     <td><strong>{exam.aspirante.nombre}</strong><small>{exam.aspirante.usuario}</small></td>
                     <td>{formatDate(exam.fecha_programada, locale, t.pending)}</td>
                     <td><span className={`estado-badge estado-${exam.estado}`}>{t.states[exam.estado] || exam.estado_label}</span></td>
@@ -367,6 +469,7 @@ export default function ExamenesGestionPanel({session}) {
               </tbody>
             </table>
           </div>
+          <TablaPaginacion control={examenesTabla} />
         </>
       )}
     </div>

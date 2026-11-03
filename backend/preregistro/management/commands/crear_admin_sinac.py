@@ -36,9 +36,11 @@ class Command(BaseCommand):
                 'seccion': 'Administración',
                 'programa': 'SINAC NEXT',
                 'business_key': 'ADMIN-SINAC',
+                'rol': 'admin',
             },
         )
         user.correo = 'admin@sinac.local'
+        user.rol = 'admin'
         user.is_active = True
         user.is_staff = True
         user.is_superuser = True

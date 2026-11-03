@@ -5,10 +5,12 @@ Servicios Escolares consulta y valida información, pero no modifica
 calificaciones de los docentes.
 """
 from io import BytesIO
+from pathlib import Path
 import uuid
 import re
 from xml.sax.saxutils import escape
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q, Sum
 from django.http import FileResponse
@@ -17,13 +19,16 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria
+from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, PeriodoInscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria
 from .serializers import DocumentoAspiranteSerializer, InscripcionSerializer
+from .seguridad import url_media
+
+PIE_CONSTANCIA = 'Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco.'
 
 
 def es_servicios(user):
@@ -32,8 +37,189 @@ def es_servicios(user):
     })
 
 
+MENSAJE_EGRESO_FORMAL = 'El egreso se registra desde Egresados, donde se verifica la prevalidación académica.'
+ESTADOS_SIN_CONSTANCIA = {'baja', 'inactivo'}
+
+
+def es_cambio_a_egresado(alumno, nuevo_estado):
+    return (
+        str(nuevo_estado or '').strip().lower() == 'egresado'
+        and str(alumno.proceso_estado or '').strip().lower() != 'egresado'
+    )
+
+
+def alumno_sin_constancia(alumno):
+    return not alumno.is_active or str(alumno.proceso_estado or '').strip().lower() in ESTADOS_SIN_CONSTANCIA
+
+
 def fecha_texto(value):
     return value.strftime('%d/%m/%Y') if value else '—'
+
+
+def ruta_logo_constancia(nombre):
+    directorios = (
+        Path('/app/frontend_assets'),
+        Path(settings.BASE_DIR).parent / 'frontend' / 'src' / 'assets',
+    )
+    for directorio in directorios:
+        ruta = directorio / nombre
+        if ruta.is_file():
+            return str(ruta)
+    raise FileNotFoundError(f'No se encontró el recurso requerido para la constancia: {nombre}')
+
+
+def dibujar_pie_constancia(canvas, documento):
+    canvas.saveState()
+    canvas.setFont('Helvetica', 8)
+    canvas.setFillColor(colors.HexColor('#41515a'))
+    canvas.drawCentredString(
+        letter[0] / 2,
+        .3 * inch,
+        PIE_CONSTANCIA,
+    )
+    canvas.restoreState()
+
+
+def construir_pdf_con_pie(doc, story):
+    doc.build(
+        story,
+        onFirstPage=dibujar_pie_constancia,
+        onLaterPages=dibujar_pie_constancia,
+    )
+
+
+def bloque_firma_constancia(styles):
+    estilo_etiqueta = ParagraphStyle(
+        'FirmaConstancia',
+        parent=styles['Normal'],
+        alignment=1,
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor('#263b46'),
+    )
+    estilo_sello = ParagraphStyle(
+        'SelloConstancia',
+        parent=estilo_etiqueta,
+        textColor=colors.HexColor('#62747c'),
+    )
+    bloque = Table(
+        [
+            ['', Paragraph('Sello de Servicios Escolares', estilo_sello)],
+            [Paragraph('<b>Firma de Servicios Escolares</b>', estilo_etiqueta), ''],
+        ],
+        colWidths=[4.35 * inch, 2.45 * inch],
+        rowHeights=[.65 * inch, .35 * inch],
+    )
+    bloque.setStyle(TableStyle([
+        ('SPAN', (1, 0), (1, 1)),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LINEABOVE', (0, 1), (0, 1), .8, colors.HexColor('#526872')),
+        ('BOX', (1, 0), (1, 1), .8, colors.HexColor('#9aabb2')),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    return bloque
+
+
+def datos_documento_academico(alumno, inscripciones, prefijo_folio='CE'):
+    inscripcion = (
+        inscripciones.exclude(periodo_inscripcion__isnull=True)
+        .select_related('periodo_inscripcion')
+        .order_by('-periodo_inscripcion__apertura')
+        .first()
+    )
+    periodo = inscripcion.periodo_inscripcion if inscripcion else None
+    ahora = timezone.now()
+    if not periodo:
+        periodo = PeriodoInscripcion.objects.filter(
+            activo=True,
+            apertura__lte=ahora,
+            cierre__gte=ahora,
+        ).order_by('-apertura').first()
+    if not periodo:
+        periodo = PeriodoInscripcion.objects.order_by('-apertura').first()
+
+    expediente_folio = ExpedienteDigital.objects.filter(aspirante=alumno).values_list('folio', flat=True).first()
+    fecha_emision = timezone.localdate()
+    return {
+        'periodo_escolar': periodo.nombre if periodo else 'No disponible',
+        'fecha_emision': fecha_emision.strftime('%d/%m/%Y'),
+        'folio': expediente_folio or f'{prefijo_folio}-{fecha_emision:%Y%m%d}-{alumno.pk:06d}',
+    }
+
+
+def seleccionar_inscripciones_constancia(inscripciones):
+    ahora = timezone.now()
+    periodo = PeriodoInscripcion.objects.filter(
+        activo=True,
+        apertura__lte=ahora,
+        cierre__gte=ahora,
+    ).order_by('-apertura').first()
+    if periodo:
+        return periodo, list(inscripciones.filter(periodo_inscripcion=periodo))
+
+    inscripcion = (
+        inscripciones.exclude(periodo_inscripcion__isnull=True)
+        .select_related('periodo_inscripcion')
+        .order_by('-periodo_inscripcion__apertura')
+        .first()
+    )
+    if inscripcion:
+        periodo = inscripcion.periodo_inscripcion
+        return periodo, list(inscripciones.filter(periodo_inscripcion=periodo))
+
+    return None, list(inscripciones.filter(periodo_inscripcion__isnull=True))
+
+
+def resumen_historial_academico(inscripciones):
+    calificaciones = [item.calificacion for item in inscripciones if item.calificacion is not None]
+    aprobadas = [item for item in inscripciones if item.calificacion is not None and item.calificacion >= 7]
+    reprobadas = [item for item in inscripciones if item.calificacion is not None and item.calificacion < 7]
+    en_curso = [item for item in inscripciones if item.calificacion is None]
+    return {
+        'materias': len(inscripciones),
+        'aprobadas': len(aprobadas),
+        'reprobadas': len(reprobadas),
+        'en_curso': len(en_curso),
+        'promedio': sum(calificaciones) / len(calificaciones) if calificaciones else None,
+        'creditos_aprobados': sum(item.materia.creditos or 0 for item in aprobadas),
+    }
+
+
+def progreso_posgrado(alumno, inscripciones):
+    configuracion = ConfiguracionPrograma.objects.filter(
+        programa__iexact=alumno.programa,
+        activo=True,
+    ).first()
+    creditos_requeridos = configuracion.creditos_requeridos if configuracion else 0
+    materias_aprobadas = {
+        item.materia_id: item.materia.creditos or 0
+        for item in inscripciones
+        if item.calificacion is not None and item.calificacion >= 7
+    }
+    creditos_aprobados = sum(materias_aprobadas.values())
+    porcentaje = (
+        min(100, round(creditos_aprobados * 100 / creditos_requeridos))
+        if creditos_requeridos > 0 else None
+    )
+    return {
+        'creditos_aprobados': creditos_aprobados,
+        'creditos_requeridos': creditos_requeridos or None,
+        'porcentaje': porcentaje,
+    }
+
+
+def celda_historial(texto, estilo):
+    return Paragraph(escape(str(texto if texto not in (None, '') else '—')), estilo)
+
+
+def estado_calificacion(inscripcion):
+    if inscripcion.calificacion is None:
+        return 'En curso'
+    return 'Aprobada' if inscripcion.calificacion >= 7 else 'Reprobada'
 
 
 def evaluar_prevalidacion_egreso(alumno, inscripciones, configuracion):
@@ -121,7 +307,7 @@ def serializar_alumno(alumno, configuraciones=None, inscripciones=None):
         'matricula': alumno.matricula,
         'correo': alumno.correo,
         'telefono': alumno.telefono,
-        'profile_photo': alumno.profile_photo.url if alumno.profile_photo else None,
+        'profile_photo': url_media(alumno.profile_photo),
         'programa': alumno.programa,
         'departamento': alumno.departamento,
         'unidad': alumno.unidad,
@@ -274,6 +460,8 @@ class ServiciosEscolaresAlumnoView(APIView):
         cambios = {campo: request.data[campo] for campo in campos if campo in request.data}
         if 'matricula' in cambios and not str(cambios['matricula']).strip():
             cambios['matricula'] = None
+        if es_cambio_a_egresado(alumno, cambios.get('proceso_estado')):
+            return Response({'detail': MENSAJE_EGRESO_FORMAL}, status=status.HTTP_400_BAD_REQUEST)
         if not cambios:
             return Response({'detail': 'No se recibieron datos administrativos para actualizar.'}, status=status.HTTP_400_BAD_REQUEST)
         valores_anteriores = {campo: getattr(alumno, campo) for campo in cambios}
@@ -301,6 +489,8 @@ class ServiciosEscolaresAlumnoView(APIView):
         nuevo_estado = (request.data.get('estado') or '').strip()
         if not detalle:
             return Response({'detalle': 'Describe el movimiento administrativo.'}, status=status.HTTP_400_BAD_REQUEST)
+        if es_cambio_a_egresado(alumno, nuevo_estado):
+            return Response({'detail': MENSAJE_EGRESO_FORMAL}, status=status.HTTP_400_BAD_REQUEST)
         if nuevo_estado:
             alumno.proceso_estado = nuevo_estado
             if nuevo_estado.lower() in ('baja', 'inactivo'):
@@ -336,7 +526,14 @@ class ServiciosEscolaresValidacionView(APIView):
             validar = False
         else:
             return Response({'validar': 'Debe ser un valor booleano.'}, status=status.HTTP_400_BAD_REQUEST)
-        detalle = request.data.get('comentario') or ('Inscripción validada administrativamente.' if validar else 'Inscripción devuelta para revisión administrativa.')
+        comentario = str(request.data.get('comentario') or '').strip()
+        if not validar and not comentario:
+            return Response({'comentario': 'Explica el motivo de la observación.'}, status=status.HTTP_400_BAD_REQUEST)
+        detalle = (
+            f'Inscripción observada por Servicios Escolares. Motivo: {comentario}'
+            if not validar
+            else comentario or 'Inscripción validada administrativamente.'
+        )
         with transaction.atomic():
             inscripciones.update(validacion_servicios='validada' if validar else 'observada', updated_at=timezone.now())
             movimiento = SeguimientoSolicitud.objects.create(aspirante=alumno, estado='inscripcion_validada' if validar else 'inscripcion_observada', detalle=detalle, origen='Servicios Escolares')
@@ -616,9 +813,10 @@ class ServiciosEscolaresDocumentoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk, tipo):
-        if request.user.is_staff or str(getattr(request.user, 'rol', '')).strip().lower() in {
+        es_personal = bool(request.user.is_staff or str(getattr(request.user, 'rol', '')).strip().lower() in {
             'servicios', 'servicios_escolares', 'servicios escolares'
-        }:
+        })
+        if es_personal:
             alumno = Aspirante.objects.filter(pk=pk, rol='alumno', is_staff=False).first()
         elif int(pk) == int(getattr(request.user, 'id', -1)):
             alumno = Aspirante.objects.filter(pk=pk, rol='alumno', is_staff=False).first()
@@ -626,44 +824,548 @@ class ServiciosEscolaresDocumentoView(APIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
         if not alumno:
             return Response({'detail': 'Alumno no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-        inscripciones = Inscripcion.objects.filter(aspirante=alumno).select_related('materia').order_by('materia__clave')
+        orden_inscripciones = (
+            ('periodo_inscripcion__apertura', 'materia__clave')
+            if tipo in ('historial', 'calificaciones')
+            else ('materia__clave',)
+        )
+        inscripciones = Inscripcion.objects.filter(aspirante=alumno).select_related(
+            'materia', 'periodo_inscripcion',
+        ).order_by(*orden_inscripciones)
         titulos = {'constancia': 'Constancia de estudios', 'historial': 'Historial académico', 'calificaciones': 'Constancia de calificaciones', 'inscripcion': 'Constancia de inscripción', 'egreso': 'Prevalidación académica de egreso (orientativa)'}
         if tipo not in titulos:
             return Response({'detail': 'Tipo de documento no válido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if tipo == 'constancia' and alumno_sin_constancia(alumno):
+            return Response(
+                {'detail': 'No se emite constancia de estudios para alumnos dados de baja o inactivos.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        periodo_constancia = None
+        inscripciones_constancia = []
+        if tipo == 'inscripcion':
+            periodo_constancia, inscripciones_constancia = seleccionar_inscripciones_constancia(
+                inscripciones,
+            )
+            if not es_personal and (
+                not inscripciones_constancia
+                or any(item.validacion_servicios != 'validada' for item in inscripciones_constancia)
+            ):
+                return Response(
+                    {'detail': 'La constancia de inscripción estará disponible cuando Servicios Escolares valide todas las materias del periodo.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
         styles = getSampleStyleSheet()
         title = ParagraphStyle('ServiciosTitle', parent=styles['Title'], textColor=colors.HexColor('#00695c'), alignment=1, fontSize=16)
         bio = BytesIO()
-        doc = SimpleDocTemplate(bio, pagesize=letter, rightMargin=.65 * inch, leftMargin=.65 * inch, topMargin=.6 * inch, bottomMargin=.6 * inch)
-        story = [Paragraph('SINAC NEXT', title), Paragraph('Centro de Investigación y de Estudios Avanzados', ParagraphStyle('Institucion', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'))), Spacer(1, 14), Paragraph(titulos[tipo], ParagraphStyle('DocTitle', parent=styles['Heading2'], alignment=1)), Spacer(1, 14)]
-        datos = [['Alumno', alumno.nombre], ['Matrícula', alumno.matricula or '—'], ['Programa', alumno.programa or '—'], ['Departamento', alumno.departamento or '—'], ['Estatus', alumno.proceso_estado or '—']]
-        info = Table(datos, colWidths=[1.5 * inch, 5.3 * inch])
-        info.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#b8c7d1')), ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e7f3f1')), ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'), ('PADDING', (0, 0), (-1, -1), 7)]))
-        story.append(info)
+        doc = SimpleDocTemplate(
+            bio,
+            pagesize=letter,
+            rightMargin=.65 * inch,
+            leftMargin=.65 * inch,
+            topMargin=.65 * inch,
+            bottomMargin=.72 * inch,
+        )
+        prevalidacion = None
         if tipo == 'egreso':
-            configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).prefetch_related('materias_plan__materia').first()
-            inscripciones_egreso = list(inscripciones.select_related('materia', 'periodo_inscripcion'))
+            configuracion = ConfiguracionPrograma.objects.filter(
+                programa__iexact=alumno.programa,
+                activo=True,
+            ).prefetch_related('materias_plan__materia').first()
+            inscripciones_egreso = list(inscripciones)
             prevalidacion = evaluar_prevalidacion_egreso(alumno, inscripciones_egreso, configuracion)
-            resumen = prevalidacion['resumen']
+        if tipo in ('constancia', 'historial', 'calificaciones', 'inscripcion', 'egreso'):
+            logo_cinvestav = Image(ruta_logo_constancia('logociv.png'), width=1.4 * inch, height=.45 * inch, kind='proportional')
+            logo_sinac = Image(ruta_logo_constancia('SINAC5-removebg-preview.png'), width=1.4 * inch, height=.45 * inch, kind='proportional')
+            encabezado = Table(
+                [[
+                    logo_cinvestav,
+                    Paragraph(
+                        'Centro de Investigación y de Estudios Avanzados',
+                        ParagraphStyle('InstitucionConstancia', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'), fontSize=11),
+                    ),
+                    logo_sinac,
+                ]],
+                colWidths=[1.55 * inch, 4.1 * inch, 1.55 * inch],
+                rowHeights=[.58 * inch],
+            )
+            encabezado.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            titulo_documento = Table(
+                [[Paragraph(
+                    titulos[tipo].upper(),
+                    ParagraphStyle('DocTitleInstitucional', parent=styles['Heading2'], alignment=1, textColor=colors.white, fontSize=15, leading=18),
+                )]],
+                colWidths=[6.8 * inch],
+            )
+            titulo_documento.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#00695c')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            encabezado.setStyle(TableStyle([
+                ('LINEBELOW', (0, 0), (-1, -1), 1, colors.HexColor('#d2dfdc')),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            story = [
+                encabezado,
+                Spacer(1, 15),
+                titulo_documento,
+                Spacer(1, 18),
+                Paragraph(
+                    'INFORMACIÓN DEL ESTUDIANTE',
+                    ParagraphStyle('SeccionInstitucional', parent=styles['Heading3'], textColor=colors.HexColor('#00695c'), fontSize=10, leading=13),
+                ),
+                Spacer(1, 5),
+            ]
+        else:
+            story = [Paragraph('SINAC NEXT', title), Paragraph('Centro de Investigación y de Estudios Avanzados', ParagraphStyle('Institucion', parent=styles['Heading2'], alignment=1, textColor=colors.HexColor('#00695c'))), Spacer(1, 14), Paragraph(titulos[tipo], ParagraphStyle('DocTitle', parent=styles['Heading2'], alignment=1)), Spacer(1, 14)]
+        datos = [
+            ['Alumno', alumno.nombre],
+            ['Matrícula', alumno.matricula or '—'],
+            ['Programa', alumno.programa or '—'],
+            ['Departamento', alumno.departamento or '—'],
+            ['Estatus', alumno.proceso_estado or '—'],
+        ]
+        datos_emision = None
+        if tipo in ('constancia', 'historial', 'calificaciones', 'inscripcion', 'egreso'):
+            prefijo_folio = {
+                'constancia': 'CE',
+                'historial': 'HA',
+                'calificaciones': 'CC',
+                'inscripcion': 'CI',
+                'egreso': 'PE',
+            }[tipo]
+            datos_emision = datos_documento_academico(alumno, inscripciones, prefijo_folio)
+        if tipo == 'constancia':
+            datos.extend([
+                ['Periodo escolar', datos_emision['periodo_escolar']],
+                ['Fecha de expedición', datos_emision['fecha_emision']],
+                ['Folio', datos_emision['folio']],
+            ])
+        elif tipo in ('historial', 'calificaciones', 'egreso'):
+            datos.extend([
+                ['Fecha de expedición', datos_emision['fecha_emision']],
+                ['Folio', datos_emision['folio']],
+            ])
+        elif tipo == 'inscripcion':
+            datos.extend([
+                ['Periodo escolar', periodo_constancia.nombre if periodo_constancia else 'No disponible'],
+                ['Fecha de expedición', datos_emision['fecha_emision']],
+                ['Folio', datos_emision['folio']],
+            ])
+        info = Table(datos, colWidths=[1.5 * inch, 5.3 * inch])
+        info.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#d5e0e4')),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e7f3f1')),
+            ('ROWBACKGROUNDS', (1, 0), (1, -1), [colors.white, colors.HexColor('#f7fafb')]),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#264b4b')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 9),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(info)
+        if tipo == 'constancia':
+            story.extend([
+                Spacer(1, 18),
+                Paragraph(
+                    (
+                        f'<b>A quien corresponda:</b> Se hace constar que '
+                        f'<b>{escape(alumno.nombre or "—")}</b> se encuentra inscrito(a) '
+                        f'en el programa de <b>{escape(alumno.programa or "—")}</b> '
+                        f'durante el periodo escolar <b>{escape(datos_emision["periodo_escolar"])}</b>.'
+                    ),
+                    ParagraphStyle(
+                        'TextoConstancia',
+                        parent=styles['BodyText'],
+                        fontSize=10,
+                        leading=16,
+                        spaceAfter=8,
+                    ),
+                ),
+                Spacer(1, 28),
+                bloque_firma_constancia(styles),
+            ])
+        if tipo in ('historial', 'calificaciones'):
+            historial_items = list(inscripciones)
+            resumen = resumen_historial_academico(historial_items)
+            promedio = f'{resumen["promedio"]:.2f}' if resumen['promedio'] is not None else '—'
+            if tipo == 'historial':
+                avance_posgrado = progreso_posgrado(alumno, historial_items)
+                porcentaje = avance_posgrado['porcentaje']
+                if porcentaje is None:
+                    avance_texto = 'No disponible: faltan configurar los créditos requeridos del programa.'
+                    barra_avance = None
+                else:
+                    avance_texto = (
+                        f'{porcentaje}% del posgrado · '
+                        f'{avance_posgrado["creditos_aprobados"]} de '
+                        f'{avance_posgrado["creditos_requeridos"]} créditos aprobados'
+                    )
+                    ancho_barra = 6.8 * inch
+                    ancho_progreso = ancho_barra * porcentaje / 100
+                    if porcentaje == 0:
+                        ancho_progreso = .02 * inch
+                    elif porcentaje == 100:
+                        ancho_progreso = ancho_barra
+                    barra_avance = Table(
+                        [['', '']],
+                        colWidths=[ancho_progreso, ancho_barra - ancho_progreso],
+                        rowHeights=[.16 * inch],
+                    )
+                    barra_avance.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#008577')),
+                        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#e3ecea')),
+                        ('BOX', (0, 0), (-1, -1), .35, colors.HexColor('#c6d6d2')),
+                    ]))
+                elementos_avance = [
+                    Spacer(1, 14),
+                    Paragraph(
+                        'AVANCE DEL POSGRADO',
+                        ParagraphStyle('TituloAvancePosgrado', parent=styles['Heading3'], textColor=colors.HexColor('#00695c'), fontSize=10),
+                    ),
+                    Spacer(1, 5),
+                    Paragraph(
+                        f'<b>{escape(avance_texto)}</b>',
+                        ParagraphStyle('TextoAvancePosgrado', parent=styles['BodyText'], fontSize=9, leading=13, textColor=colors.HexColor('#315c59')),
+                    ),
+                ]
+                if barra_avance:
+                    elementos_avance.extend([Spacer(1, 5), barra_avance])
+                story.extend(elementos_avance)
+            if tipo == 'calificaciones':
+                etiquetas_resumen = ['MATERIAS CALIFICADAS', 'APROBADAS', 'REPROBADAS']
+                valores_resumen = [
+                    str(resumen['aprobadas'] + resumen['reprobadas']),
+                    str(resumen['aprobadas']),
+                    str(resumen['reprobadas']),
+                ]
+                etiquetas_extra = ['EN CURSO', 'PROMEDIO', 'CRÉDITOS APROBADOS']
+                valores_extra = [
+                    str(resumen['en_curso']),
+                    promedio,
+                    str(resumen['creditos_aprobados']),
+                ]
+            else:
+                etiquetas_resumen = ['MATERIAS', 'APROBADAS', 'EN CURSO']
+                valores_resumen = [
+                    str(resumen['materias']),
+                    str(resumen['aprobadas']),
+                    str(resumen['en_curso']),
+                ]
+                etiquetas_extra = ['REPROBADAS', 'PROMEDIO', 'CRÉDITOS APROBADOS']
+                valores_extra = [
+                    str(resumen['reprobadas']),
+                    promedio,
+                    str(resumen['creditos_aprobados']),
+                ]
+            resumen_tabla = Table(
+                [
+                    etiquetas_resumen,
+                    valores_resumen,
+                    etiquetas_extra,
+                    valores_extra,
+                ],
+                colWidths=[6.8 * inch / 3] * 3,
+            )
+            resumen_tabla.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e7f3f1')),
+                ('BACKGROUND', (0, 2), (-1, 2), colors.HexColor('#e7f3f1')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#315c59')),
+                ('TEXTCOLOR', (0, 2), (-1, 2), colors.HexColor('#315c59')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 2), (-1, 2), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#d5e0e4')),
+                ('TOPPADDING', (0, 0), (-1, -1), 7),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+            ]))
             story.extend([
                 Spacer(1, 16),
-                Paragraph('<b>Resultado académico orientativo</b>', styles['Heading3']),
-                Paragraph(f"Materias obligatorias aprobadas: {resumen['materias_obligatorias_aprobadas']} / {resumen['materias_obligatorias']}", styles['BodyText']),
-                Paragraph(f"Créditos aprobados: {resumen['creditos_aprobados']} / {resumen['creditos_requeridos'] or 'Sin umbral configurado'}", styles['BodyText']),
-                Paragraph(f"Periodos concluidos: {resumen['periodos_cursados']} / {resumen['periodos_requeridos']}", styles['BodyText']),
-                Paragraph('Esta prevalidación no sustituye la revisión documental, administrativa ni el dictamen oficial de egreso.', styles['BodyText']),
+                Paragraph(
+                    'RESUMEN DE CALIFICACIONES' if tipo == 'calificaciones' else 'RESUMEN ACADÉMICO',
+                    ParagraphStyle('ResumenHistorial', parent=styles['Heading3'], textColor=colors.HexColor('#00695c'), fontSize=10),
+                ),
+                Spacer(1, 5),
+                resumen_tabla,
+                Spacer(1, 16),
+            ])
+        if tipo == 'egreso':
+            resumen = prevalidacion['resumen']
+            estado_color = colors.HexColor('#176b4d') if prevalidacion['completa'] else colors.HexColor('#9a4c18')
+            estado_texto = 'CUMPLE LOS REQUISITOS CONFIGURADOS' if prevalidacion['completa'] else 'PENDIENTE DE REQUISITOS'
+            estado_tabla = Table(
+                [[Paragraph(
+                    estado_texto,
+                    ParagraphStyle('EstadoEgreso', parent=styles['Heading3'], alignment=1, textColor=colors.white, fontSize=11),
+                )]],
+                colWidths=[6.8 * inch],
+            )
+            estado_tabla.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), estado_color),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 9),
+            ]))
+            requisitos = [
+                ('Materias obligatorias', resumen['materias_obligatorias_aprobadas'], resumen['materias_obligatorias']),
+                ('Créditos aprobados', resumen['creditos_aprobados'], resumen['creditos_requeridos']),
+                ('Periodos concluidos', resumen['periodos_cursados'], resumen['periodos_requeridos']),
+            ]
+            requisitos_rows = [[
+                Paragraph('<b>Requisito</b>', styles['BodyText']),
+                Paragraph('<b>Avance</b>', styles['BodyText']),
+                Paragraph('<b>Meta</b>', styles['BodyText']),
+                Paragraph('<b>Estado</b>', styles['BodyText']),
+            ]]
+            for etiqueta, avance, meta in requisitos:
+                verificado = bool(meta and avance >= meta)
+                requisitos_rows.append([
+                    Paragraph(escape(etiqueta), styles['BodyText']),
+                    str(avance),
+                    str(meta or 'Sin configurar'),
+                    'Cumplido' if verificado else 'Pendiente',
+                ])
+            requisitos_tabla = Table(
+                requisitos_rows,
+                colWidths=[2.6 * inch, 1.15 * inch, 1.45 * inch, 1.6 * inch],
+                repeatRows=1,
+            )
+            requisitos_tabla.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e7f3f1')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#315c59')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#d5e0e4')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f7fafb')]),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+                ('TOPPADDING', (0, 0), (-1, -1), 7),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+            ]))
+            story.extend([
+                Spacer(1, 16),
+                Paragraph(
+                    'RESULTADO DE LA PREVALIDACIÓN',
+                    ParagraphStyle('TituloPrevalidacion', parent=styles['Heading3'], textColor=colors.HexColor('#00695c'), fontSize=10),
+                ),
+                Spacer(1, 5),
+                estado_tabla,
+                Spacer(1, 12),
+                requisitos_tabla,
+                Spacer(1, 14),
+                Paragraph(
+                    '<b>Alcance:</b> Esta revisión es orientativa y se basa en los requisitos académicos configurados para el programa. No sustituye la validación documental ni el dictamen oficial de egreso.',
+                    ParagraphStyle('NotaPrevalidacion', parent=styles['BodyText'], fontSize=8.5, leading=12, textColor=colors.HexColor('#526872')),
+                ),
             ])
             if prevalidacion['motivos']:
-                story.append(Paragraph('<b>Pendientes académicos:</b>', styles['BodyText']))
-                story.extend(Paragraph(f'- {motivo}', styles['BodyText']) for motivo in prevalidacion['motivos'])
-        if tipo in ('historial', 'calificaciones', 'egreso'):
+                story.extend([
+                    Spacer(1, 14),
+                    Paragraph(
+                        'PENDIENTES Y OBSERVACIONES',
+                        ParagraphStyle('TituloPendientesEgreso', parent=styles['Heading3'], textColor=colors.HexColor('#9a4c18'), fontSize=10),
+                    ),
+                    Spacer(1, 4),
+                ])
+                story.extend(
+                    Paragraph(f'• {escape(motivo)}', ParagraphStyle('MotivoEgreso', parent=styles['BodyText'], fontSize=8.5, leading=12, leftIndent=10, spaceAfter=4))
+                    for motivo in prevalidacion['motivos']
+                )
+            if resumen['materias_pendientes']:
+                materias_pendientes = Table(
+                    [[
+                        Paragraph('<b>Clave</b>', styles['BodyText']),
+                        Paragraph('<b>Materia obligatoria pendiente</b>', styles['BodyText']),
+                    ]] + [
+                        [
+                            celda_historial(materia['clave'], ParagraphStyle('PendienteClave', parent=styles['BodyText'], fontSize=8, wordWrap='CJK')),
+                            celda_historial(materia['nombre'], ParagraphStyle('PendienteNombre', parent=styles['BodyText'], fontSize=8, wordWrap='CJK')),
+                        ]
+                        for materia in resumen['materias_pendientes']
+                    ],
+                    colWidths=[1.35 * inch, 5.45 * inch],
+                    repeatRows=1,
+                )
+                materias_pendientes.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8eee4')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#75411f')),
+                    ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#dfcbbb')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fdf9f5')]),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ]))
+                story.extend([
+                    Spacer(1, 10),
+                    Paragraph('<b>Materias obligatorias por aprobar</b>', styles['BodyText']),
+                    Spacer(1, 7),
+                    materias_pendientes,
+                ])
+        if tipo == 'inscripcion':
+            periodo_nombre = periodo_constancia.nombre if periodo_constancia else 'No disponible'
+            if inscripciones_constancia:
+                mensaje_inscripcion = (
+                    f'Se hace constar que <b>{escape(alumno.nombre or "—")}</b> '
+                    f'registra las siguientes inscripciones académicas para el periodo '
+                    f'<b>{escape(periodo_nombre)}</b>.'
+                )
+            else:
+                mensaje_inscripcion = (
+                    f'No se encontraron inscripciones académicas registradas para '
+                    f'<b>{escape(periodo_nombre)}</b>.'
+                )
+            story.extend([
+                Spacer(1, 18),
+                Paragraph(
+                    mensaje_inscripcion,
+                    ParagraphStyle('TextoInscripcion', parent=styles['BodyText'], fontSize=10, leading=16),
+                ),
+                Spacer(1, 15),
+                Paragraph(
+                    'MATERIAS INSCRITAS',
+                    ParagraphStyle('TituloMateriasInscritas', parent=styles['Heading3'], textColor=colors.HexColor('#00695c'), fontSize=10),
+                ),
+                Spacer(1, 6),
+            ])
+            if inscripciones_constancia:
+                total_creditos = sum(item.materia.creditos or 0 for item in inscripciones_constancia)
+                resumen_inscripcion = Table(
+                    [[
+                        Paragraph('<b>Materias inscritas</b>', styles['BodyText']),
+                        Paragraph('<b>Créditos registrados</b>', styles['BodyText']),
+                    ], [str(len(inscripciones_constancia)), str(total_creditos)]],
+                    colWidths=[3.4 * inch, 3.4 * inch],
+                )
+                resumen_inscripcion.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e7f3f1')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#315c59')),
+                    ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#d5e0e4')),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ]))
+                story.extend([resumen_inscripcion, Spacer(1, 14)])
+            else:
+                story.append(Spacer(1, 8))
+
+        if tipo in ('historial', 'calificaciones', 'egreso', 'inscripcion'):
             story.append(Spacer(1, 18))
-            rows = [['Clave', 'Materia', 'Créditos', 'Final', 'Estado']]
-            for item in inscripciones:
-                rows.append([item.materia.clave, item.materia.nombre, item.materia.creditos, item.calificacion if item.calificacion is not None else 'Pendiente', item.get_estado_display()])
-            table = Table(rows, colWidths=[.8 * inch, 3.1 * inch, .8 * inch, 1 * inch, 1.2 * inch], repeatRows=1)
-            table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00695c')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white), ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#b8c7d1')), ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f8fa')]), ('PADDING', (0, 0), (-1, -1), 6)]))
+            if tipo in ('historial', 'calificaciones', 'inscripcion'):
+                estilo_celda_historial = ParagraphStyle(
+                    'CeldaInscripcion' if tipo == 'inscripcion' else ('CeldaHistorial' if tipo == 'historial' else 'CeldaCalificaciones'),
+                    parent=styles['BodyText'],
+                    fontSize=7.5,
+                    leading=9.5,
+                    wordWrap='CJK',
+                )
+                estilo_encabezado_historial = ParagraphStyle(
+                    'EncabezadoInscripcion' if tipo == 'inscripcion' else ('EncabezadoHistorial' if tipo == 'historial' else 'EncabezadoCalificaciones'),
+                    parent=estilo_celda_historial,
+                    textColor=colors.white,
+                    fontName='Helvetica-Bold',
+                    alignment=1,
+                )
+                if tipo == 'inscripcion':
+                    headers = ['Clave', 'Materia', 'Créditos', 'Docente', 'Horario', 'Estado']
+                else:
+                    headers = (
+                        ['Periodo', 'Clave', 'Materia', 'Créditos', 'Calificación', 'Estado']
+                        if tipo == 'historial'
+                        else ['Periodo', 'Clave', 'Materia', 'Créditos', 'Calificación', 'Resultado']
+                    )
+                rows = [[celda_historial(header, estilo_encabezado_historial) for header in headers]]
+                items_tabla = inscripciones_constancia if tipo == 'inscripcion' else historial_items
+                for item in items_tabla:
+                    periodo_nombre = item.periodo_inscripcion.nombre if item.periodo_inscripcion else '—'
+                    calificacion = f'{item.calificacion:.2f}' if item.calificacion is not None else 'En curso'
+                    if tipo == 'inscripcion':
+                        rows.append([
+                            celda_historial(item.materia.clave, estilo_celda_historial),
+                            celda_historial(item.materia.nombre, estilo_celda_historial),
+                            celda_historial(item.materia.creditos or 0, estilo_celda_historial),
+                            celda_historial(item.materia.profesor or 'Por asignar', estilo_celda_historial),
+                            celda_historial(item.horario or item.materia.horario or 'Por asignar', estilo_celda_historial),
+                            celda_historial(item.get_estado_display(), estilo_celda_historial),
+                        ])
+                        continue
+                    rows.append([
+                        celda_historial(periodo_nombre, estilo_celda_historial),
+                        celda_historial(item.materia.clave, estilo_celda_historial),
+                        celda_historial(item.materia.nombre, estilo_celda_historial),
+                        celda_historial(item.materia.creditos or 0, estilo_celda_historial),
+                        celda_historial(calificacion, estilo_celda_historial),
+                        celda_historial(
+                            estado_calificacion(item) if tipo == 'calificaciones' else item.get_estado_display(),
+                            estilo_celda_historial,
+                        ),
+                    ])
+                if tipo == 'inscripcion':
+                    column_widths = [.9 * inch, 1.8 * inch, .6 * inch, .85 * inch, 1.45 * inch, 1.15 * inch]
+                else:
+                    column_widths = [1.15 * inch, 1.1 * inch, 2 * inch, .55 * inch, .95 * inch, 1.05 * inch]
+            else:
+                estilo_celda_tabla = ParagraphStyle(
+                    'CeldaDocumentoAcademico',
+                    parent=styles['BodyText'],
+                    fontSize=8,
+                    leading=10,
+                    wordWrap='CJK',
+                )
+                estilo_encabezado_tabla = ParagraphStyle(
+                    'EncabezadoDocumentoAcademico',
+                    parent=estilo_celda_tabla,
+                    textColor=colors.white,
+                    fontName='Helvetica-Bold',
+                    alignment=1,
+                )
+                headers = ['Clave', 'Materia', 'Créditos', 'Final', 'Estado']
+                rows = [[celda_historial(header, estilo_encabezado_tabla) for header in headers]]
+                for item in inscripciones:
+                    calificacion = f'{item.calificacion:.2f}' if item.calificacion is not None else 'Pendiente'
+                    rows.append([
+                        celda_historial(item.materia.clave, estilo_celda_tabla),
+                        celda_historial(item.materia.nombre, estilo_celda_tabla),
+                        celda_historial(item.materia.creditos or 0, estilo_celda_tabla),
+                        celda_historial(calificacion, estilo_celda_tabla),
+                        celda_historial(item.get_estado_display(), estilo_celda_tabla),
+                    ])
+                column_widths = [1.25 * inch, 2.8 * inch, .7 * inch, 1.05 * inch, 1.4 * inch]
+            table = Table(rows, colWidths=column_widths, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00695c')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#b8c7d1')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f8fa')]),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 9),
+            ]))
             story.append(table)
-        story.extend([Spacer(1, 30), Paragraph('Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco', ParagraphStyle('Pie', parent=styles['Normal'], alignment=1, fontSize=8, textColor=colors.HexColor('#41515a')))])
-        doc.build(story)
+        if tipo == 'historial':
+            story.extend([
+                Spacer(1, 24),
+                KeepTogether(bloque_firma_constancia(styles)),
+            ])
+        if tipo in ('calificaciones', 'egreso', 'inscripcion'):
+            story.extend([
+                Spacer(1, 24),
+                KeepTogether(bloque_firma_constancia(styles)),
+            ])
+        construir_pdf_con_pie(doc, story)
         bio.seek(0)
         return FileResponse(bio, as_attachment=True, filename=f'{alumno.usuario}_{tipo}.pdf', content_type='application/pdf')

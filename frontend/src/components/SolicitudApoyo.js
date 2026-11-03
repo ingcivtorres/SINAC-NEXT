@@ -47,8 +47,11 @@ export default function SolicitudApoyo({perfil, session, onActualizado}) {
         headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
         body: JSON.stringify({banco: banco.trim(), clabe_interbancaria: clabeLimpia}),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(text.saveError);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detalle = [data.detail, data.banco, data.clabe_interbancaria].flat().filter(Boolean).join(' ');
+        throw new Error(detalle || text.saveError);
+      }
       setMensaje(text.registered);
       onActualizado();
     } catch (err) {
@@ -61,7 +64,7 @@ export default function SolicitudApoyo({perfil, session, onActualizado}) {
   return <>
     <div className="panel-card support-card">
       <h3>{text.title}</h3>
-      {!habilitado ? <p className="support-locked">{text.locked}</p> : solicitudCompleta ? <><div className="api-success" role="status">{text.registered}</div><button type="button" className="qa-btn support-print-btn" onClick={() => window.print()}>{text.print}</button></> : <form className="support-form" onSubmit={guardar}><p>{text.intro}</p><label>{text.bank}<select value={banco} required onChange={(event) => setBanco(event.target.value)}><option value="">—</option>{banco && !BANCOS_MEXICO.includes(banco) && <option value={banco}>{banco}</option>}{BANCOS_MEXICO.map(nombre => <option key={nombre} value={nombre}>{nombre}</option>)}</select></label><label>{text.clabe}<span className="clabe-field"><input type="text" inputMode="numeric" value={clabe} maxLength="18" required onChange={(event) => setClabe(event.target.value.replace(/\D/g, ''))} placeholder={text.digits} className={clabe.length === 18 ? (clabeValida(clabe) ? 'clabe-ok' : 'clabe-bad') : ''}/>{clabeValida(clabe) && <span className="clabe-check" role="img" aria-label="CLABE válida">✔</span>}</span>{clabe.length === 18 && !clabeValida(clabe) && <small className="clabe-error">CLABE inválida: revisa los dígitos.</small>}</label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>}
+      {!habilitado ? <p className="support-locked">{text.locked}</p> : solicitudCompleta ? <><div className="api-success" role="status">{perfil.apoyo_autorizado ? text.authorized : text.registered}</div><button type="button" className="qa-btn support-print-btn" onClick={() => window.print()}>{text.print}</button></> : <form className="support-form" onSubmit={guardar}><p>{text.intro}</p><label>{text.bank}<select value={banco} required onChange={(event) => setBanco(event.target.value)}><option value="">—</option>{banco && !BANCOS_MEXICO.includes(banco) && <option value={banco}>{banco}</option>}{BANCOS_MEXICO.map(nombre => <option key={nombre} value={nombre}>{nombre}</option>)}</select></label><label>{text.clabe}<span className="clabe-field"><input type="text" inputMode="numeric" value={clabe} maxLength="18" required onChange={(event) => setClabe(event.target.value.replace(/\D/g, ''))} placeholder={text.digits} className={clabe.length === 18 ? (clabeValida(clabe) ? 'clabe-ok' : 'clabe-bad') : ''}/>{clabeValida(clabe) && <span className="clabe-check" role="img" aria-label={text.clabeValid}>✔</span>}</span>{clabe.length === 18 && !clabeValida(clabe) && <small className="clabe-error">{text.clabeInvalid}</small>}</label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>}
     </div>
 
     {solicitudCompleta && <section className="support-print-sheet" aria-label={text.printTitle}>

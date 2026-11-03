@@ -19,7 +19,8 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .models import Aspirante, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, CargaAcademica, CargaAcademicaMateria, SeguimientoSolicitud, Materia, Inscripcion, PlanEstudioMateria, SolicitudAcademica, SolicitudDireccionTesis, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria, ExamenEnLinea, EntrevistaVirtual, EvaluacionColegio, PreguntaExamen, RespuestaExamen, PeriodoInscripcion, FirmaElectronica
 from .admin_views import AdminRolePermission
@@ -62,6 +63,7 @@ def _crear_expediente_si_aceptado(aspirante):
     )
     return expediente
 from io import TextIOWrapper, BytesIO
+from .seguridad import celda_segura, nombre_archivo_seguro, url_media, validar_csv, validar_imagen, validar_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +125,13 @@ def _xlsx_response(rows, filename, title='SINAC NEXT'):
         sheet['A1'].font = Font(bold=True, size=14, color='FFFFFF')
         sheet['A1'].fill = PatternFill('solid', fgColor='006B63')
         sheet['A1'].alignment = Alignment(horizontal='center')
-        sheet.append(rows[0])
+        sheet.append([celda_segura(valor) for valor in rows[0]])
         for cell in sheet[2]:
             cell.font = Font(bold=True, color='FFFFFF')
             cell.fill = PatternFill('solid', fgColor='008F83')
             cell.alignment = Alignment(horizontal='center')
         for row in rows[1:]:
-            sheet.append(list(row))
+            sheet.append([celda_segura(valor) for valor in row])
         sheet.freeze_panes = 'A3'
         sheet.auto_filter.ref = f'A2:{get_column_letter(len(rows[0]))}{sheet.max_row}'
         for column in range(1, len(rows[0]) + 1):
@@ -186,6 +188,13 @@ def _obtener_tamano_archivo(archivo):
 
 class InicioSesionView(TokenObtainPairView):
     serializer_class = InicioSesionSerializer
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'login'
+
+
+class RenovarTokenView(TokenRefreshView):
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'refresh'
 
 
 def _enviar_correo_notificacion(aspirante, asunto, mensaje):
@@ -268,6 +277,8 @@ class PreregistroCreateView(generics.CreateAPIView):
     queryset = Aspirante.objects.all()
     serializer_class = AspiranteRegistroSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'registro'
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -294,50 +305,36 @@ class PreregistroCreateView(generics.CreateAPIView):
 class MiPerfilView(generics.RetrieveUpdateAPIView):
     serializer_class = AspiranteDetalleSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'put', 'head', 'options']
+    CAMPOS_EDITABLES = [
+        'nombre', 'correo', 'telefono',
+        'estado_actual', 'municipio_actual', 'direccion_actual',
+        'estado_permanente', 'municipio_permanente', 'direccion_permanente',
+        'nombre_familiar', 'parentesco', 'telefono_familiar',
+        'ultimo_grado', 'institucion', 'promedio', 'idiomas',
+        'publicaciones', 'apoyos', 'experiencia', 'tutor_propuesto', 'comentarios',
+    ]
 
     def get_object(self):
         return self.request.user
 
     def put(self, request, *args, **kwargs):
-        """Update profile including photo upload."""
         aspirante = self.get_object()
-        
-        # Handle file upload
-        if 'profile_photo' in request.FILES:
-            foto = request.FILES['profile_photo']
+        foto = request.FILES.get('profile_photo')
+        error_foto = validar_imagen(foto)
+        if error_foto:
+            return Response({'profile_photo': error_foto}, status=status.HTTP_400_BAD_REQUEST)
+        datos = {campo: request.data.get(campo) for campo in self.CAMPOS_EDITABLES if request.data.get(campo) not in (None, '')}
+        serializer = AspiranteDetalleSerializer(aspirante, data=datos, partial=True)
+        serializer.is_valid(raise_exception=True)
+        correo = serializer.validated_data.get('correo')
+        if correo and Aspirante.objects.filter(correo__iexact=correo).exclude(pk=aspirante.pk).exists():
+            return Response({'correo': 'Ese correo ya está registrado.'}, status=status.HTTP_400_BAD_REQUEST)
+        aspirante = serializer.save()
+        if foto:
             aspirante.profile_photo = foto
-        
-        # Update text fields
-        nombre = request.data.get('nombre')
-        if nombre:
-            aspirante.nombre = nombre
-        
-        correo = request.data.get('correo')
-        if correo:
-            aspirante.correo = correo
-        
-        telefono = request.data.get('telefono')
-        if telefono:
-            aspirante.telefono = telefono
-        
-        # Add more fields as needed
-        fields_to_update = [
-            'estado_actual', 'municipio_actual', 'direccion_actual',
-            'estado_permanente', 'municipio_permanente', 'direccion_permanente',
-            'nombre_familiar', 'parentesco', 'telefono_familiar',
-            'ultimo_grado', 'institucion', 'promedio', 'idiomas',
-            'publicaciones', 'apoyos', 'experiencia', 'tutor_propuesto', 'comentarios'
-        ]
-        
-        for field in fields_to_update:
-            if field in request.data:
-                setattr(aspirante, field, request.data.get(field))
-        
-        try:
-            aspirante.save()
-            return Response(AspiranteDetalleSerializer(aspirante).data)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            aspirante.save(update_fields=['profile_photo', 'updated_at'])
+        return Response(AspiranteDetalleSerializer(aspirante).data)
 
 
 class PerfilAspiranteView(APIView):
@@ -367,9 +364,9 @@ class PerfilAspiranteView(APIView):
     def _update(self, request):
         if not self._puede_editar(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
-        photo = request.FILES.get('profile_photo')
-        if photo and photo.size > self.max_photo_size:
-            return Response({'profile_photo': 'La foto no debe superar 5 MB.'}, status=status.HTTP_400_BAD_REQUEST)
+        error_foto = validar_imagen(request.FILES.get('profile_photo'), self.max_photo_size)
+        if error_foto:
+            return Response({'profile_photo': error_foto}, status=status.HTTP_400_BAD_REQUEST)
         serializer = PerfilAspiranteSerializer(request.user, data=request.data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -414,6 +411,19 @@ def _materias_plan_disponibles(alumno, configuracion):
     if not _puede_elegir_seminario(alumno, configuracion):
         materias = materias.exclude(materia__categoria='seminario')
     return materias.select_related('materia').order_by('periodo_sugerido', 'materia__clave')
+
+
+MATERIAS_POR_PERIODO = 4
+
+
+def _materias_requeridas_periodo(alumno, configuracion, periodo):
+    """Carga obligatoria del periodo: 4 materias, o todas las ofertadas del plan si hay menos."""
+    inscritas = set(Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo).values_list('materia_id', flat=True))
+    plan_ids = set(_materias_plan_disponibles(alumno, configuracion).values_list('materia_id', flat=True))
+    ofertadas = set(CargaAcademicaMateria.objects.filter(
+        carga__estado='publicada', carga__periodo_inscripcion=periodo, materia_id__in=plan_ids,
+    ).values_list('materia_id', flat=True))
+    return min(MATERIAS_POR_PERIODO, len(inscritas | ofertadas))
 
 
 def _tiene_match_tesis(alumno):
@@ -611,66 +621,71 @@ class MisInscripcionesView(APIView):
         if len(set(materias_ids)) != len(materias_ids):
             return Response({'materias': 'No repitas materias en la selección.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        with transaction.atomic():
-            existentes_periodo = Inscripcion.objects.filter(aspirante=request.user, periodo_inscripcion=periodo)
-            existentes_ids = set(existentes_periodo.values_list('materia_id', flat=True))
-            if existentes_periodo.count() + len(materias_ids) != 4:
-                faltantes = max(0, 4 - existentes_periodo.count())
-                return Response({'detail': f'Debes completar exactamente 4 materias este periodo. Selecciona {faltantes}.'}, status=status.HTTP_400_BAD_REQUEST)
-            if existentes_ids.intersection(materias_ids):
-                return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                Aspirante.objects.select_for_update().filter(pk=request.user.pk).first()
+                existentes_periodo = Inscripcion.objects.filter(aspirante=request.user, periodo_inscripcion=periodo)
+                existentes_ids = set(existentes_periodo.values_list('materia_id', flat=True))
+                requeridas = _materias_requeridas_periodo(request.user, configuracion, periodo)
+                if not _puede_elegir_seminario(request.user, configuracion) and configuracion.materias_plan.filter(
+                    materia_id__in=materias_ids, materia__categoria='seminario',
+                ).exists():
+                    return Response(
+                        {'detail': 'La materia de Seminario de tesis se habilita cuando tú y tu Director confirmen el match del proyecto.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if existentes_periodo.count() + len(materias_ids) != requeridas:
+                    faltantes = max(0, requeridas - existentes_periodo.count())
+                    return Response({'detail': f'Debes completar {requeridas} materias este periodo. Selecciona {faltantes}.'}, status=status.HTTP_400_BAD_REQUEST)
+                if existentes_ids.intersection(materias_ids):
+                    return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if not _puede_elegir_seminario(request.user, configuracion) and configuracion.materias_plan.filter(
-                materia_id__in=materias_ids, materia__categoria='seminario',
-            ).exists():
-                return Response(
-                    {'detail': 'La materia de Seminario de tesis se habilita cuando tú y tu Director confirmen el match del proyecto.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            plan_ids = set(_materias_plan_disponibles(request.user, configuracion).filter(
-                materia_id__in=materias_ids,
-            ).values_list('materia_id', flat=True))
-            if plan_ids != set(materias_ids):
-                return Response({'detail': 'Solo puedes inscribir materias del plan correspondiente a tu semestre o cuatrimestre actual.'}, status=status.HTTP_400_BAD_REQUEST)
-            if Inscripcion.objects.filter(aspirante=request.user, materia_id__in=materias_ids, periodo_inscripcion=periodo).exists():
-                return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            detalles = list(
-                CargaAcademicaMateria.objects.select_for_update()
-                .filter(
-                    carga__estado='publicada',
-                    carga__periodo_inscripcion=periodo,
+                plan_ids = set(_materias_plan_disponibles(request.user, configuracion).filter(
                     materia_id__in=materias_ids,
-                )
-                .select_related('materia')
-                .order_by('materia__clave')
-            )
-            detalles_por_materia = {detalle.materia_id: detalle for detalle in detalles}
-            if set(detalles_por_materia) != set(materias_ids):
-                return Response(
-                    {'materias': 'Una o más materias ya no forman parte de una carga publicada para este periodo.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            materias = [detalles_por_materia[materia_id].materia for materia_id in materias_ids]
-            llenas = [
-                detalle.materia
-                for detalle in detalles
-                if Inscripcion.objects.filter(materia_id=detalle.materia_id, periodo_inscripcion=periodo).count()
-                >= detalle.capacidad
-            ]
-            if llenas:
-                return Response({'detail': f'No hay cupo en: {", ".join(materia.clave for materia in llenas)}.'}, status=status.HTTP_409_CONFLICT)
+                ).values_list('materia_id', flat=True))
+                if plan_ids != set(materias_ids):
+                    return Response({'detail': 'Solo puedes inscribir materias del plan correspondiente a tu semestre o cuatrimestre actual.'}, status=status.HTTP_400_BAD_REQUEST)
+                if Inscripcion.objects.filter(aspirante=request.user, materia_id__in=materias_ids, periodo_inscripcion=periodo).exists():
+                    return Response({'detail': 'Ya tienes una de esas materias inscrita en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            inscripciones = [
-                Inscripcion(
-                    aspirante=request.user,
-                    materia=materia,
-                    periodo_inscripcion=periodo,
-                    horario=detalles_por_materia[materia.id].horario,
+                detalles = list(
+                    CargaAcademicaMateria.objects.select_for_update()
+                    .filter(
+                        carga__estado='publicada',
+                        carga__periodo_inscripcion=periodo,
+                        materia_id__in=materias_ids,
+                    )
+                    .select_related('materia')
+                    .order_by('materia__clave')
                 )
-                for materia in materias
-            ]
-            Inscripcion.objects.bulk_create(inscripciones)
+                detalles_por_materia = {detalle.materia_id: detalle for detalle in detalles}
+                if set(detalles_por_materia) != set(materias_ids):
+                    return Response(
+                        {'materias': 'Una o más materias ya no forman parte de una carga publicada para este periodo.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                materias = [detalles_por_materia[materia_id].materia for materia_id in materias_ids]
+                llenas = [
+                    detalle.materia
+                    for detalle in detalles
+                    if Inscripcion.objects.filter(materia_id=detalle.materia_id, periodo_inscripcion=periodo).count()
+                    >= detalle.capacidad
+                ]
+                if llenas:
+                    return Response({'detail': f'No hay cupo en: {", ".join(materia.clave for materia in llenas)}.'}, status=status.HTTP_409_CONFLICT)
+
+                inscripciones = [
+                    Inscripcion(
+                        aspirante=request.user,
+                        materia=materia,
+                        periodo_inscripcion=periodo,
+                        horario=detalles_por_materia[materia.id].horario,
+                    )
+                    for materia in materias
+                ]
+                Inscripcion.objects.bulk_create(inscripciones)
+        except IntegrityError:
+            return Response({'detail': 'Una o más materias ya quedaron registradas en este periodo. Actualiza tu información.'}, status=status.HTTP_409_CONFLICT)
 
         for materia in materias:
             _registrar_seguimiento(request.user, 'pendiente', f'Solicitud de inscripción recibida para {materia.clave} - {materia.nombre}.', 'Alumno', notificar=True, asunto='Solicitud de inscripción recibida')
@@ -702,9 +717,13 @@ class InscripcionCoordinacionView(APIView):
         periodo = _periodo_inscripcion_vigente()
         inscripciones = Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo) if periodo else Inscripcion.objects.none()
         registradas = inscripciones.count()
-        faltantes = max(0, self.total_materias_periodo - registradas)
         materias = []
         configuracion = ConfiguracionPrograma.objects.filter(programa__iexact=alumno.programa, activo=True).first()
+        requeridas = (
+            _materias_requeridas_periodo(alumno, configuracion, periodo)
+            if periodo and configuracion and alumno.numero_periodo_actual else self.total_materias_periodo
+        )
+        faltantes = max(0, requeridas - registradas)
         if periodo and configuracion and alumno.numero_periodo_actual and faltantes:
             ya_inscritas = set(inscripciones.values_list('materia_id', flat=True))
             plan_ids = set(_materias_plan_disponibles(alumno, configuracion).values_list('materia_id', flat=True)) - ya_inscritas
@@ -733,6 +752,7 @@ class InscripcionCoordinacionView(APIView):
             'alumno': {'id': alumno.id, 'nombre': alumno.nombre, 'matricula': alumno.matricula, 'programa': alumno.programa},
             'periodo': PeriodoInscripcionView.serializar(periodo) if periodo else None,
             'registradas': registradas,
+            'requeridas': requeridas,
             'faltantes': faltantes,
             'validacion_servicios': list(inscripciones.values_list('validacion_servicios', flat=True)),
             'materias': materias,
@@ -773,12 +793,13 @@ class InscripcionCoordinacionView(APIView):
 
                 existentes = Inscripcion.objects.filter(aspirante=alumno, periodo_inscripcion=periodo)
                 registradas = existentes.count()
-                faltantes = self.total_materias_periodo - registradas
+                requeridas = _materias_requeridas_periodo(alumno, configuracion, periodo)
+                faltantes = requeridas - registradas
                 if faltantes <= 0:
-                    return Response({'detail': 'El alumno ya completó las cuatro materias de este periodo.'}, status=status.HTTP_409_CONFLICT)
+                    return Response({'detail': 'El alumno ya completó su carga de materias de este periodo.'}, status=status.HTTP_409_CONFLICT)
                 if len(materias_ids) != faltantes:
                     return Response(
-                        {'detail': f'Selecciona exactamente las {faltantes} materias que faltan para completar las cuatro del periodo.'},
+                        {'detail': f'Selecciona exactamente las {faltantes} materias que faltan para completar las {requeridas} del periodo.'},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 ya_inscritas = set(existentes.values_list('materia_id', flat=True))
@@ -1068,7 +1089,13 @@ class SolicitudAcademicaView(APIView):
         rol = str(getattr(user, 'rol', '')).strip().lower()
         if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
             return {'historial', 'reinscripcion'}
+        if rol in {'admin', 'administrador'}:
+            return set()
         if rol in {'coordinacion', 'coordinador'}:
+            return {'ajuste_materias'}
+        if user.is_superuser:
+            return set()
+        if user.is_staff:
             return {'ajuste_materias'}
         return set()
 
@@ -1176,9 +1203,11 @@ class MisEntrevistasView(APIView):
             entrevistas_iniciadas = entrevistas.filter(estado='iniciada').count()
             entrevistas_completadas = entrevistas.filter(estado='completada').count()
             
-            serializer = EntrevistaVirtualSerializer(entrevistas, many=True)
+            datos = EntrevistaVirtualSerializer(entrevistas, many=True).data
+            for entrevista in datos:
+                entrevista.pop('notas_docente', None)
             return Response({
-                'entrevistas': serializer.data,
+                'entrevistas': datos,
                 'resumen': {
                     'entrevistas_total': entrevistas_total,
                     'entrevistas_programadas': entrevistas_programadas,
@@ -1256,8 +1285,8 @@ class HorarioDescargaView(APIView):
         ]
         for ins in inscripciones:
             content_lines.append(f'{ins.materia.clave} - {ins.materia.nombre}')
-            content_lines.append(f'  Profesor: {ins.materia.profesor or "—"}')
-            content_lines.append(f'  Horario: {ins.horario or ins.materia.horario or "Por asignar"}')
+            content_lines.append(f'  Profesor: {ins.profesor_asignado or "—"}')
+            content_lines.append(f'  Horario: {ins.horario_asignado or "Por asignar"}')
             content_lines.append(f'  Estado: {ins.get_estado_display()} / Calificación: {ins.calificacion or "—"}')
             content_lines.append('')
         bio = BytesIO()
@@ -1265,7 +1294,7 @@ class HorarioDescargaView(APIView):
         styles = getSampleStyleSheet(); title = ParagraphStyle('HorarioTitle', parent=styles['Title'], textColor=colors.HexColor('#00695c'), fontSize=18)
         story = [Paragraph('SINAC NEXT', title), Paragraph('Horario académico', styles['Heading2']), Paragraph(f'<b>Alumno:</b> {request.user.nombre}<br/><b>Programa:</b> {request.user.programa or "—"}<br/><b>Unidad:</b> {request.user.unidad or "—"}', styles['BodyText']), Spacer(1, 18)]
         rows = [['Clave', 'Materia', 'Profesor', 'Horario', 'Estado']]
-        for ins in inscripciones: rows.append([ins.materia.clave, ins.materia.nombre, ins.materia.profesor or 'Por asignar', ins.horario or ins.materia.horario or 'Por asignar', ins.get_estado_display()])
+        for ins in inscripciones: rows.append([ins.materia.clave, ins.materia.nombre, ins.profesor_asignado or 'Por asignar', ins.horario_asignado or 'Por asignar', ins.get_estado_display()])
         table = Table(rows, colWidths=[.75*inch, 2.05*inch, 1.3*inch, 1.35*inch, .8*inch], repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),.35,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),8),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, colors.HexColor('#f1f5f9')])]))
         story.extend([table, Spacer(1, 18), Paragraph('Documento generado por SINAC NEXT.', styles['Normal'])]); doc.build(story); bio.seek(0)
         return FileResponse(bio, as_attachment=True, filename=f'{request.user.usuario}_horario.pdf', content_type='application/pdf')
@@ -1312,7 +1341,7 @@ class HorarioFormalDescargaView(APIView):
         story = [header, Spacer(1,12), datos, Spacer(1,16)]
         cell = lambda value: Paragraph(str(value), ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK'))
         rows = [[cell('Clave del curso'),cell('Materia'),cell('Profesor'),cell('Horario'),cell('Salón / lugar'),cell('Estado'),cell('Validación')]]
-        for ins in inscripciones: rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.materia.profesor or 'Por asignar'),cell(ins.horario or ins.materia.horario or 'Por asignar'),cell(ins.materia.get_salon_display() or 'Por asignar'),cell(ins.get_estado_display()),cell(ins.get_validacion_servicios_display())])
+        for ins in inscripciones: rows.append([cell(ins.materia.clave),cell(ins.materia.nombre),cell(ins.profesor_asignado or 'Por asignar'),cell(ins.horario_asignado or 'Por asignar'),cell(ins.salon_asignado or 'Por asignar'),cell(ins.get_estado_display()),cell(ins.get_validacion_servicios_display())])
         if len(rows) > 1:
             table = Table(rows, colWidths=[.8*inch,2.1*inch,1.45*inch,1.8*inch,1.25*inch,.85*inch,.9*inch], repeatRows=1)
             table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),('FONTSIZE',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'TOP'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f1f5f9')]),('PADDING',(0,0),(-1,-1),6)])); story.append(table)
@@ -1398,6 +1427,14 @@ class BoletaInscripcionView(APIView):
     def get(self, request):
         if request.user.is_staff:
             return Response(status=status.HTTP_403_FORBIDDEN)
+        from .servicios_views import seleccionar_inscripciones_constancia
+        _, inscripciones_boleta = seleccionar_inscripciones_constancia(
+            Inscripcion.objects.filter(aspirante=request.user).select_related('materia', 'periodo_inscripcion').order_by('materia__clave'),
+        )
+        if not inscripciones_boleta:
+            return Response({'detail': 'No tienes materias inscritas en el periodo vigente.'}, status=status.HTTP_404_NOT_FOUND)
+        if any(item.validacion_servicios != 'validada' for item in inscripciones_boleta):
+            return Response({'detail': 'La boleta estará disponible cuando Servicios Escolares valide todas las materias del periodo.'}, status=status.HTTP_409_CONFLICT)
         matricula = getattr(request.user, 'matricula', None) or getattr(request.user, 'usuario', None) or '—'
         datos_academicos = _datos_academicos_boleta(request.user)
         bio = BytesIO()
@@ -1417,9 +1454,42 @@ class BoletaInscripcionView(APIView):
         info = Table(datos, colWidths=[1.55*inch,2.05*inch,1.55*inch,1.85*inch])
         info.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),('BACKGROUND',(0,0),(0,-1),colors.HexColor('#e7f3f1')),('BACKGROUND',(2,0),(2,-1),colors.HexColor('#e7f3f1')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('LEFTPADDING',(0,0),(-1,-1),7),('RIGHTPADDING',(0,0),(-1,-1),7),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
         story.extend([info, Spacer(1,16)])
-        rows = [['Clave del Curso','Materia','Profesor']]
-        for ins in request.user.inscripciones.select_related('materia').all(): rows.append([ins.materia.clave, ins.materia.nombre, ins.materia.profesor or 'Por asignar'])
-        courses = Table(rows, colWidths=[1.35*inch,3.2*inch,2.1*inch], repeatRows=1); courses.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f5f8fa')]),('PADDING',(0,0),(-1,-1),7)])); story.extend([courses, Spacer(1,48), Table([['Firma del estudiante','Jefe del Departamento de Coordinación Académica','Servicios escolares'],['\n\n________________','\n\n________________','\n\n________________']], colWidths=[2.2*inch]*3, style=TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold')])), Spacer(1,24), Paragraph('Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco', ParagraphStyle('Footer', parent=styles['Normal'], alignment=1, fontSize=8))])
+        course_header_style = ParagraphStyle(
+            'BoletaCourseHeader',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=10,
+            textColor=colors.white,
+        )
+        course_cell_style = ParagraphStyle(
+            'BoletaCourseCell',
+            parent=styles['Normal'],
+            fontSize=8.5,
+            leading=10.5,
+            wordWrap='CJK',
+            splitLongWords=1,
+        )
+        course_cell = lambda value, style=course_cell_style: Paragraph(escape(str(value or '—')), style)
+        rows = [[course_cell('Clave del Curso', course_header_style), course_cell('Materia', course_header_style), course_cell('Profesor', course_header_style)]]
+        for ins in inscripciones_boleta:
+            rows.append([
+                course_cell(ins.materia.clave),
+                course_cell(ins.materia.nombre),
+                course_cell(ins.profesor_asignado or 'Por asignar'),
+            ])
+        courses = Table(rows, colWidths=[1.65*inch,3.55*inch,2.2*inch], repeatRows=1)
+        courses.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#00695c')),
+            ('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c7d1')),
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f5f8fa')]),
+            ('LEFTPADDING',(0,0),(-1,-1),7),
+            ('RIGHTPADDING',(0,0),(-1,-1),7),
+            ('TOPPADDING',(0,0),(-1,-1),7),
+            ('BOTTOMPADDING',(0,0),(-1,-1),7),
+        ]))
+        story.extend([courses, Spacer(1,48), Table([['Firma del estudiante','Jefe del Departamento de Coordinación Académica','Servicios escolares'],['\n\n________________','\n\n________________','\n\n________________']], colWidths=[2.2*inch]*3, style=TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold')])), Spacer(1,24), Paragraph('Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco', ParagraphStyle('Footer', parent=styles['Normal'], alignment=1, fontSize=8))])
         story = story[:-4]
         sig_style = ParagraphStyle('SignatureLabel', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1)
         firmas = Table([
@@ -1446,10 +1516,7 @@ class ExpedienteDigitalView(APIView):
     def _es_director_de(self, user, expediente):
         return (
             str(getattr(user, 'rol', '')).strip().lower() in ('director', 'director de tesis')
-            and (expediente.aspirante.director_tesis_id == user.id or expediente.aspirante.tutor_propuesto.strip().lower() in {
-                str(getattr(user, 'nombre', '')).strip().lower(),
-                str(getattr(user, 'usuario', '')).strip().lower(),
-            })
+            and expediente.aspirante.director_tesis_id == user.id
         )
 
     def get(self, request, pk=None):
@@ -1462,7 +1529,7 @@ class ExpedienteDigitalView(APIView):
         if self._permitido(request.user):
             qs = ExpedienteDigital.objects.select_related('aspirante').all()
         elif str(getattr(request.user, 'rol', '')).strip().lower() in ('director', 'director de tesis'):
-            qs = ExpedienteDigital.objects.select_related('aspirante').filter(Q(aspirante__director_tesis=request.user) | Q(aspirante__tutor_propuesto__iexact=request.user.nombre)).distinct()
+            qs = ExpedienteDigital.objects.select_related('aspirante').filter(aspirante__director_tesis=request.user, aspirante__rol='alumno')
         else:
             qs = ExpedienteDigital.objects.filter(aspirante=request.user)
         return Response(ExpedienteDigitalSerializer(qs, many=True).data)
@@ -1486,10 +1553,7 @@ class FirmaElectronicaView(APIView):
         expediente = ExpedienteDigital.objects.select_related('aspirante').filter(pk=pk).first()
         if not expediente: return Response(status=status.HTTP_404_NOT_FOUND)
         if not request.user.is_staff:
-            if not (expediente.aspirante.director_tesis_id == request.user.id or expediente.aspirante.tutor_propuesto.strip().lower() in {
-                str(getattr(request.user, 'nombre', '')).strip().lower(),
-                str(getattr(request.user, 'usuario', '')).strip().lower(),
-            }):
+            if expediente.aspirante.director_tesis_id != request.user.id:
                 return Response({'detail': 'Este expediente no pertenece a uno de tus tesistas.'}, status=status.HTTP_403_FORBIDDEN)
             if request.data.get('rol_firmante', 'director') != 'director':
                 return Response({'detail': 'Un director solo puede firmar con el rol director.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1579,10 +1643,21 @@ class AlertasAutomatizadasView(APIView):
 
 class DocumentoAspiranteView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    ESTADOS_RESUELTOS = ('aceptado', 'rechazado', 'baja')
 
     @staticmethod
     def _aspirante(request):
         return None if request.user.is_staff else request.user
+
+    def _bloqueo_edicion(self, aspirante):
+        if aspirante.rol != 'aspirante':
+            return Response({'detail': 'Solo los aspirantes pueden modificar sus documentos de admisión.'}, status=status.HTTP_403_FORBIDDEN)
+        if aspirante.proceso_estado in self.ESTADOS_RESUELTOS:
+            return Response(
+                {'detail': 'Tu solicitud ya fue resuelta; los documentos no pueden modificarse. Comunícate con Coordinación Académica si necesitas corregir alguno.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return None
 
     def get(self, request):
         aspirante = self._aspirante(request)
@@ -1594,17 +1669,18 @@ class DocumentoAspiranteView(APIView):
         aspirante = self._aspirante(request)
         if not aspirante:
             return Response(status=status.HTTP_403_FORBIDDEN)
+        bloqueo = self._bloqueo_edicion(aspirante)
+        if bloqueo:
+            return bloqueo
         tipo = request.data.get('tipo')
         archivo = request.FILES.get('archivo')
         tipos_validos = {tipo_id for tipo_id, _ in DocumentoAspirante.TIPOS}
         if tipo not in tipos_validos:
             return Response({'tipo': 'Selecciona un tipo de documento válido.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not archivo:
-            return Response({'archivo': 'Selecciona un archivo PDF.'}, status=status.HTTP_400_BAD_REQUEST)
-        if archivo.size > MAX_DOCUMENTO_BYTES:
-            return Response({'archivo': 'El archivo no debe exceder 10 MB.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not archivo.name.lower().endswith('.pdf'):
-            return Response({'archivo': 'Solo se permiten archivos PDF.'}, status=status.HTTP_400_BAD_REQUEST)
+        error_archivo = validar_pdf(archivo, MAX_DOCUMENTO_BYTES)
+        if error_archivo:
+            return Response({'archivo': error_archivo}, status=status.HTTP_400_BAD_REQUEST)
+        archivo.name = nombre_archivo_seguro(archivo.name, 'documento')
 
         tamano = _obtener_tamano_archivo(archivo)
         documento, created = DocumentoAspirante.objects.get_or_create(
@@ -1635,6 +1711,9 @@ class DocumentoAspiranteView(APIView):
         aspirante = self._aspirante(request)
         if not aspirante:
             return Response(status=status.HTTP_403_FORBIDDEN)
+        bloqueo = self._bloqueo_edicion(aspirante)
+        if bloqueo:
+            return bloqueo
         try:
             documento = aspirante.documentos.get(pk=pk)
         except DocumentoAspirante.DoesNotExist:
@@ -1656,7 +1735,6 @@ class DocumentoDescargaView(APIView):
             from .expediente_central_views import _es_gestion
             director = str(getattr(request.user, 'rol', '')).strip().lower() in ('director', 'director de tesis') and (
                 documento.aspirante.director_tesis_id == request.user.id
-                or documento.aspirante.tutor_propuesto.strip().lower() in {str(getattr(request.user, 'nombre', '')).strip().lower(), str(getattr(request.user, 'usuario', '')).strip().lower()}
             )
             if not (_es_gestion(request.user) or director):
                 return Response(status=status.HTTP_403_FORBIDDEN)
@@ -1665,13 +1743,24 @@ class DocumentoDescargaView(APIView):
         return FileResponse(documento.archivo.open('rb'), as_attachment=True, filename=documento.nombre_original)
 
 
+def _clabe_valida(clabe):
+    pesos = (3, 7, 1)
+    suma = sum((int(digito) * pesos[i % 3]) % 10 for i, digito in enumerate(clabe[:17]))
+    return (10 - suma % 10) % 10 == int(clabe[17])
+
+
 class SolicitarApoyoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         aspirante = request.user
-        if aspirante.is_staff:
+        if aspirante.is_staff or aspirante.rol not in ('aspirante', 'alumno'):
             return Response(status=status.HTTP_403_FORBIDDEN)
+        if aspirante.apoyo_autorizado:
+            return Response(
+                {'detail': 'Tu apoyo ya fue autorizado; para cambiar los datos bancarios comunícate con Coordinación Académica.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         nota = Decimal(str(aspirante.curso_propedeutico_nota or '0'))
         if not aspirante.curso_propedeutico_aprobado or nota < Decimal('8.00'):
             return Response(
@@ -1684,6 +1773,10 @@ class SolicitarApoyoView(APIView):
             return Response({'banco': 'Captura el nombre del banco.'}, status=status.HTTP_400_BAD_REQUEST)
         if len(clabe) != 18:
             return Response({'clabe_interbancaria': 'La CLABE interbancaria debe tener 18 dígitos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not _clabe_valida(clabe):
+            return Response({'clabe_interbancaria': 'La CLABE interbancaria no es válida; revisa los dígitos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(banco) > 120:
+            return Response({'banco': 'El nombre del banco es demasiado largo.'}, status=status.HTTP_400_BAD_REQUEST)
 
         es_nueva_solicitud = not aspirante.apoyo_solicitado
         aspirante.banco_apoyo = banco
@@ -1722,7 +1815,7 @@ class PanelAdministradorView(APIView):
             'admin': 'admin',
             'administrador': 'admin',
             'coordinacion': 'coordinacion',
-            'coordinación': 'aspirante',
+            'coordinación': 'coordinacion',
             'coordinador': 'coordinacion',
             'docente': 'docente',
             'teacher': 'docente',
@@ -1751,16 +1844,17 @@ class PanelAdministradorView(APIView):
         return None
 
     def get(self, request):
-        aspirantes = Aspirante.objects.filter(is_staff=False).order_by('-created_at')
+        personas = Aspirante.objects.filter(is_staff=False).order_by('-created_at')
+        solicitudes = personas.filter(rol='aspirante')
         return Response({
             'resumen': {
-                'total': aspirantes.count(),
-                'pendiente': aspirantes.filter(proceso_estado='pendiente').count(),
-                'iniciado': aspirantes.filter(proceso_estado='iniciado').count(),
-                'revision': aspirantes.filter(proceso_estado='revision').count(),
-                'aceptado': aspirantes.filter(proceso_estado='aceptado').count(),
+                'total': solicitudes.count(),
+                'pendiente': solicitudes.filter(proceso_estado='pendiente').count(),
+                'iniciado': solicitudes.filter(proceso_estado='iniciado').count(),
+                'revision': solicitudes.filter(proceso_estado='revision').count(),
+                'aceptado': solicitudes.filter(proceso_estado='aceptado').count(),
             },
-            'aspirantes': AspiranteAdminSerializer(aspirantes, many=True).data,
+            'aspirantes': AspiranteAdminSerializer(personas, many=True).data,
         })
 
     def post(self, request):
@@ -1929,7 +2023,7 @@ class PanelCoordinacionView(APIView):
             if persona.rol not in ('docente', 'director', 'investigador'):
                 continue
             materias = list(Materia.objects.filter(profesor__iexact=persona.nombre).values('id', 'clave', 'nombre', 'creditos', 'horario'))
-            tesistas = list(Aspirante.objects.filter(Q(director_tesis=persona) | Q(tutor_propuesto__iexact=persona.nombre), is_staff=False).exclude(rol__in=('docente', 'director', 'investigador')).values('id', 'nombre', 'matricula', 'programa', 'proceso_estado').distinct()) if persona.rol == 'director' else []
+            tesistas = list(Aspirante.objects.filter(director_tesis=persona, rol='alumno', is_staff=False).values('id', 'nombre', 'matricula', 'programa', 'proceso_estado')) if persona.rol == 'director' else []
             item.update({'materias': materias, 'total_materias': len(materias), 'horarios': [m['horario'] for m in materias if m['horario']], 'creditos_impartidos': sum(m['creditos'] or 0 for m in materias), 'tesistas': tesistas, 'total_tesistas': len(tesistas)})
         return Response({
             'usuario': {
@@ -1938,7 +2032,7 @@ class PanelCoordinacionView(APIView):
                 'usuario': request.user.usuario,
                 'correo': request.user.correo,
                 'telefono': request.user.telefono,
-                'profile_photo': request.user.profile_photo.url if request.user.profile_photo else None,
+                'profile_photo': url_media(request.user.profile_photo),
             },
             'resumen': {
                 'total': solicitudes.count(),
@@ -2237,8 +2331,9 @@ class CursosUploadView(APIView):
         if rol not in {'servicios', 'servicios_escolares', 'servicios escolares'}:
             return Response({'detail': 'Solo Servicios Escolares puede cargar el catálogo de materias.'}, status=status.HTTP_403_FORBIDDEN)
         archivo = request.FILES.get('file')
-        if not archivo:
-            return Response({'file': 'Selecciona un archivo CSV.'}, status=status.HTTP_400_BAD_REQUEST)
+        error_archivo = validar_csv(archivo)
+        if error_archivo:
+            return Response({'file': error_archivo}, status=status.HTTP_400_BAD_REQUEST)
         try:
             wrapper = TextIOWrapper(archivo.file, encoding='utf-8')
             reader = csv.DictReader(wrapper)
@@ -2265,6 +2360,9 @@ class CursosUploadView(APIView):
             materia, created = Materia.objects.update_or_create(clave=clave, defaults=defaults)
             count += 1
         return Response({'detail': f'{count} materias procesadas.'})
+
+
+FILTRO_DOCENTES_CARGA = Q(rol__iexact='docente') | Q(rol__iexact='investigador') | Q(rol__iexact='director')
 
 
 class CargaAcademicaWorkflowView(APIView):
@@ -2304,7 +2402,7 @@ class CargaAcademicaWorkflowView(APIView):
             docente_id = item.get('docente')
             if docente_id:
                 try:
-                    docente = Aspirante.objects.get(pk=docente_id, rol__iexact='docente', is_staff=False)
+                    docente = Aspirante.objects.filter(FILTRO_DOCENTES_CARGA).get(pk=docente_id, is_staff=False)
                 except (Aspirante.DoesNotExist, TypeError, ValueError):
                     raise ValueError(f'Selecciona un docente válido en la fila {index}.')
             horario = str(item.get('horario', materia.horario) or '').strip()
@@ -2383,7 +2481,7 @@ class CargaAcademicaWorkflowView(APIView):
         ):
             qs = qs.filter(creador=request.user)
         materias = Materia.objects.order_by('clave')
-        docentes = Aspirante.objects.filter(rol__iexact='docente', is_staff=False, is_active=True).order_by('nombre')
+        docentes = Aspirante.objects.filter(FILTRO_DOCENTES_CARGA, is_staff=False, is_active=True).order_by('nombre')
         return Response({
             'cargas': [self._serializar(carga) for carga in qs.order_by('-created_at')],
             'materias_catalogo': [{'id': m.id, 'clave': m.clave, 'nombre': m.nombre, 'creditos': m.creditos, 'horario': m.horario, 'salon': m.salon, 'capacidad': m.capacidad, 'profesor': m.profesor} for m in materias],
@@ -2455,10 +2553,21 @@ class CargaAcademicaWorkflowView(APIView):
             and estado in ('aprobada', 'rechazada')
             and self._puede_revisar(request.user)
         )
+        if es_decision_revision and es_creador:
+            return Response(
+                {'detail': 'Quien preparó la carga no puede dictaminarla; debe revisarla otra persona de Servicios Escolares.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         es_publicacion = carga.estado == 'aprobada' and estado == 'publicada' and self._puede_revisar(request.user)
-        if not es_envio and not es_decision_revision and not es_publicacion:
+        es_reapertura = (
+            carga.estado == 'rechazada'
+            and estado == 'borrador'
+            and (es_creador or request.user.is_staff or puede_coordinar)
+            and self._puede_preparar(request.user)
+        )
+        if not es_envio and not es_decision_revision and not es_publicacion and not es_reapertura:
             return Response(status=status.HTTP_403_FORBIDDEN)
-        transiciones = {'borrador': {'en_revision'}, 'en_revision': {'aprobada','rechazada'}, 'aprobada': {'publicada'}}
+        transiciones = {'borrador': {'en_revision'}, 'en_revision': {'aprobada','rechazada'}, 'aprobada': {'publicada'}, 'rechazada': {'borrador'}}
         if estado != carga.estado and estado not in transiciones.get(carga.estado, set()):
             return Response({'detail': f'No se puede pasar de {carga.estado} a {estado}.'}, status=status.HTTP_400_BAD_REQUEST)
         comentario = str(request.data.get('comentario', '') or '').strip()
@@ -2511,17 +2620,18 @@ class CargaAcademicaWorkflowView(APIView):
                 try:
                     carga.camunda_instance_id = _iniciar_carga_en_camunda(carga)
                     carga.save(update_fields=['camunda_instance_id', 'updated_at'])
-                except http.RequestException as exc:
-                    logging.exception('No fue posible iniciar el proceso Camunda para la carga')
-                    return Response({'detail': f'Camunda no está disponible: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+                except http.RequestException:
+                    logger.exception('No fue posible iniciar el proceso Camunda para la carga %s', carga.pk)
+                    return Response({'detail': 'El motor de procesos no está disponible. Intenta nuevamente en unos minutos.'}, status=status.HTTP_502_BAD_GATEWAY)
             _registrar_seguimiento(request.user, 'en_revision', f'Carga académica {carga.periodo} enviada a revisión.', 'Carga académica', notificar=True, asunto='Carga académica en revisión')
         try:
             if not es_envio and carga.estado == 'en_revision' and estado in ('aprobada', 'rechazada'):
                 camunda_result = _completar_tarea_carga(carga, 'revision', {'aprobada': {'value': estado == 'aprobada', 'type': 'Boolean'}})
             elif not es_envio and carga.estado == 'aprobada' and estado == 'publicada':
                 camunda_result = _completar_tarea_carga(carga, 'publicacion', {'publicada': {'value': True, 'type': 'Boolean'}})
-        except http.RequestException as exc:
-            return Response({'detail': f'No se pudo completar la aprobación en Camunda: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+        except http.RequestException:
+            logger.exception('No fue posible completar la tarea Camunda de la carga %s', carga.pk)
+            return Response({'detail': 'No se pudo completar la aprobación en el motor de procesos. Intenta nuevamente en unos minutos.'}, status=status.HTTP_502_BAD_GATEWAY)
         carga.estado = estado
         if es_publicacion:
             carga.periodo_inscripcion = periodo_publicacion
@@ -2539,8 +2649,16 @@ class CargaAcademicaWorkflowView(APIView):
         if not es_envio:
             detalle = f'Carga académica actualizada a {estado}.'
             if es_decision_revision:
-                detalle += f' Comentario de Coordinación: {comentario}'
-            _registrar_seguimiento(carga.creador,'aceptado' if estado in ('aprobada','publicada') else estado,detalle,'Coordinación Académica',notificar=True,asunto='Actualización de carga académica')
+                detalle += f' Comentario de revisión: {comentario}'
+            origen = 'Servicios Escolares' if puede_servicios else 'Administración'
+            _registrar_seguimiento(
+                carga.creador,
+                'aceptado' if estado in ('aprobada', 'publicada') else estado,
+                detalle,
+                origen,
+                notificar=True,
+                asunto='Actualización de carga académica',
+            )
         carga.refresh_from_db()
         response_data = self._serializar(carga)
         response_data['camunda'] = camunda_result
@@ -2564,7 +2682,7 @@ class GenerarCargaView(APIView):
             output = StringIO(newline='')
             writer = csv.writer(output)
             writer.writerow(headers)
-            writer.writerows(rows)
+            writer.writerows([[celda_segura(valor) for valor in row] for row in rows])
             return FileResponse(BytesIO(('\ufeff' + output.getvalue()).encode('utf-8')), as_attachment=True, filename=f'carga_academica_{timestamp}.csv', content_type='text/csv; charset=utf-8')
         return _xlsx_response([headers] + rows, f'carga_academica_{timestamp}.xlsx', 'Carga académica SINAC NEXT')
 

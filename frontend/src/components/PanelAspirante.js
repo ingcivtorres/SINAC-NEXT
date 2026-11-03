@@ -1,9 +1,10 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import DocumentosAspirante from './DocumentosAspirante';
 import SeguimientoSolicitud from './SeguimientoSolicitud';
 import SolicitudApoyo from './SolicitudApoyo';
 import PerfilAspirante from './PerfilAspirante';
 import ExamenesEnLinea from './ExamenesEnLinea';
+import EntrevistasAspirante from './EntrevistasAspirante';
 import {useApplicantCopy} from './aspirantPanelTranslations';
 import './PanelAspirante.css';
 import './PanelAspiranteSingle.css';
@@ -21,8 +22,12 @@ const MENU_ITEMS = [
   {id: 'expediente'},
   {id: 'proceso'},
   {id: 'documentos'},
+  {id: 'entrevistas'},
   {id: 'examenes'},
 ];
+
+const ESTADOS_RESUELTOS = ['aceptado', 'rechazado', 'baja'];
+const INTERVALO_SEGUIMIENTO = 30000;
 
 function etapaIndex(estado) {
   const index = ETAPAS.findIndex((etapa) => etapa.id === estado);
@@ -53,7 +58,7 @@ function InfoItem({label, value}) {
 function SectionPanel({id, label, open, onToggle, children}) {
   return (
     <div className={`aspirante-section-card${open ? ' is-open' : ''}`}>
-      <button type="button" className="section-trigger" onClick={onToggle} aria-expanded={open} aria-controls={`section-${id}`}>
+      <button type="button" className="section-trigger" onClick={onToggle} aria-expanded={Boolean(open)} aria-controls={`section-${id}`}>
         <span>{label}</span>
         <span className="section-indicator">{open ? '−' : '+'}</span>
       </button>
@@ -73,95 +78,112 @@ export default function PanelAspirante({session, onLogout}) {
   const [perfil, setPerfil] = useState(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
-  const [openSections, setOpenSections] = useState({inicio: true, perfil: false, expediente: false, proceso: false, documentos: false, examenes: false, notificaciones: false});
+  const [openSections, setOpenSections] = useState({inicio: true});
   const [seguimiento, setSeguimiento] = useState(null);
   const [seguimientoCargando, setSeguimientoCargando] = useState(true);
   const [examenes, setExamenes] = useState([]);
+  const [examenesError, setExamenesError] = useState('');
+  const [entrevistas, setEntrevistas] = useState([]);
+  const [entrevistasError, setEntrevistasError] = useState('');
+  const [evaluaciones, setEvaluaciones] = useState([]);
   const [expedienteCentral, setExpedienteCentral] = useState(null);
   const [expedienteCargando, setExpedienteCargando] = useState(false);
+  const sesionCerradaRef = useRef(false);
+  const logoutRef = useRef(onLogout);
+  logoutRef.current = onLogout;
 
-  const toggleSection = (id) => {
-    setOpenSections((prev) => {
-      const next = Object.keys(prev).reduce((sections, key) => ({...sections, [key]: key === id}), {});
-      // if opening notifications, mark them as read
-      if (id === 'notificaciones' && !prev.notificaciones) {
-        marcarNotificacionesLeidas();
+  const obtener = useCallback(async (url, signal) => {
+    const response = await fetch(url, {headers: {Authorization: `Bearer ${session.access}`}, signal});
+    if (response.status === 401) {
+      if (!sesionCerradaRef.current) {
+        sesionCerradaRef.current = true;
+        logoutRef.current(copy.messages.sessionExpired);
       }
-      return next;
-    });
-  };
-
-  async function marcarNotificacionesLeidas() {
-    try {
-      const res = await fetch('/api/preregistro/notificaciones/marcar-leidas/', {
-        method: 'POST',
-        headers: {'Authorization': `Bearer ${session.access}`, 'Content-Type': 'application/json'},
-      });
-      if (res.ok) {
-        cargarSeguimiento(new AbortController().signal);
-      }
-    } catch (e) {
-      // ignore
+      const error = new Error(copy.messages.sessionExpired);
+      error.name = 'AbortError';
+      throw error;
     }
-  }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }, [copy, session.access]);
 
   const cargarPerfil = useCallback(async (signal) => {
     setCargando(true);
     setError('');
-
     try {
-      const response = await fetch('/api/preregistro/me/', {
-        headers: {Authorization: `Bearer ${session.access}`},
-        signal,
-      });
-
-      if (response.status === 401) {
-        onLogout(copy.messages.sessionExpired);
-        return;
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      setPerfil(await response.json());
+      setPerfil(await obtener('/api/preregistro/me/', signal));
     } catch (err) {
-      if (err.name !== 'AbortError') {
-        setError(copy.messages.profileLoadError);
-      }
+      if (err.name !== 'AbortError') setError(copy.messages.profileLoadError);
     } finally {
-      if (!signal.aborted) setCargando(false);
+      if (!signal?.aborted) setCargando(false);
     }
-  }, [copy, onLogout, session.access]);
+  }, [copy, obtener]);
 
   const cargarSeguimiento = useCallback(async (signal) => {
     setSeguimientoCargando(true);
     try {
-      const response = await fetch('/api/preregistro/seguimiento/', {headers: {Authorization: `Bearer ${session.access}`}, signal});
-      if (response.status === 401) {
-        onLogout(copy.messages.sessionExpired);
-        return;
-      }
-      if (!response.ok) throw new Error(copy.messages.trackingError);
-      setSeguimiento(await response.json());
+      setSeguimiento(await obtener('/api/preregistro/seguimiento/', signal));
     } catch (err) {
-      if (err.name !== 'AbortError') setSeguimiento(null);
+      // Ante un fallo temporal se conserva el último seguimiento recibido.
     } finally {
-      if (!signal.aborted) setSeguimientoCargando(false);
+      if (!signal?.aborted) setSeguimientoCargando(false);
     }
-  }, [copy, onLogout, session.access]);
+  }, [obtener]);
+
+  const cargarExamenes = useCallback(async (signal) => {
+    try {
+      const data = await obtener('/api/preregistro/examenes/', signal);
+      setExamenes(data.examenes || []);
+      setExamenesError('');
+    } catch (err) {
+      if (err.name !== 'AbortError') setExamenesError(copy.messages.examsLoadError);
+    }
+  }, [copy, obtener]);
+
+  const cargarEntrevistas = useCallback(async (signal) => {
+    try {
+      const data = await obtener('/api/preregistro/entrevistas/', signal);
+      setEntrevistas(data.entrevistas || []);
+      setEntrevistasError('');
+    } catch (err) {
+      if (err.name !== 'AbortError') setEntrevistasError(copy.interviews.loadError);
+    }
+  }, [copy, obtener]);
+
+  const marcarNotificacionesLeidas = useCallback(async () => {
+    if (!seguimiento?.no_leidas) return;
+    try {
+      const res = await fetch('/api/preregistro/notificaciones/marcar-leidas/', {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${session.access}`, 'Content-Type': 'application/json'},
+      });
+      if (res.ok) {
+        setSeguimiento(actual => actual && {...actual, no_leidas: 0, eventos: (actual.eventos || []).map(evento => ({...evento, leido: true}))});
+      }
+    } catch (e) {
+      // El contador se corrige en el siguiente refresco.
+    }
+  }, [seguimiento?.no_leidas, session.access]);
+
+  const toggleSection = (id) => {
+    const abrir = !openSections[id];
+    setOpenSections({[id]: true});
+    if (abrir && id === 'notificaciones') marcarNotificacionesLeidas();
+    if (abrir && id === 'examenes') cargarExamenes();
+    if (abrir && id === 'entrevistas') cargarEntrevistas();
+  };
 
   useEffect(() => {
     const controller = new AbortController();
-    const sctrl = new AbortController();
     cargarPerfil(controller.signal);
-    cargarSeguimiento(sctrl.signal);
-    return () => {
-      controller.abort();
-      sctrl.abort();
-    };
-  }, [cargarPerfil, cargarSeguimiento]);
-
-  useEffect(() => {
-    fetch('/api/preregistro/examenes/', {headers: {Authorization: `Bearer ${session.access}`}}).then(r => r.ok ? r.json() : {examenes: []}).then(data => setExamenes(data.examenes || []));
-  }, [session.access]);
+    cargarSeguimiento(controller.signal);
+    cargarExamenes(controller.signal);
+    cargarEntrevistas(controller.signal);
+    obtener('/api/preregistro/evaluaciones-colegio/', controller.signal)
+      .then(data => setEvaluaciones(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [cargarPerfil, cargarSeguimiento, cargarExamenes, cargarEntrevistas, obtener]);
 
   useEffect(() => {
     const expedienteId = perfil?.expediente_digital?.id;
@@ -171,23 +193,30 @@ export default function PanelAspirante({session, onLogout}) {
     }
     const controller = new AbortController();
     setExpedienteCargando(true);
-    fetch(`/api/expedientes/${expedienteId}/centralizado/`, {headers: {Authorization: `Bearer ${session.access}`}, signal: controller.signal})
-      .then(response => response.ok ? response.json() : null)
+    obtener(`/api/expedientes/${expedienteId}/centralizado/`, controller.signal)
       .then(setExpedienteCentral)
       .catch(() => setExpedienteCentral(null))
       .finally(() => { if (!controller.signal.aborted) setExpedienteCargando(false); });
     return () => controller.abort();
-  }, [perfil?.expediente_digital?.id, session.access]);
+  }, [perfil?.expediente_digital?.id, obtener]);
 
   useEffect(() => {
+    let controller = null;
     const interval = setInterval(() => {
-      cargarSeguimiento(new AbortController().signal);
-    }, 7000);
-    return () => clearInterval(interval);
+      if (document.hidden) return;
+      if (controller) controller.abort();
+      controller = new AbortController();
+      cargarSeguimiento(controller.signal);
+    }, INTERVALO_SEGUIMIENTO);
+    return () => {
+      clearInterval(interval);
+      if (controller) controller.abort();
+    };
   }, [cargarSeguimiento]);
 
   const etapa = etapaIndex(perfil?.proceso_estado);
   const estadoTerminal = ['rechazado', 'baja'].includes(perfil?.proceso_estado);
+  const documentosSoloLectura = perfil && (perfil.rol !== 'aspirante' || ESTADOS_RESUELTOS.includes(perfil.proceso_estado));
 
 
   return (
@@ -213,7 +242,7 @@ export default function PanelAspirante({session, onLogout}) {
       {cargando && !perfil && <div className="panel-card">{copy.loadingRequest}</div>}
 
       {perfil && <div className="aspirante-layout">
-        <aside className="aspirante-sidebar" aria-label="Menú de navegación del panel">
+        <aside className="aspirante-sidebar" aria-label={copy.navAria}>
           <div className="aspirante-sidebar-header">
             <h2>{copy.sidebarTitle}</h2>
             <p>{copy.sidebarHint}</p>
@@ -223,10 +252,10 @@ export default function PanelAspirante({session, onLogout}) {
               type="button"
               className={`sidebar-item${openSections.notificaciones ? ' is-active' : ''}`}
               onClick={() => toggleSection('notificaciones')}
-              aria-expanded={openSections.notificaciones}
+              aria-expanded={Boolean(openSections.notificaciones)}
             >
               <span>{copy.notifications}</span>
-              <span className="notif-badge">{seguimiento?.eventos?.filter(e => !e.leido).length || 0}</span>
+              <span className="notif-badge">{seguimiento?.no_leidas || 0}</span>
             </button>
             {MENU_ITEMS.map((item) => (
               <button
@@ -234,7 +263,7 @@ export default function PanelAspirante({session, onLogout}) {
                 type="button"
                 className={`sidebar-item${openSections[item.id] ? ' is-active' : ''}`}
                 onClick={() => toggleSection(item.id)}
-                aria-expanded={openSections[item.id]}
+                aria-expanded={Boolean(openSections[item.id])}
               >
                 <span>{copy.menu[item.id]}</span>
                 <span>{openSections[item.id] ? '−' : '+'}</span>
@@ -296,7 +325,7 @@ export default function PanelAspirante({session, onLogout}) {
             <div className="panel-card">
               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                 <h3>{copy.overview.recentNotifications}</h3>
-                <button type="button" className="qa-btn" onClick={() => cargarSeguimiento(new AbortController().signal)}>{copy.overview.update}</button>
+                <button type="button" className="qa-btn" onClick={() => cargarSeguimiento()}>{copy.overview.update}</button>
               </div>
               {seguimientoCargando && !seguimiento ? <p>{copy.messages.loadingNotifications}</p> : null}
               {!seguimientoCargando && (!seguimiento || !seguimiento.eventos || seguimiento.eventos.length === 0) ? (
@@ -304,7 +333,7 @@ export default function PanelAspirante({session, onLogout}) {
               ) : (
                 <div className="notifs-list">
                   {(seguimiento?.eventos || []).map((evt) => (
-                    <article key={evt.id} className="notif-item">
+                    <article key={evt.id} className={`notif-item${evt.leido ? '' : ' is-unread'}`}>
                       <div className="notif-head"><strong>{evt.origen}</strong><time>{fechaSeguimiento(evt.created_at, copy.locale)}</time></div>
                       <p>{evt.detalle}</p>
                     </article>
@@ -326,14 +355,19 @@ export default function PanelAspirante({session, onLogout}) {
           </SectionPanel>
 
           <SectionPanel id="proceso" label={copy.menu.proceso} open={openSections.proceso} onToggle={() => toggleSection('proceso')}>
-            <SeguimientoSolicitud seguimiento={seguimiento} cargando={seguimientoCargando} onActualizar={() => cargarSeguimiento(new AbortController().signal)} />
+            <SeguimientoSolicitud seguimiento={seguimiento} evaluaciones={evaluaciones} cargando={seguimientoCargando} onActualizar={() => cargarSeguimiento()} />
           </SectionPanel>
 
           <SectionPanel id="documentos" label={copy.menu.documentos} open={openSections.documentos} onToggle={() => toggleSection('documentos')}>
-            <DocumentosAspirante session={session} />
+            <DocumentosAspirante session={session} soloLectura={documentosSoloLectura} />
+          </SectionPanel>
+
+          <SectionPanel id="entrevistas" label={copy.menu.entrevistas} open={openSections.entrevistas} onToggle={() => toggleSection('entrevistas')}>
+            <EntrevistasAspirante entrevistas={entrevistas} error={entrevistasError} />
           </SectionPanel>
 
           <SectionPanel id="examenes" label={copy.menu.examenes} open={openSections.examenes} onToggle={() => toggleSection('examenes')}>
+            {examenesError && <div className="api-error" role="alert">{examenesError}</div>}
             <ExamenesEnLinea session={session} examenes={examenes} onChange={setExamenes} />
           </SectionPanel>
         </div>

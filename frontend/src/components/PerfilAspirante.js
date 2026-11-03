@@ -33,6 +33,8 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
     setPreview(fotoUrl(perfil.profile_photo));
   }, [perfil.nombre, perfil.correo, perfil.telefono, perfil.profile_photo]);
 
+  useEffect(() => () => { if (preview.startsWith('blob:')) URL.revokeObjectURL(preview); }, [preview]);
+
   function seleccionarFoto(event) {
     const archivo = event.target.files?.[0];
     if (!archivo) return;
@@ -55,7 +57,10 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
       const response = await fetch(`${API}/api/preregistro/perfil/`, {method: 'PATCH', headers: {Authorization: `Bearer ${session.access}`}, body: form});
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {};
-      if (!response.ok) throw new Error(`${text.saveError} (HTTP ${response.status}).`);
+      if (!response.ok) {
+        const detalle = [data.detail, data.nombre, data.correo, data.telefono, data.profile_photo].flat().filter(Boolean).join(' ');
+        throw new Error(detalle || `${text.saveError} (HTTP ${response.status}).`);
+      }
       if (!contentType.includes('application/json')) throw new Error(text.unexpected);
       if (fileRef.current) fileRef.current.value = '';
       setFoto(null); setMensaje(text.saved); setModal('ok');
@@ -66,7 +71,7 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
 
   return <div className="profile-editor panel-card">
     <div className="profile-editor-head"><div className="profile-avatar">{preview ? <img src={preview} alt={text.photo} onError={() => setPreview('')}/> : <span>{(nombre || 'A').charAt(0).toUpperCase()}</span>}</div><div><h3>{text.name}</h3><p>{text.update}</p></div></div>
-    <form className="profile-form" onSubmit={(event) => { event.preventDefault(); setModal('confirm'); }}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
+    <form className="profile-form" onSubmit={(event) => { event.preventDefault(); setModal('confirm'); }}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input type="tel" inputMode="tel" autoComplete="tel" maxLength={20} value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
     {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal('')}><div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
       <h3>{modal === 'confirm' ? text.confirmTitle : text.savedTitle}</h3>
       <p>{modal === 'confirm' ? text.confirmText : text.saved}</p>

@@ -10,7 +10,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .jurado_views import _es_coordinacion, _es_director
+from .jurado_views import _es_coordinacion, _es_director_del_proyecto
 from .models import DefensaTesis, JuradoProyecto, ProyectoTesis
 
 
@@ -25,7 +25,7 @@ class DiplomaDigitalView(APIView):
         defensa = DefensaTesis.objects.filter(proyecto=proyecto).first()
         puede_consultar = (
             _es_coordinacion(request.user)
-            or _es_director(request.user)
+            or _es_director_del_proyecto(request.user, proyecto)
             or request.user == proyecto.alumno
             or JuradoProyecto.objects.filter(proyecto=proyecto, jurado=request.user).exists()
         )
