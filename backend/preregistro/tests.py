@@ -299,7 +299,7 @@ class CargaAcademicaPreparationTests(TestCase):
         self.assertEqual(response.data['cargas'][0]['creador_nombre'], self.docente.nombre)
         self.assertEqual(response.data['periodos_inscripcion'][0]['id'], periodo.id)
 
-    @patch('preregistro.views._registrar_seguimiento')
+    @patch('preregistro.cargas_views._registrar_seguimiento')
     def test_review_notification_identifies_school_services_as_origin(self, registrar_seguimiento):
         carga = CargaAcademica.objects.create(
             creador=self.docente,
@@ -881,15 +881,15 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
             Materia.objects.create(clave='CAL-102', nombre='Calificación reprobatoria', creditos=4),
             Materia.objects.create(clave='CAL-103', nombre='Materia sin calificar', creditos=3),
         ]
-        aprobada = Inscripcion.objects.create(
+        Inscripcion.objects.create(
             aspirante=self.alumno, materia=materias[0], periodo_inscripcion=periodo_anterior,
             calificacion='9.00', estado='cursando',
         )
-        reprobada = Inscripcion.objects.create(
+        Inscripcion.objects.create(
             aspirante=self.alumno, materia=materias[1], periodo_inscripcion=periodo_actual,
             calificacion='6.00', estado='cursando',
         )
-        en_curso = Inscripcion.objects.create(
+        Inscripcion.objects.create(
             aspirante=self.alumno, materia=materias[2], periodo_inscripcion=periodo_actual,
             estado='cursando',
         )
@@ -1000,7 +1000,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('CINV-2025-0001_boleta_inscripcion.pdf', response['Content-Disposition'])
-        from preregistro.views import _datos_academicos_boleta
+        from preregistro.alumno_views import _datos_academicos_boleta
         datos_academicos = _datos_academicos_boleta(self.alumno)
         self.assertEqual(datos_academicos['periodo_escolar'], '2025-1')
         self.assertEqual(datos_academicos['etiqueta_ciclo'], 'Cuatrimestre')
@@ -1037,7 +1037,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
             filas_tabla.append(args[0])
             return ReportLabTable(*args, **kwargs)
 
-        with patch('preregistro.views.Table', side_effect=capturar_tabla):
+        with patch('preregistro.alumno_views.Table', side_effect=capturar_tabla):
             response = self.client.get('/api/preregistro/boleta-inscripcion/download/')
 
         self.assertEqual(response.status_code, 200)
@@ -1078,7 +1078,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
         materia = Materia.objects.create(clave='MATE-102', nombre='Materia Histórica', creditos=4)
         Inscripcion.objects.create(aspirante=self.alumno, materia=materia, periodo_inscripcion=None)
 
-        from preregistro.views import _datos_academicos_boleta
+        from preregistro.alumno_views import _datos_academicos_boleta
         datos_academicos = _datos_academicos_boleta(self.alumno)
 
         self.assertEqual(datos_academicos['periodo_escolar'], periodo.nombre)
@@ -1141,7 +1141,7 @@ class ServiciosEscolaresDocumentosAlumnoTests(TestCase):
             nombre='2025-2', apertura=timezone.now() - timedelta(days=60),
             cierre=timezone.now() - timedelta(days=1), activo=False,
         )
-        inscripcion_uno = Inscripcion.objects.create(
+        Inscripcion.objects.create(
             aspirante=self.alumno, materia=materia_uno, periodo_inscripcion=periodo_uno, calificacion=8,
         )
         inscripcion_dos = Inscripcion.objects.create(
@@ -1605,7 +1605,7 @@ class SolicitudAcademicaWorkflowTests(TestCase):
             rol='coordinacion', curp='SACA850101HDFRNN03', business_key='COORD-SOL-ACAD',
         )
 
-    @patch('preregistro.views._registrar_seguimiento')
+    @patch('preregistro.alumno_views._registrar_seguimiento')
     def test_student_creates_request_and_cannot_duplicate_pending_type(self, registrar_seguimiento):
         self.client.force_authenticate(user=self.alumno)
         invalid = self.client.post('/api/preregistro/solicitudes-academicas/', {
@@ -1626,7 +1626,7 @@ class SolicitudAcademicaWorkflowTests(TestCase):
         }, format='json')
         self.assertEqual(duplicate.status_code, 409)
 
-    @patch('preregistro.views._registrar_seguimiento')
+    @patch('preregistro.alumno_views._registrar_seguimiento')
     def test_review_routing_response_and_student_follow_up(self, registrar_seguimiento):
         historial = SolicitudAcademica.objects.create(
             aspirante=self.alumno, tipo='historial', comentario='Solicito historial académico.',
@@ -3163,7 +3163,7 @@ class NotificacionesMasivasCoordinacionTests(TestCase):
             **self.base_aspirante,
         )
 
-    @patch('preregistro.views.send_mail', return_value=1)
+    @patch('preregistro.coordinacion_views.send_mail', return_value=1)
     def test_envia_a_un_grupo_y_agrega_fechas_guardadas(self, enviar_correo):
         self.pendiente.fecha_entrevista = timezone.now()
         self.pendiente.save(update_fields=['fecha_entrevista'])
@@ -3182,7 +3182,7 @@ class NotificacionesMasivasCoordinacionTests(TestCase):
         self.assertEqual(SeguimientoSolicitud.objects.filter(aspirante=self.pendiente).count(), 1)
         self.assertEqual(SeguimientoSolicitud.objects.filter(aspirante=self.revision).count(), 0)
 
-    @patch('preregistro.views.send_mail', return_value=1)
+    @patch('preregistro.coordinacion_views.send_mail', return_value=1)
     def test_rechaza_destinatario_fuera_del_grupo(self, enviar_correo):
         response = self.client.post(
             '/api/coordinacion/notificaciones-masivas/',
@@ -3193,7 +3193,7 @@ class NotificacionesMasivasCoordinacionTests(TestCase):
         self.assertEqual(response.status_code, 409)
         enviar_correo.assert_not_called()
 
-    @patch('preregistro.views.send_mail', return_value=0)
+    @patch('preregistro.coordinacion_views.send_mail', return_value=0)
     def test_reporta_fallo_de_correo_y_no_registra_aviso_enviado(self, enviar_correo):
         response = self.client.post(
             '/api/coordinacion/notificaciones-masivas/',
@@ -3206,7 +3206,7 @@ class NotificacionesMasivasCoordinacionTests(TestCase):
         self.assertEqual(len(response.data['fallidos']), 1)
         self.assertEqual(SeguimientoSolicitud.objects.filter(aspirante=self.aceptado).count(), 0)
 
-    @patch('preregistro.views.send_mail', return_value=1)
+    @patch('preregistro.coordinacion_views.send_mail', return_value=1)
     def test_email_notifications_can_be_disabled_while_internal_notices_remain(self, enviar_correo):
         ConfiguracionSistema.objects.create(clave='notificaciones_activas', valor='false')
 

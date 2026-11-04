@@ -3,7 +3,7 @@ proxy_http_version 1.1;
 proxy_set_header Host $http_host;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $remote_addr;
-proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Proto $sinac_proto;
 proxy_set_header Connection $sinac_connection_upgrade;
 proxy_hide_header X-Powered-By;
 proxy_hide_header Server;

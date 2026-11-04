@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from .expediente_central_views import _es_gestion
 from .historial import ROLES_HISTORIAL
 from .models import Aspirante, HistorialPersona
+from .paginacion import paginar
 from .seguridad import url_media
 
 LIMITE = 300
@@ -116,9 +117,11 @@ class HistoricoPersonasView(APIView):
                 eventos = eventos.filter(**{lookup: fechas[nombre]})
         total = eventos.count()
         resumen = _resumen(eventos, fechas.get('hasta') or timezone.localdate())
+        pagina, paginacion = paginar(request, eventos)
         return Response({
             'total': total,
-            'truncado': total > LIMITE,
+            'truncado': not paginacion and total > LIMITE,
+            'paginacion': paginacion,
             'resumen': resumen,
             'opciones': {
                 'programas': sorted(
@@ -130,7 +133,7 @@ class HistoricoPersonasView(APIView):
                     .values_list('realizado_por_nombre', flat=True).distinct()
                 ),
             },
-            'eventos': [_evento(e) for e in eventos[:LIMITE]],
+            'eventos': [_evento(e) for e in (pagina if paginacion else eventos[:LIMITE])],
         })
 
 

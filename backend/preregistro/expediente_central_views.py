@@ -2,7 +2,6 @@ from io import BytesIO
 import logging
 from xml.sax.saxutils import escape
 
-from django.db.models import Q
 from django.http import FileResponse
 from PIL import Image as PILImage, ImageOps
 from reportlab.lib import colors
@@ -27,7 +26,7 @@ from .serializers import (
     SolicitudAcademicaSerializer,
 )
 from .servicios_views import ruta_logo_constancia
-from .seguridad import url_media
+from .seguridad import FORMATOS_IMAGEN, url_media
 
 logger = logging.getLogger(__name__)
 PIE_EXPEDIENTE = 'Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco.'
@@ -51,7 +50,7 @@ def _imagen_perfil_pdf(alumno):
 
     try:
         with alumno.profile_photo.open('rb') as archivo:
-            imagen = ImageOps.exif_transpose(PILImage.open(archivo)).convert('RGB')
+            imagen = ImageOps.exif_transpose(PILImage.open(archivo, formats=list(FORMATOS_IMAGEN))).convert('RGB')
             imagen.thumbnail((600, 800))
             contenido = BytesIO()
             imagen.save(contenido, format='JPEG', quality=88, optimize=True)

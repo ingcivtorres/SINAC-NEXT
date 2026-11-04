@@ -27,7 +27,6 @@ const MENU_GROUPS = [
     {id: 'config', icon: '☷'},
   ]},
 ];
-const MENU_ITEMS = MENU_GROUPS.flatMap(group => group.items);
 const SALONES = [
   {value: 'salon_1', labelKey: 'roomOne'},
   {value: 'laboratorio_harold', labelKey: 'haroldLab'},
@@ -1155,7 +1154,7 @@ export default function PanelAdministrador({session, onLogout}) {
 
       {!dialog && message && (
         <div className="admin-dialog-backdrop" onClick={() => setMessage('')}>
-          <section className="admin-dialog-card admin-dialog-card--success" role="status" aria-live="polite" aria-modal="true" aria-labelledby="admin-success-title" onClick={event => event.stopPropagation()}>
+          <section className="admin-dialog-card admin-dialog-card--success" role="status" aria-live="polite" aria-labelledby="admin-success-title" onClick={event => event.stopPropagation()}>
             <div className="admin-dialog-symbol" aria-hidden="true">✓</div>
             <div className="admin-dialog-copy">
               <h2 id="admin-success-title">{copy.dialog.successTitle}</h2>

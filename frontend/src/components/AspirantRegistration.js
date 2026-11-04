@@ -1,9 +1,9 @@
 import React, {useMemo, useState} from 'react';
 import {useLanguage} from '../translations';
+import {PROGRAMAS} from './programasCatalogo';
 
 const DRAFT_KEY = 'sinac_preregistro_draft_v2';
 const DEPARTAMENTOS = ['Biología Celular','Biomedicina Molecular','Bioquímica','Biotecnología y Bioingeniería','Computación','Control Automático','Farmacología','Física','Fisiología, Biofísica y Neurociencias','Genética y Biología Molecular','Infectómica y Patogénesis Molecular','Ingeniería Eléctrica','Investigación y Estudios Multidisciplinarios','Matemática Educativa','Matemáticas','Química','Toxicología'];
-import {PROGRAMAS} from './programasCatalogo';
 const SECCIONES = Array.from({length:65},(_,i)=>String(i+1));
 const REGISTRATION_COPY = {
   es: {

@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from .expediente_central_views import _es_gestion
 from .models import Aspirante, ConfiguracionPrograma, EgresoAlumno, ExpedienteDigital, Inscripcion, ProyectoTesis
+from .paginacion import paginar
 from .servicios_views import evaluar_prevalidacion_egreso
 from .views import _registrar_seguimiento
 from .seguridad import url_media
@@ -114,8 +115,10 @@ class EgresadosView(APIView):
                 aspirante_id__in=[alumno.pk for alumno in candidatos],
             ).select_related('materia', 'periodo_inscripcion'):
                 inscripciones_por_alumno[inscripcion.aspirante_id].append(inscripcion)
+        pagina, paginacion = paginar(request, egresos)
         return Response({
-            'egresados': [_serializar(item) for item in egresos],
+            'egresados': [_serializar(item) for item in pagina],
+            'paginacion': paginacion,
             'filtros': {
                 'programas': sorted({item.alumno.programa for item in base if item.alumno.programa}),
                 'generaciones': sorted({item.generacion for item in base if item.generacion}),

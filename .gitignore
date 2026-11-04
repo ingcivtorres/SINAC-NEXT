@@ -34,6 +34,7 @@ Thumbs.db
 
 # Archivos subidos por usuarios (datos personales)
 backend/media/
+respaldos/
 
 # Logs
 *.log

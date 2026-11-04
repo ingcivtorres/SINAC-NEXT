@@ -3,7 +3,6 @@ import logging
 import uuid
 from collections import Counter
 
-from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import permissions, status
@@ -11,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import requests
 
+from . import camunda
 from .models import (
     Aspirante, CargaAcademicaMateria, EntrevistaVirtual, ExamenEnLinea, Inscripcion, PeriodoInscripcion,
 )
@@ -147,32 +147,6 @@ class PanelDocenteView(APIView):
         })
 
 
-class DocenteMateriaView(APIView):
-    """Estudiantes inscritos en un grupo asignado al docente."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, pk):
-        docente = request.user
-        if not _es_docente(docente):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-
-        asignaciones = [item for item in _asignaciones(docente) if item.materia_id == pk]
-        if not asignaciones:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        inscripciones = _inscripciones_docente(docente, asignaciones).select_related('aspirante')
-        return Response({
-            'materia': MateriaSerializer(asignaciones[0].materia).data,
-            'inscripciones': InscripcionSerializer(inscripciones, many=True).data,
-            'estadisticas': {
-                'total': inscripciones.count(),
-                'cursando': inscripciones.filter(estado='cursando').count(),
-                'aprobada': inscripciones.filter(estado='aprobada').count(),
-                'reprobada': inscripciones.filter(estado='reprobada').count(),
-            }
-        })
-
-
 class CalificacionesView(APIView):
     """Permite al docente registrar calificaciones de sus grupos del periodo en curso."""
     permission_classes = [permissions.IsAuthenticated]
@@ -254,39 +228,6 @@ class CalificacionesView(APIView):
             inscripcion.estado = 'reprobada' if calificacion < 7 else 'aprobada'
             inscripcion.save()
         return Response(InscripcionSerializer(inscripcion).data)
-
-
-class ActasCalificacionesView(APIView):
-    """Genera actas de calificaciones de un grupo asignado al docente."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, materia_id):
-        docente = request.user
-        if not _es_docente(docente):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-
-        asignaciones = [item for item in _asignaciones(docente) if item.materia_id == materia_id]
-        if not asignaciones:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        asignacion = asignaciones[0]
-        inscripciones = _inscripciones_docente(docente, [asignacion]).select_related('aspirante')
-
-        return Response({
-            'materia': {
-                'clave': asignacion.materia.clave,
-                'nombre': asignacion.materia.nombre,
-                'profesor': docente.nombre,
-                'horario': asignacion.horario,
-                'periodo': asignacion.carga.periodo_inscripcion.nombre,
-            },
-            'calificaciones': [{
-                'estudiante': inscripcion.aspirante.nombre,
-                'usuario': inscripcion.aspirante.usuario,
-                'calificacion': inscripcion.calificacion,
-                'estado': inscripcion.estado,
-                'programa': inscripcion.aspirante.programa,
-            } for inscripcion in inscripciones],
-        })
 
 
 class DocenteExamenView(APIView):
@@ -457,7 +398,7 @@ class DocenteEntrevistaView(APIView):
                 )
 
             jitsi_room_id = str(uuid.uuid4())[:8]
-            jitsi_room_link = f"https://meet.jitsi.si/sinac-{jitsi_room_id}"
+            jitsi_room_link = f"https://meet.jit.si/sinac-{jitsi_room_id}"
 
             entrevista_data = request.data.copy()
             entrevista_data['aspirante'] = aspirante.id
@@ -473,14 +414,13 @@ class DocenteEntrevistaView(APIView):
                     jitsi_room_id=jitsi_room_id,
                     jitsi_room_link=jitsi_room_link,
                 )
-                base = getattr(settings, 'CAMUNDA_REST_URL', '')
-                if base:
+                if camunda.rest_url():
                     try:
-                        r = requests.post(f'{base}/process-definition/key/sinac_entrevista_v1/start', json={'businessKey': f'entrevista-{entrevista.id}', 'variables': {'entrevistaId': {'value': entrevista.id, 'type': 'Integer'}, 'aspiranteId': {'value': aspirante.id, 'type': 'Integer'}}}, timeout=6)
-                        if r.ok:
-                            entrevista.camunda_instance_id = r.json().get('id', ''); entrevista.save(update_fields=['camunda_instance_id','updated_at'])
+                        r = camunda.post('/process-definition/key/sinac_entrevista_v1/start', json={'businessKey': f'entrevista-{entrevista.id}', 'variables': {'entrevistaId': {'value': entrevista.id, 'type': 'Integer'}, 'aspiranteId': {'value': aspirante.id, 'type': 'Integer'}}}, timeout=6)
+                        if not r.ok:
+                            logger.warning('Camunda no inició el proceso de la entrevista %s: %s', entrevista.id, r.status_code)
                     except requests.RequestException:
-                        pass
+                        logger.warning('Camunda no disponible al iniciar la entrevista %s', entrevista.id)
                 _registrar_seguimiento(aspirante, 'entrevista_programada', f'Entrevista virtual programada para {entrevista.fecha_programada or "fecha pendiente"}.', 'Docencia', notificar=False)
                 return Response(EntrevistaVirtualSerializer(entrevista).data, status=status.HTTP_201_CREATED)
 

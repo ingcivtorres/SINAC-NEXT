@@ -1,8 +1,9 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.files.base import ContentFile
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
@@ -107,7 +108,12 @@ class Command(BaseCommand):
         return persona
 
     @transaction.atomic
+    def add_arguments(self, parser):
+        parser.add_argument('--forzar', action='store_true', help='Permite cargar los datos demo con DEBUG desactivado.')
+
     def handle(self, *args, **options):
+        if not settings.DEBUG and not options['forzar']:
+            raise CommandError('Los datos demo tienen contraseñas conocidas: no se cargan con DEBUG desactivado (usa --forzar).')
         credenciales = []
         ahora = timezone.now()
 
@@ -135,7 +141,7 @@ class Command(BaseCommand):
         credenciales.append(('Coordinación', coordinacion.usuario, _password('Coord', 1), coordinacion.nombre))
         servicios = self._persona(
             'serv.demo', 'Servicios Escolares Demo', 'servicios', 71, _password('Serv', 1),
-            'Servicios Escolares', proceso_estado='aceptado', is_staff=True,
+            'Servicios Escolares', proceso_estado='aceptado',
         )
         credenciales.append(('Servicios', servicios.usuario, _password('Serv', 1), servicios.nombre))
 

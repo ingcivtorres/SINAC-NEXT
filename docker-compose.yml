@@ -1,72 +1,138 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  logging: *logging
+  restart: unless-stopped
+
 x-backend-env: &backend-env
   CAMUNDA_URL: http://camunda:8080
-  CAMUNDA_REST_URL: http://camunda:8080/engine-rest
-  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+  CAMUNDA_USER: ${CAMUNDA_USER:-}
+  CAMUNDA_PASSWORD: ${CAMUNDA_PASSWORD:-}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-}
   DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
   DJANGO_HTTPS: ${DJANGO_HTTPS:-false}
+  DJANGO_HSTS_SUBDOMAINS: ${DJANGO_HSTS_SUBDOMAINS:-true}
+  DJANGO_HSTS_PRELOAD: ${DJANGO_HSTS_PRELOAD:-false}
+  SINAC_URL_PUBLICA: ${SINAC_URL_PUBLICA:-http://localhost:3000}
   DB_HOST: postgres
   DB_PORT: 5432
   DB_NAME: ${POSTGRES_DB:-camunda}
   DB_USER: ${POSTGRES_USER:-camunda}
-  DB_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en el archivo .env}
+  EMAIL_HOST: ${EMAIL_HOST:-}
+  EMAIL_PORT: ${EMAIL_PORT:-587}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
 
 services:
   postgres:
+    <<: *hardening
     image: postgres:15
     container_name: camunda-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-camunda}
       POSTGRES_USER: ${POSTGRES_USER:-camunda}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en el archivo .env}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
 
   camunda:
-    image: camunda/camunda-bpm-platform:latest
+    <<: *hardening
+    build:
+      context: ./docker/camunda
+    image: sinac-camunda:7.24.0
     container_name: camunda
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DB_DRIVER: org.postgresql.Driver
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-camunda}
       DB_USERNAME: ${POSTGRES_USER:-camunda}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-camunda}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en el archivo .env}
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
       - ./camunda:/camunda/configuration/resources
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/engine-rest/version | grep -q 401"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1536m
+
+  permisos-media:
+    image: python:3.12-slim
+    container_name: sinac-permisos-media
+    command: chown -R 1000:1000 /app/media
+    volumes:
+      - documentos_media:/app/media
+    logging: *logging
+    restart: "no"
 
   backend:
+    <<: *hardening
     build:
       context: ./backend
     container_name: sinac-backend
     environment:
       <<: *backend-env
     command: >-
-      sh -c "python manage.py migrate --noinput &&
-      if [ \"$${DJANGO_DEBUG:-true}\" = \"true\" ]; then python manage.py runserver 0.0.0.0:8000;
-      else gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers $${GUNICORN_WORKERS:-3} --timeout 120 --forwarded-allow-ips='*'; fi"
+      sh -c "python manage.py migrate --noinput && python manage.py createcachetable &&
+      if [ \"$${DJANGO_DEBUG:-false}\" = \"true\" ]; then python manage.py runserver 0.0.0.0:8000;
+      else gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers $${GUNICORN_WORKERS:-3} --timeout 120 --forwarded-allow-ips='*' --access-logfile - --error-logfile -; fi"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      permisos-media:
+        condition: service_completed_successfully
     volumes:
       - documentos_media:/app/media
       - ./frontend/src/assets:/app/frontend_assets:ro
+      - ./camunda:/app/bpmn:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"]
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 10s
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
 
   alertas:
+    <<: *hardening
     build:
       context: ./backend
     container_name: sinac-alertas
@@ -77,9 +143,43 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  respaldos:
+    <<: *hardening
+    image: postgres:15
+    container_name: sinac-respaldos
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-camunda}
+      PGUSER: ${POSTGRES_USER:-camunda}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en el archivo .env}
+      RESPALDOS_DIAS: ${RESPALDOS_DIAS:-14}
+      TZ: America/Mexico_City
+    command: >-
+      sh -c 'while true; do
+      f=/respaldos/sinac_$$(date +%Y%m%d_%H%M);
+      pg_dump -Fc -f "$${f}.dump" && tar -czf "$${f}_media.tar.gz" -C /media . && echo "Respaldo creado: $${f}";
+      find /respaldos -name "sinac_*" -type f -mtime +$${RESPALDOS_DIAS} -delete;
+      sleep 86400; done'
+    volumes:
+      - ./respaldos:/respaldos
+      - documentos_media:/media:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
 
   frontend:
+    <<: *hardening
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -88,7 +188,11 @@ services:
       - "3000:80"
     depends_on:
       - backend
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
 
 volumes:
   postgres_data: {}

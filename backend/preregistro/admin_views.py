@@ -1,5 +1,4 @@
 import csv
-import re
 import uuid
 import unicodedata
 from datetime import timedelta
@@ -15,7 +14,6 @@ from django.http import FileResponse
 from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.styles import getSampleStyleSheet
@@ -30,7 +28,9 @@ from .models import (
     DocumentoAspirante, AuditoriaSistema, ConfiguracionSistema,
 )
 from .configuracion_sistema import DEFAULTS as SYSTEM_CONFIG_DEFAULTS, parse_password_policy, password_meets_policy
+from .paginacion import paginar
 from .seguridad import celda_segura
+from .sesiones import revocar_sesiones
 
 
 ROLE_ALIASES = {
@@ -54,6 +54,20 @@ class AdminRolePermission(permissions.BasePermission):
         return bool(
             user and user.is_authenticated and
             (user.is_superuser or str(getattr(user, 'rol', '')).strip().lower() == 'admin')
+        )
+
+
+class CoordinacionRolePermission(permissions.BasePermission):
+    """Módulos de Coordinación: usa el mismo rol efectivo que recibe la sesión del usuario."""
+    message = 'Se requiere el rol Coordinación para acceder a este módulo.'
+
+    def has_permission(self, request, view):
+        from .serializers import InicioSesionSerializer
+
+        user = request.user
+        return bool(
+            user and user.is_authenticated and
+            InicioSesionSerializer.obtener_rol(user) in ('coordinacion', 'admin')
         )
 
 
@@ -214,7 +228,11 @@ class AdminUsuariosView(APIView):
             qs = qs.filter(rol=normalizar_rol(rol))
         if activo in ('true', 'false'):
             qs = qs.filter(is_active=activo == 'true')
-        return Response({'usuarios': [serializar_usuario(u) for u in qs], 'roles': sorted({r for r in ROLE_ALIASES.values()})})
+        usuarios, paginacion = paginar(request, qs)
+        respuesta = {'usuarios': [serializar_usuario(u) for u in usuarios], 'roles': sorted({r for r in ROLE_ALIASES.values()})}
+        if paginacion:
+            respuesta['paginacion'] = paginacion
+        return Response(respuesta)
 
     def post(self, request):
         data = request.data
@@ -334,6 +352,8 @@ class AdminUsuarioDetailView(APIView):
             user.login_failed_attempts = 0
             user.login_locked_until = None
         user.save()
+        if data.get('password') or not user.is_active:
+            revocar_sesiones(user)
         despues = serializar_usuario(user)
         registrar_auditoria(request, 'actualizacion_usuario', 'Aspirante', user.id, antes, despues)
         return Response(despues)
@@ -347,6 +367,7 @@ class AdminUsuarioDetailView(APIView):
         antes = serializar_usuario(user)
         user.is_active = False
         user.save(update_fields=['is_active', 'updated_at'])
+        revocar_sesiones(user)
         registrar_auditoria(request, 'desactivacion_usuario', 'Aspirante', user.id, antes, serializar_usuario(user))
         return Response({'detail': 'Usuario desactivado. Puede reactivarse desde la gestión de usuarios.'})
 
@@ -587,12 +608,14 @@ class AdminAuditoriaView(APIView):
     permission_classes = [AdminRolePermission]
 
     def get(self, request):
-        qs = AuditoriaSistema.objects.select_related('actor').all()[:200]
-        return Response([{
+        qs = AuditoriaSistema.objects.select_related('actor').all()
+        registros, paginacion = paginar(request, qs)
+        datos = [{
             'id': item.id, 'accion': item.accion, 'modelo': item.modelo, 'objeto_id': item.objeto_id,
             'usuario': item.actor.usuario if item.actor else 'Sistema', 'ip': item.ip,
             'anteriores': item.datos_anteriores, 'nuevos': item.datos_nuevos, 'created_at': item.created_at,
-        } for item in qs])
+        } for item in (registros if paginacion else qs[:200])]
+        return Response({'registros': datos, 'paginacion': paginacion} if paginacion else datos)
 
 
 class AdminConfiguracionView(APIView):

@@ -585,7 +585,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
   }), [aspirantesRegistrados]);
   const directores = useMemo(() => (datos?.personas || []).filter(a => a.rol === 'director' && a.is_active !== false), [datos]);
   const filtrarPersonas = (lista) => lista.filter(a => !busqueda.trim() || `${a.nombre} ${a.usuario} ${a.correo}`.toLowerCase().includes(busqueda.toLowerCase()));
-  const analitica = useMemo(() => { const lista=datos?.personas||[]; const total=lista.length||1; const estados=['pendiente','revision','aceptado','rechazado']; return {total:lista.length, aspirantes:lista.filter(a=>a.rol==='aspirante').length, alumnos:lista.filter(a=>a.rol==='alumno').length, personal:lista.filter(a=>['docente','investigador','director'].includes(a.rol)).length, estados:estados.map(e=>({key:e,label:etiquetaEstado(e, copy),count:lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length,pct:Math.round(lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length*100/Math.max(1,lista.filter(a=>a.rol==='aspirante').length))}))}; }, [copy, datos]);
+  const analitica = useMemo(() => { const lista=datos?.personas||[]; const estados=['pendiente','revision','aceptado','rechazado']; return {total:lista.length, aspirantes:lista.filter(a=>a.rol==='aspirante').length, alumnos:lista.filter(a=>a.rol==='alumno').length, personal:lista.filter(a=>['docente','investigador','director'].includes(a.rol)).length, estados:estados.map(e=>({key:e,label:etiquetaEstado(e, copy),count:lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length,pct:Math.round(lista.filter(a=>a.rol==='aspirante'&&a.proceso_estado===e).length*100/Math.max(1,lista.filter(a=>a.rol==='aspirante').length))}))}; }, [copy, datos]);
   const evaluacionesVisibles = useMemo(() => evaluacionFiltro === 'todas' ? evaluacionesColegio : evaluacionesColegio.filter(e => e.estado === evaluacionFiltro), [evaluacionesColegio, evaluacionFiltro]);
   const etiquetasFiltro = useEtiquetasFiltro();
   const bandejaTabla = useTablaControl(aspirantes, {
@@ -939,7 +939,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
         <div className="coordinacion-layout">
           <aside className="coordinacion-sidebar" aria-label={copy.title}>
             <div className="coord-nav-brand">
-              <span>{datos.usuario?.profile_photo ? <img style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit'}} src={fotoUrl(datos.usuario.profile_photo)} alt="Profile photo" /> : 'CA'}</span><div><small>{copy.profile.operations}</small><h2>{copy.profile.brand}</h2></div>
+              <span>{datos.usuario?.profile_photo ? <img style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit'}} src={fotoUrl(datos.usuario.profile_photo)} alt={datos.usuario.nombre || copy.profile.brand} /> : 'CA'}</span><div><small>{copy.profile.operations}</small><h2>{copy.profile.brand}</h2></div>
             </div>
             <nav className="coordinacion-sidebar-nav">
               {COORDINATION_NAV.map(group => <div className="coord-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.map(([id, , icon]) => <button type="button" key={id} className={`sidebar-item${activeSection === id ? ' is-active' : ''}`} onClick={() => setActiveSection(id)} aria-current={activeSection === id ? 'page' : undefined}><i aria-hidden="true">{icon}</i><span>{copy.nav[id]}</span>{id === 'bandeja' && <b>{resumen.por_revisar || 0}</b>}</button>)}</div>)}
@@ -1046,7 +1046,7 @@ export default function PanelCoordinacion({session, onLogout: onLogoutProp}) {
                 </header>
                 <ol className="coord-extemporanea-steps" aria-label={copy.nav.extemporanea}>
                   {[extText.stepStudent, extText.stepSubjects, extText.stepReason].map((step, index) => (
-                    <li className={`coord-extemporanea-step${index === 0 && alumnoExtemporaneoId || index === 1 && materiasExtemporaneasSeleccionadas.length || index === 2 && motivoExtemporaneo.trim() ? ' is-complete' : ''}`} key={step}>
+                    <li className={`coord-extemporanea-step${(index === 0 && alumnoExtemporaneoId) || (index === 1 && materiasExtemporaneasSeleccionadas.length) || (index === 2 && motivoExtemporaneo.trim()) ? ' is-complete' : ''}`} key={step}>
                       <span>{index + 1}</span><strong>{step}</strong>
                     </li>
                   ))}

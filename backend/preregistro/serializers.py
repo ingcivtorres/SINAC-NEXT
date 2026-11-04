@@ -1,10 +1,13 @@
+import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import timedelta
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.urls import reverse
@@ -18,6 +21,10 @@ from .configuracion_sistema import (
     LOCKOUT_DURATION_MINUTES, get_login_attempt_limit, password_meets_policy,
 )
 from .seguridad import ImagenFirmadaField, url_media
+
+logger = logging.getLogger(__name__)
+# Fallos acumulados desde cualquier origen a partir de los cuales la cuenta se bloquea para todos.
+FACTOR_BLOQUEO_GLOBAL = 5
 
 
 class AspiranteRegistroSerializer(serializers.ModelSerializer):
@@ -165,11 +172,6 @@ class ExpedienteDigitalSerializer(serializers.ModelSerializer):
         fields = ['id', 'folio', 'fecha_creacion', 'estado', 'aspirante_nombre', 'usuario', 'matricula', 'programa', 'departamento', 'proceso_estado']
         read_only_fields = fields
 
-
-class ExpedienteDigitalUpdateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ExpedienteDigital
-        fields = ['estado']
 
 class FirmaElectronicaSerializer(serializers.ModelSerializer):
     firmante_nombre = serializers.CharField(source='firmante.nombre', read_only=True)
@@ -425,7 +427,7 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
             return 'admin'
         if str(getattr(user, 'rol', '')).strip().lower() in ('servicios', 'servicios_escolares', 'servicios escolares'):
             return 'servicios'
-        if user.is_staff:
+        if user.is_staff or str(getattr(user, 'rol', '')).strip().lower() in ('coordinacion', 'coordinador'):
             return 'coordinacion'
         if str(getattr(user, 'rol', '')).strip().lower() in ('director', 'director de tesis'):
             return 'director'
@@ -438,6 +440,10 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
         if getattr(user, 'rol', None) == 'director':
             return 'director'
         return 'aspirante'
+
+    def _origen(self):
+        request = self.context.get('request')
+        return AnonRateThrottle().get_ident(request) if request else 'desconocido'
 
     @staticmethod
     def get_user_by_identifier(identifier):
@@ -461,27 +467,33 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
 
         invalid_credentials = False
         now = timezone.now()
+        limite = get_login_attempt_limit()
+        clave_origen = f'login_fallos:{user.pk}:{self._origen()}'
         with transaction.atomic():
             user = Aspirante.objects.select_for_update().filter(pk=user.pk).first()
+            bloqueada = bool(user and user.login_locked_until and user.login_locked_until > now)
             if user is None or not user.is_active:
                 invalid_credentials = True
-            elif user.login_locked_until and user.login_locked_until > now:
+            elif bloqueada and (cache.get(clave_origen) or user.login_failed_attempts >= limite * FACTOR_BLOQUEO_GLOBAL):
                 invalid_credentials = True
             else:
                 had_login_failures = bool(user.login_failed_attempts or user.login_locked_until)
-                if user.login_locked_until:
+                if user.login_locked_until and not bloqueada:
                     user.login_failed_attempts = 0
                     user.login_locked_until = None
                 if not user.check_password(password):
                     user.login_failed_attempts += 1
-                    if user.login_failed_attempts >= get_login_attempt_limit():
+                    cache.set(clave_origen, (cache.get(clave_origen) or 0) + 1, LOCKOUT_DURATION_MINUTES * 60)
+                    if user.login_failed_attempts >= limite and not bloqueada:
                         user.login_locked_until = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                        logger.warning('Cuenta %s bloqueada temporalmente por intentos fallidos.', user.pk)
                     user.save(update_fields=['login_failed_attempts', 'login_locked_until', 'updated_at'])
                     invalid_credentials = True
                 elif had_login_failures:
                     user.login_failed_attempts = 0
                     user.login_locked_until = None
                     user.save(update_fields=['login_failed_attempts', 'login_locked_until', 'updated_at'])
+                    cache.delete(clave_origen)
 
         if invalid_credentials:
             raise AuthenticationFailed('Credenciales inválidas.')

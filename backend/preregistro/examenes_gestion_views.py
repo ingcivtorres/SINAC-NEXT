@@ -9,8 +9,10 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import camunda
 from .expediente_central_views import _es_gestion
 from .models import Aspirante, ExamenEnLinea, PreguntaExamen
+from .paginacion import paginar
 from .servicios_views import es_servicios
 from .views import _registrar_seguimiento
 
@@ -18,6 +20,15 @@ TIPOS_GESTIONABLES = ('admision', 'seleccion', 'diagnostico', 'otro')
 ROLES_COORDINACION = {'coordinacion', 'coordinador'}
 ROLES_EVALUADOR = ('docente', 'investigador', 'director')
 MAX_PREGUNTAS = 200
+
+
+def _iniciar_examen_lida(examen):
+    instancia = camunda.iniciar(
+        'sinac_examen_v1', examen.business_key,
+        examenId=examen.pk, aspiranteId=examen.aspirante_id, tipoExamen=examen.tipo,
+    )
+    if instancia:
+        ExamenEnLinea.objects.filter(pk=examen.pk).update(camunda_instance_id=instancia)
 
 
 def _evaluadores():
@@ -160,10 +171,11 @@ class ExamenesGestionView(APIView):
         qs = qs.order_by('-fecha_programada', '-id')
         base = ExamenEnLinea.objects.exclude(tipo='predoctoral')
         resumen = {estado: base.filter(estado=estado).count() for estado, _ in ExamenEnLinea.ESTADOS_EXAMEN}
-        data = [_item(examen) for examen in qs[:300]]
+        pagina, paginacion = paginar(request, qs)
+        data = [_item(examen) for examen in (pagina if paginacion else qs[:300])]
         puede_crear = _puede_crear(request.user)
         return Response({
-            'examenes': data, 'total': qs.count(), 'resumen': resumen,
+            'examenes': data, 'total': qs.count(), 'resumen': resumen, 'paginacion': paginacion,
             'puede_crear': puede_crear,
             'evaluadores': [{'id': d.id, 'nombre': d.nombre} for d in _evaluadores()] if puede_crear else [],
             'tipos': [{'value': v, 'label': l} for v, l in ExamenEnLinea.TIPOS_EXAMEN if v in TIPOS_GESTIONABLES],
@@ -206,6 +218,7 @@ class ExamenesGestionView(APIView):
             )
             PreguntaExamen.objects.bulk_create([PreguntaExamen(examen=examen, **p) for p in preguntas])
             _registrar_seguimiento(aspirante, 'examen_programado', f'Se te asignó el examen "{examen.titulo}".', 'Coordinación Académica', notificar=False)
+            transaction.on_commit(lambda examen=examen: _iniciar_examen_lida(examen))
             creados.append(examen)
         return Response({'creados': len(creados), 'examenes': [_item(e) for e in creados]}, status=status.HTTP_201_CREATED)
 

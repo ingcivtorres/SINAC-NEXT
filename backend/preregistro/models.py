@@ -18,6 +18,7 @@ class AspiranteManager(BaseUserManager):
         extra.setdefault('is_staff', True)
         extra.setdefault('is_superuser', True)
         extra.setdefault('is_active', True)
+        extra.setdefault('rol', 'admin')
         extra.setdefault('nombre', 'Administrador SINAC')
         extra.setdefault('curp', 'ADMS000000HDF00001')
         extra.setdefault('telefono', '0000000000')
@@ -122,6 +123,11 @@ class Aspirante(AbstractBaseUser, PermissionsMixin):
             ('aspirante', 'Aspirante'),
             ('alumno', 'Alumno'),
             ('docente', 'Docente'),
+            ('director', 'Director de tesis'),
+            ('investigador', 'Investigador'),
+            ('coordinacion', 'Coordinación'),
+            ('servicios', 'Servicios Escolares'),
+            ('admin', 'Administrador'),
         ],
         default='aspirante',
     )

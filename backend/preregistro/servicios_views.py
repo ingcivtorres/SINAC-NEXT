@@ -24,7 +24,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, PeriodoInscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea, SolicitudInscripcionExtemporaneaMateria
+from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, PeriodoInscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea
 from .serializers import DocumentoAspiranteSerializer, InscripcionSerializer
 from .seguridad import url_media
 

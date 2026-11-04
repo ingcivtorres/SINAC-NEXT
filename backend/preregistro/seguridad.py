@@ -65,7 +65,7 @@ def validar_imagen(archivo, max_bytes=MAX_IMAGEN_BYTES):
     posicion = archivo.tell()
     try:
         archivo.seek(0)
-        with Image.open(archivo) as imagen:
+        with Image.open(archivo, formats=list(FORMATOS_IMAGEN)) as imagen:
             formato = imagen.format
             imagen.verify()
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError):

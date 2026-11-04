@@ -1,13 +1,12 @@
 from collections import Counter
 
 from django.db import transaction
-from django.db.models import Q
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .director_views import es_programa_doctorado, requisitos_predoctoral
-from .models import Aspirante, ConfiguracionPrograma, Inscripcion, Materia, PlanEstudioMateria, ProyectoTesis, SolicitudDireccionTesis
+from .models import Aspirante, ConfiguracionPrograma, Materia, PlanEstudioMateria, ProyectoTesis, SolicitudDireccionTesis
 from .views import _registrar_seguimiento
 
 

@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {Suspense, lazy, useState, useEffect, useRef} from 'react';
 import {createPortal} from 'react-dom';
 import LoadingScreen from './components/LoadingScreen';
 import LogoutModal from './components/LogoutModal';
@@ -6,24 +6,26 @@ import Navbar from './components/Navbar';
 import HomePage from './components/HomePage';
 import AspirantRegistration from './components/AspirantRegistration';
 import LoginView from './components/LoginView';
-import PanelAspirante from './components/PanelAspirante';
-import PanelAdministrador from './components/PanelAdministrador';
-import PanelAlumno from './components/PanelAlumno';
-import PanelCoordinacion from './components/PanelCoordinacion';
-import PanelDocente from './components/PanelDocente';
-import PanelDirector from './components/PanelDirector';
-import PanelServiciosEscolares from './components/PanelServiciosEscolares';
 import AvisoPrivacidad from './components/AvisoPrivacidad';
 import Footer from './components/Footer';
 import ContactPage from './components/ContactPage';
 import NotificationBell from './components/NotificationBell';
 import ErrorPage from './components/ErrorPage';
 import ErrorBoundary from './components/ErrorBoundary';
+import {cerrarSesionServidor} from './auth';
 import './styles.css';
 import './components/Navbar.css';
 import './components/Footer.css';
 import './components/RegistrationPrivacyGate.css';
 import './components/Login.css';
+
+const PanelAspirante = lazy(() => import('./components/PanelAspirante'));
+const PanelAdministrador = lazy(() => import('./components/PanelAdministrador'));
+const PanelAlumno = lazy(() => import('./components/PanelAlumno'));
+const PanelCoordinacion = lazy(() => import('./components/PanelCoordinacion'));
+const PanelDocente = lazy(() => import('./components/PanelDocente'));
+const PanelDirector = lazy(() => import('./components/PanelDirector'));
+const PanelServiciosEscolares = lazy(() => import('./components/PanelServiciosEscolares'));
 
 const ROLE_HOME_VIEW = {
   aspirante: 'panel',
@@ -44,6 +46,7 @@ const KNOWN_VIEWS = new Set([...PUBLIC_VIEWS, ...Object.values(ROLE_HOME_VIEW)])
 
 function initialView() {
   const path = window.location.pathname.replace(/\/+$/, '');
+  if (path === '/restablecer') return 'login';
   return path === '' || path === '/index.html' ? 'home' : 'error-404';
 }
 
@@ -108,6 +111,12 @@ export default function App(){
     };
   }, []);
 
+  useEffect(() => {
+    const actualizarToken = (event) => setSession(actual => actual ? {...actual, access: event.detail} : actual);
+    window.addEventListener('sinac:token', actualizarToken);
+    return () => window.removeEventListener('sinac:token', actualizarToken);
+  }, []);
+
   function handleNavigate(target, nextSession = session){
     const role = normalizedRole(nextSession?.role);
     const allowedRoles = ROLE_VIEW_ACCESS[target];
@@ -133,15 +142,17 @@ export default function App(){
     handleNavigate(target, authenticatedSession);
   }
 
+  const sesionActiva = Boolean(session);
   useEffect(() => {
-    if (!session) return;
+    if (!sesionActiva) return;
     const timeoutId = window.setTimeout(() => {
       handleLogout('Tu sesión ha expirado por inactividad. Inicia sesión nuevamente.');
     }, 1000 * 60 * 60);
     return () => window.clearTimeout(timeoutId);
-  }, [session]);
+  }, [sesionActiva]);
 
   function handleLogout(reason = 'Tu sesión ha finalizado. Inicia sesión nuevamente para continuar.'){
+    cerrarSesionServidor();
     clearAuthStorage();
     if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
     switchTimerRef.current = null;
@@ -176,6 +187,7 @@ export default function App(){
           document.body
         )}
         <ErrorBoundary resetKey={displayView} onHome={() => handleNavigate('home')}>
+        <Suspense fallback={<div className="panel-cargando" role="status">Cargando…</div>}>
         {displayView === 'error-404' && <ErrorPage code={404} path={notFoundPath} onHome={() => handleNavigate('home')} onBack={window.history.length > 1 ? () => window.history.back() : undefined} />}
         {displayView === 'error-403' && <ErrorPage code={403} onHome={() => handleNavigate(session ? ROLE_HOME_VIEW[normalizedRole(session.role)] || 'home' : 'home')} />}
         {displayView === 'home'   && <HomePage />}
@@ -221,6 +233,7 @@ export default function App(){
         {displayView === 'servicios-panel' && (
           session && normalizedRole(session.role) === 'servicios' ? <PanelServiciosEscolares session={session} onLogout={requestLogout} /> : <LoginView onBackHome={()=>handleNavigate('home')} onLoginSuccess={handleLoginSuccess}/>
         )}
+        </Suspense>
         </ErrorBoundary>
       </main>
       {session && <NotificationBell session={session} />}

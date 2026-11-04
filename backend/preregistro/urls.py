@@ -1,7 +1,24 @@
 from django.urls import path
-from .views import RenovarTokenView, PreregistroCreateView, MiPerfilView, PerfilAspiranteView, PanelAdministradorView, PanelCoordinacionView, EstadoAspiranteCoordinacionView, NotificacionMasivaCoordinacionView, DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, SolicitarApoyoView, InicioSesionView, DocumentoAspiranteView, DocumentoDescargaView, SeguimientoAspiranteView, MarcarNotificacionesLeidasView, AlertasAutomatizadasView, EvaluacionColegioView, MisMateriasDisponiblesView, MisInscripcionesView, SolicitudAcademicaView, MisEntrevistasView, MisExamenesView, HorarioDescargaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView, MateriasListView, CursosUploadView, GenerarCargaView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView
-from .docente_views import PanelDocenteView, DocenteMateriaView, CalificacionesView, ActasCalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
-from .views import ExpedienteDigitalView, FirmaElectronicaView, CargaAcademicaWorkflowView, PeriodoInscripcionView, InscripcionCoordinacionView, BoletaInscripcionCoordinacionView, InscripcionExtemporaneaView, CoordinacionReporteView
+from .views import InicioSesionView, RenovarTokenView
+from .aspirante_views import (
+    PreregistroCreateView, MiPerfilView, PerfilAspiranteView, SeguimientoAspiranteView, MisEntrevistasView,
+    MisExamenesView, EvaluacionColegioView, MarcarNotificacionesLeidasView, DocumentoAspiranteView,
+    DocumentoDescargaView, SolicitarApoyoView,
+)
+from .inscripciones_views import (
+    MisMateriasDisponiblesView, PeriodoInscripcionView, MisInscripcionesView, InscripcionCoordinacionView,
+    BoletaInscripcionCoordinacionView, InscripcionExtemporaneaView,
+)
+from .alumno_views import SolicitudAcademicaView, HorarioFormalDescargaView, ReinscripcionDescargaView, BoletaInscripcionView
+from .firmas_views import FirmaElectronicaView
+from .panel_admin_views import PanelAdministradorView
+from .coordinacion_views import (
+    PanelCoordinacionView, EstadoAspiranteCoordinacionView, NotificacionMasivaCoordinacionView,
+    DocumentoRevisionCoordinacionView, AspiranteCoordinacionDetailView, MateriasListView, CursosUploadView,
+    CoordinacionReporteView, CalificacionesDownloadView, AdscripcionDownloadView, DarBajaView, ConvertirAlumnoView,
+)
+from .cargas_views import CargaAcademicaWorkflowView, GenerarCargaView
+from .docente_views import PanelDocenteView, CalificacionesView, DocenteExamenView, DocenteExamenDetailView, DocenteEntrevistaView, DocenteEntrevistaDetailView
 from .servicios_views import ServiciosEscolaresPanelView, ServiciosEscolaresAlumnoView, ServiciosEscolaresValidacionView, ServiciosEscolaresReporteView, ServiciosEscolaresDocumentoView, SolicitudesExtemporaneasServiciosView, OficioInscripcionExtemporaneaView, OficioInscripcionExtemporaneaCoordinacionView
 from .admin_views import AdminUsuariosView, AdminUsuarioDetailView, AdminCatalogosView, AdminAlumnosView, AdminDocentesView, AdminReportesView, AdminAuditoriaView, AdminConfiguracionView
 from .director_views import DirectorPanelView
@@ -15,6 +32,7 @@ from .expediente_central_views import ExpedienteCentralizadoView, ExpedientePDFV
 from .egresados_views import EgresadosView, EgresadoDetailView
 from .historico_views import HistoricoPersonaDetalleView, HistoricoPersonasView
 from .docentes_views import ServiciosDocentesView, ServiciosDocenteDetailView
+from .sesiones import CerrarSesionView, RestablecerContrasenaView, SolicitarRecuperacionView
 from .examenes_gestion_views import ExamenesGestionView, ExamenesGestionDetailView, ExamenesCandidatosView
 
 urlpatterns = [
@@ -26,8 +44,6 @@ urlpatterns = [
     path('servicios-escolares/solicitudes-extemporaneas/<int:pk>/oficio/', OficioInscripcionExtemporaneaView.as_view(), name='servicios-oficio-extemporanea'),
     path('servicios-escolares/reportes/', ServiciosEscolaresReporteView.as_view(), name='servicios-reportes'),
     path('servicios-escolares/alumnos/<int:pk>/documentos/<str:tipo>/', ServiciosEscolaresDocumentoView.as_view(), name='servicios-documento'),
-    path('servicios-escolares/expedientes/', ExpedienteDigitalView.as_view(), name='expedientes-digitales'),
-    path('servicios-escolares/expedientes/<int:pk>/', ExpedienteDigitalView.as_view(), name='expediente-digital-detail'),
     path('servicios-escolares/docentes/', ServiciosDocentesView.as_view(), name='servicios-docentes'),
     path('servicios-escolares/docentes/<int:pk>/', ServiciosDocenteDetailView.as_view(), name='servicios-docente-detail'),
     path('examenes-gestion/', ExamenesGestionView.as_view(), name='examenes-gestion'),
@@ -79,10 +95,8 @@ urlpatterns = [
     path('coordinacion/aspirantes/<int:pk>/dar_baja/', DarBajaView.as_view(), name='coordinacion-dar-baja'),
     path('coordinacion/aspirantes/<int:pk>/convertir/',           ConvertirAlumnoView.as_view(), name='coordinacion-convertir-alumno'),
     path('docente/panel/', PanelDocenteView.as_view(), name='docente-panel'),
-    path('docente/materias/<int:pk>/', DocenteMateriaView.as_view(), name='docente-materia'),
     path('docente/calificaciones/', CalificacionesView.as_view(), name='docente-calificaciones'),
     path('docente/calificaciones/<int:pk>/', CalificacionesView.as_view(), name='docente-calificacion-update'),
-    path('docente/actas/<int:materia_id>/', ActasCalificacionesView.as_view(), name='docente-actas'),
     path('docente/examenes/', DocenteExamenView.as_view(), name='docente-examenes'),
     path('docente/examenes/<int:pk>/', DocenteExamenDetailView.as_view(), name='docente-examen-detail'),
     path('docente/entrevistas/', DocenteEntrevistaView.as_view(), name='docente-entrevistas'),
@@ -106,7 +120,6 @@ urlpatterns = [
     path('preregistro/evaluaciones-colegio/<int:pk>/', EvaluacionColegioView.as_view(), name='evaluacion-colegio-detail'),
     path('preregistro/apoyo/solicitar/', SolicitarApoyoView.as_view(), name='solicitar-apoyo'),
     path('preregistro/notificaciones/marcar-leidas/', MarcarNotificacionesLeidasView.as_view(), name='marcar-notificaciones-leidas'),
-    path('alertas-automatizadas/', AlertasAutomatizadasView.as_view(), name='alertas-automatizadas'),
     path('preregistro/materias/', MisMateriasDisponiblesView.as_view(), name='materias-disponibles'),
     path('preregistro/inscripciones/', MisInscripcionesView.as_view(), name='mis-inscripciones'),
     path('preregistro/solicitudes-academicas/', SolicitudAcademicaView.as_view(), name='solicitudes-academicas'),
@@ -116,4 +129,7 @@ urlpatterns = [
     path('preregistro/boleta-inscripcion/download/', BoletaInscripcionView.as_view(), name='boleta-inscripcion-descarga'),
     path('auth/login/',     InicioSesionView.as_view(),       name='token-obtain'),
     path('auth/refresh/',   RenovarTokenView.as_view(),      name='token-refresh'),
+    path('auth/logout/',    CerrarSesionView.as_view(),      name='token-logout'),
+    path('auth/recuperar/', SolicitarRecuperacionView.as_view(), name='password-recuperar'),
+    path('auth/restablecer/', RestablecerContrasenaView.as_view(), name='password-restablecer'),
 ]

@@ -1,18 +1,15 @@
 import hashlib
 import os
-import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 import requests
 
-from django.shortcuts import render
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import ProyectoTesis, RevisionAntiplagio
 from .seguridad import nombre_archivo_seguro, validar_pdf
-from .serializers import RevisionAntiplagioSerializer
 
 
 ESTADOS_REVISABLES = {'borrador', 'en_revision', 'observado'}

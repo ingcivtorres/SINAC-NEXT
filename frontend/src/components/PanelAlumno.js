@@ -410,7 +410,7 @@ export default function PanelAlumno({session, onLogout}) {
       if (!response.ok) throw new Error(primerErrorApi(data, copy.messages.thesisRequestError));
       setFlujoTesis(actual => ({...actual, solicitud:data}));
       const text = thesisWorkflowTranslations[copy.locale.split('-')[0]]?.student || thesisWorkflowTranslations.es.student;
-      setMessage(data.estado === 'aprobada' ? text.matchConfirmed : text.matchRejected);
+      setMessage(data.estado === 'aprobada' ? text.matchConfirmedMessage : text.matchRejected);
     } catch (error) {
       setError(error.message || copy.messages.thesisRequestError);
     }

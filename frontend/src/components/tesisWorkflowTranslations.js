@@ -21,7 +21,7 @@ const thesisWorkflowTranslations = {
       waitingStudent: 'El Director aceptó. Confirma si estás de acuerdo para completar el match.',
       confirm: 'Confirmar Director y proyecto',
       reject: 'No aceptar esta propuesta',
-      matchConfirmed: 'Match confirmado. El seguimiento de tesis ya puede comenzar.',
+      matchConfirmedMessage: 'Match confirmado. El seguimiento de tesis ya puede comenzar.',
       matchRejected: 'La propuesta fue rechazada. Puedes enviar una nueva solicitud a Coordinación.',
     },
     director: {
@@ -60,7 +60,7 @@ const thesisWorkflowTranslations = {
       waitingStudent: 'The advisor accepted. Confirm whether you agree to complete the match.',
       confirm: 'Confirm advisor and project',
       reject: 'Decline this proposal',
-      matchConfirmed: 'The match is confirmed. Thesis follow-up can now begin.',
+      matchConfirmedMessage: 'The match is confirmed. Thesis follow-up can now begin.',
       matchRejected: 'The proposal was declined. You can submit a new request to Coordination.',
     },
     director: {
@@ -99,7 +99,7 @@ const thesisWorkflowTranslations = {
       waitingStudent: 'Die Betreuung hat zugestimmt. Bestätigen Sie den Abschluss des Abgleichs.',
       confirm: 'Betreuung und Projekt bestätigen',
       reject: 'Vorschlag ablehnen',
-      matchConfirmed: 'Die Übereinstimmung ist bestätigt. Die Betreuung kann beginnen.',
+      matchConfirmedMessage: 'Die Übereinstimmung ist bestätigt. Die Betreuung kann beginnen.',
       matchRejected: 'Der Vorschlag wurde abgelehnt. Sie können einen neuen Antrag stellen.',
     },
     director: {
@@ -138,7 +138,7 @@ const thesisWorkflowTranslations = {
       waitingStudent: '导师已接受。请确认是否同意以完成匹配。',
       confirm: '确认导师和项目',
       reject: '拒绝此提议',
-      matchConfirmed: '匹配已确认。现在可以开始论文跟进。',
+      matchConfirmedMessage: '匹配已确认。现在可以开始论文跟进。',
       matchRejected: '提议未获接受。您可以重新提交申请。',
     },
     director: {
@@ -177,7 +177,7 @@ const thesisWorkflowTranslations = {
       waitingStudent: 'O orientador aceitou. Confirme se concorda para concluir o match.',
       confirm: 'Confirmar orientador e projeto',
       reject: 'Não aceitar esta proposta',
-      matchConfirmed: 'O match foi confirmado. O acompanhamento de tese já pode começar.',
+      matchConfirmedMessage: 'O match foi confirmado. O acompanhamento de tese já pode começar.',
       matchRejected: 'A proposta foi recusada. Você pode enviar uma nova solicitação à Coordenação.',
     },
     director: {

@@ -906,3 +906,5 @@ html { transition: background-color .2s ease, color .2s ease }
 .exp-sello code{font-size:.68rem;color:#52616b}
 .exp-doc{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px}
 .exp-doc small{display:block;color:#64748b}
+
+.panel-cargando{min-height:40vh;display:flex;align-items:center;justify-content:center;color:#475569;font-weight:600;}

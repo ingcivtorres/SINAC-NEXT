@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useMemo, useRef, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import ExpedienteCentralizadoCard from "./ExpedienteCentralizadoCard";
 import EgresadosPanel from "./EgresadosPanel";
 import HistoricoPanel from "./HistoricoPanel";
@@ -31,11 +31,6 @@ const estadoTexto = (estado, copy) => ({
   validada: copy.status.validada,
   observada: copy.status.observada,
 }[estado] || estado || copy.status.pending);
-
-function fecha(value, incluirHora = false, copy) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat(copy.locale, incluirHora ? {dateStyle: "short", timeStyle: "short"} : {dateStyle: "medium"}).format(new Date(value));
-}
 
 function Estado({value, copy}) {
   const clase = String(value || "pendiente").toLowerCase().replace(/\s+/g, "-");

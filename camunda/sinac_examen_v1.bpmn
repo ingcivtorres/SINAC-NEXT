@@ -1,3 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" targetNamespace="http://sinac.cinvestav.mx">
-<process id="sinac_examen_v1" name="Examen en línea SINAC" isExecutable="true" camunda:historyTimeToLive="365"><startEvent id="inicio" name="Examen programado"/><sequenceFlow id="a" sourceRef="inicio" targetRef="presentar"/><userTask id="presentar" name="Presentar examen" camunda:candidateGroups="aspirantes"/><sequenceFlow id="b" sourceRef="presentar" targetRef="evaluar"/><serviceTask id="evaluar" name="Evaluar respuestas" camunda:expression="${true}"/><sequenceFlow id="c" sourceRef="evaluar" targetRef="fin"/><endEvent id="fin" name="Examen evaluado"/></process></definitions>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" targetNamespace="http://sinac.cinvestav.mx">
+  <process id="sinac_examen_v1" name="Examen en línea SINAC" isExecutable="true" camunda:historyTimeToLive="365">
+    <startEvent id="inicio" name="Examen programado"/>
+    <sequenceFlow id="a" sourceRef="inicio" targetRef="presentar"/>
+    <userTask id="presentar" name="Presentar examen" camunda:candidateGroups="aspirantes"/>
+    <sequenceFlow id="b" sourceRef="presentar" targetRef="resultado"/>
+    <exclusiveGateway id="resultado" name="¿Examen aprobado?" default="no"/>
+    <sequenceFlow id="ok" sourceRef="resultado" targetRef="aprobado">
+      <conditionExpression xsi:type="tFormalExpression">${aprobado == true}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="no" sourceRef="resultado" targetRef="reprobado"/>
+    <endEvent id="aprobado" name="Examen aprobado"/>
+    <endEvent id="reprobado" name="Examen no aprobado"/>
+  </process>
+</definitions>

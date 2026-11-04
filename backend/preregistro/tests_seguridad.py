@@ -10,8 +10,8 @@ from PIL import Image
 from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
-from preregistro.models import Aspirante
-from preregistro.seguridad import celda_segura, nombre_archivo_seguro, url_media
+from preregistro.models import Aspirante, ExpedienteDigital
+from preregistro.seguridad import celda_segura, nombre_archivo_seguro, url_media, validar_imagen
 
 DATOS_REGISTRO = {
     'nombre': 'Ana López', 'usuario': 'ANASEGURA', 'curp': 'LOPA850101HDFRRR01',
@@ -156,6 +156,41 @@ class UtilidadesSeguridadTests(TestCase):
         self.assertEqual(nombre_archivo_seguro(''), 'archivo')
 
 
+class AutorizacionPorRolTests(TestCase):
+    def test_panel_coordinacion_usa_el_rol_y_no_solo_is_staff(self):
+        casos = [
+            (crear_usuario('SERVSTAFF', rol='servicios', is_staff=True), 403),
+            (crear_usuario('ALUMSTAFF', rol='alumno'), 403),
+            (crear_usuario('COORDROL', rol='coordinacion'), 200),
+            (crear_usuario('COORDLEG', is_staff=True), 200),
+        ]
+        for usuario, esperado in casos:
+            cliente = APIClient()
+            cliente.force_authenticate(usuario)
+            self.assertEqual(cliente.get('/api/coordinacion/panel/').status_code, esperado, usuario.usuario)
+
+    def test_firmas_solo_para_titular_director_o_gestion(self):
+        director = crear_usuario('DIRFIRMA', rol='director')
+        titular = crear_usuario('TITFIRMA', rol='alumno', director_tesis=director)
+        ajeno = crear_usuario('AJEFIRMA', rol='alumno')
+        expediente = ExpedienteDigital.objects.create(aspirante=titular, folio='EXP-FIRMA-0001')
+        ruta = f'/api/expedientes/{expediente.pk}/firma/'
+        for usuario, esperado in ((ajeno, 403), (titular, 200), (director, 200)):
+            cliente = APIClient()
+            cliente.force_authenticate(usuario)
+            self.assertEqual(cliente.get(ruta).status_code, esperado, usuario.usuario)
+
+    def test_superusuario_se_crea_con_rol_admin(self):
+        admin = Aspirante.objects.create_superuser(usuario='SUPERROL', correo='super.rol@example.com', password='Segura2026x')
+        self.assertEqual(admin.rol, 'admin')
+
+    def test_imagen_con_formato_no_permitido_se_rechaza(self):
+        buffer = BytesIO()
+        Image.new('RGB', (4, 4), 'teal').save(buffer, 'GIF')
+        self.assertIsNotNone(validar_imagen(SimpleUploadedFile('foto.png', buffer.getvalue(), content_type='image/png')))
+        self.assertIsNone(validar_imagen(png()))
+
+
 class LimiteIntentosTests(TestCase):
     def test_login_responde_429_al_superar_el_limite(self):
         tasas = {'anon': '1000/minute', 'user': '1000/minute', 'login': '3/minute', 'registro': '5/hour', 'refresh': '30/minute'}
@@ -166,3 +201,165 @@ class LimiteIntentosTests(TestCase):
             codigos = [cliente.post('/api/auth/login/', {'usuario': 'nadie', 'password': 'x'}, format='json').status_code for _ in range(4)]
         self.assertEqual(codigos[:3], [401, 401, 401])
         self.assertEqual(codigos[3], 429)
+
+
+class SesionesJWTTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.usuario = crear_usuario('SESIONJWT', rol='alumno')
+        self.cliente = APIClient()
+
+    def iniciar(self):
+        respuesta = self.cliente.post('/api/auth/login/', {'usuario': 'SESIONJWT', 'password': 'Segura2026x'}, format='json')
+        self.assertEqual(respuesta.status_code, 200)
+        return respuesta.data['refresh']
+
+    def renovar(self, refresh):
+        return self.cliente.post('/api/auth/refresh/', {'refresh': refresh}, format='json')
+
+    def test_renovar_rota_el_token_y_el_anterior_queda_invalido(self):
+        refresh = self.iniciar()
+        respuesta = self.renovar(refresh)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertNotEqual(respuesta.data['refresh'], refresh)
+        self.assertEqual(self.renovar(refresh).status_code, 401)
+
+    def test_cerrar_sesion_invalida_el_token_de_renovacion(self):
+        refresh = self.iniciar()
+        self.assertEqual(self.cliente.post('/api/auth/logout/', {'refresh': refresh}, format='json').status_code, 205)
+        self.assertEqual(self.renovar(refresh).status_code, 401)
+
+    def test_revocar_sesiones_invalida_todos_los_tokens(self):
+        from preregistro.sesiones import revocar_sesiones
+        tokens = [self.iniciar(), self.iniciar()]
+        revocar_sesiones(self.usuario)
+        for refresh in tokens:
+            self.assertEqual(self.renovar(refresh).status_code, 401)
+
+
+class RecuperacionContrasenaTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.usuario = crear_usuario('RECUPERA', rol='alumno')
+        self.cliente = APIClient()
+
+    def solicitar(self, identificador):
+        from django.core import mail
+        mail.outbox.clear()
+        respuesta = self.cliente.post('/api/auth/recuperar/', {'usuario': identificador}, format='json')
+        self.assertEqual(respuesta.status_code, 200)
+        return respuesta, mail.outbox
+
+    def enlace(self):
+        import re
+        _, buzon = self.solicitar('recupera@example.com')
+        self.assertEqual(len(buzon), 1)
+        return dict(re.findall(r'[?&](uid|token)=([\w-]+)', buzon[0].body))
+
+    def test_respuesta_identica_exista_o_no_la_cuenta(self):
+        existente, buzon = self.solicitar('RECUPERA')
+        self.assertEqual(len(buzon), 1)
+        inexistente, buzon = self.solicitar('nadie@example.com')
+        self.assertEqual(len(buzon), 0)
+        self.assertEqual(existente.data, inexistente.data)
+
+    def test_restablecer_cambia_la_contrasena_revoca_sesiones_y_el_enlace_es_de_un_uso(self):
+        refresh = self.cliente.post('/api/auth/login/', {'usuario': 'RECUPERA', 'password': 'Segura2026x'}, format='json').data['refresh']
+        datos = {**self.enlace(), 'password': 'NuevaClave2026'}
+        self.assertEqual(self.cliente.post('/api/auth/restablecer/', datos, format='json').status_code, 200)
+        self.usuario.refresh_from_db()
+        self.assertTrue(self.usuario.check_password('NuevaClave2026'))
+        self.assertEqual(self.cliente.post('/api/auth/refresh/', {'refresh': refresh}, format='json').status_code, 401)
+        self.assertEqual(self.cliente.post('/api/auth/restablecer/', datos, format='json').status_code, 400)
+
+    def test_restablecer_rechaza_token_invalido_y_contrasena_debil(self):
+        datos = self.enlace()
+        self.assertEqual(self.cliente.post('/api/auth/restablecer/', {**datos, 'password': 'debil'}, format='json').status_code, 400)
+        self.assertEqual(self.cliente.post('/api/auth/restablecer/', {**datos, 'token': 'x-y', 'password': 'NuevaClave2026'}, format='json').status_code, 400)
+        self.usuario.refresh_from_db()
+        self.assertTrue(self.usuario.check_password('Segura2026x'))
+
+
+@override_settings(CAMUNDA_URL='http://camunda:8080')
+class IntegracionLidaTests(TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+        from preregistro.models import DocumentoAspirante
+        self.coordinacion = APIClient()
+        self.coordinacion.force_authenticate(crear_usuario('COORDLIDA', rol='coordinacion'))
+        self.aspirante = crear_usuario('ASPLIDA')
+        self.documento = DocumentoAspirante.objects.create(
+            aspirante=self.aspirante, tipo='cv', archivo='aspirantes/cv.pdf', nombre_original='cv.pdf', tamano=10,
+        )
+        respuesta = MagicMock(status_code=200)
+        respuesta.json.return_value = [{'id': 'tarea-1'}]
+        self.post = patch('preregistro.camunda.requests.post', return_value=respuesta).start()
+        self.addCleanup(patch.stopall)
+
+    def consulta(self):
+        llamada = self.post.call_args_list[0]
+        self.assertEqual(llamada.args[0], 'http://camunda:8080/engine-rest/task')
+        return llamada.kwargs['json']
+
+    def completado_con(self):
+        self.assertEqual(self.post.call_args.args[0], 'http://camunda:8080/engine-rest/task/tarea-1/complete')
+        return self.post.call_args.kwargs['json']['variables']
+
+    def test_revisar_documento_completa_la_validacion_bpmn(self):
+        ruta = f'/api/coordinacion/documentos/{self.documento.pk}/revision/'
+        self.assertEqual(self.coordinacion.patch(ruta, {'revisado': True}, format='json').status_code, 200)
+        self.assertEqual(self.consulta()['processVariables'], [{'name': 'documentoId', 'operator': 'eq', 'value': self.documento.pk}])
+        self.assertEqual(self.completado_con(), {'valido': {'value': True, 'type': 'Boolean'}})
+
+    def test_decision_final_cierra_la_revision_del_preregistro(self):
+        self.documento.revisado = True
+        self.documento.save(update_fields=['revisado'])
+        ruta = f'/api/coordinacion/aspirantes/{self.aspirante.pk}/estado/'
+        self.assertEqual(self.coordinacion.patch(ruta, {'proceso_estado': 'aceptado'}, format='json').status_code, 200)
+        self.assertEqual(self.consulta()['processInstanceBusinessKey'], self.aspirante.business_key)
+        self.assertEqual(self.completado_con(), {'decision': {'value': 'aceptado', 'type': 'String'}})
+
+
+class PaginacionOpcionalTests(TestCase):
+    def setUp(self):
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(crear_usuario('ADMINPAG', rol='admin'))
+        for numero in range(4):
+            crear_usuario(f'PAGINA{numero}')
+
+    def test_sin_page_devuelve_el_listado_completo(self):
+        datos = self.cliente.get('/api/administracion/usuarios/').data
+        self.assertEqual(len(datos['usuarios']), 5)
+        self.assertNotIn('paginacion', datos)
+
+    def test_con_page_devuelve_la_pagina_y_sus_metadatos(self):
+        datos = self.cliente.get('/api/administracion/usuarios/?page=2&page_size=2').data
+        self.assertEqual(len(datos['usuarios']), 2)
+        self.assertEqual(datos['paginacion'], {'pagina': 2, 'paginas': 3, 'total': 5, 'tamano': 2})
+        self.assertEqual(self.cliente.get('/api/administracion/usuarios/?page=9').status_code, 404)
+
+
+class BloqueoPorOrigenTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        from preregistro.models import ConfiguracionSistema
+        ConfiguracionSistema.objects.create(clave='bloqueo_intentos', valor='2')
+        self.usuario = crear_usuario('BLOQORIGEN', rol='alumno')
+
+    def login(self, password, ip):
+        return APIClient().post(
+            '/api/auth/login/', {'usuario': 'BLOQORIGEN', 'password': password}, format='json', REMOTE_ADDR=ip,
+        ).status_code
+
+    def test_el_bloqueo_aplica_al_origen_que_fallo_y_no_al_titular(self):
+        self.assertEqual([self.login('mala', '10.0.0.9') for _ in range(2)], [401, 401])
+        self.assertEqual(self.login('Segura2026x', '10.0.0.9'), 401)
+        self.assertEqual(self.login('Segura2026x', '10.0.0.20'), 200)
+
+    def test_demasiados_fallos_bloquean_la_cuenta_para_todos(self):
+        for numero in range(10):
+            self.login('mala', f'10.0.1.{numero}')
+        self.assertEqual(self.login('Segura2026x', '10.0.0.20'), 401)

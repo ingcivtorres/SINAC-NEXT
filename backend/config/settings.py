@@ -4,7 +4,9 @@ import sys
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-CAMUNDA_URL = os.getenv('CAMUNDA_URL', '')
+CAMUNDA_URL = '' if 'test' in sys.argv else os.getenv('CAMUNDA_URL', '')
+CAMUNDA_USER = os.getenv('CAMUNDA_USER', '')
+CAMUNDA_PASSWORD = os.getenv('CAMUNDA_PASSWORD', '')
 
 
 def _env_bool(name, default):
@@ -16,15 +18,15 @@ def _env_list(name, default=''):
     return [item.strip() for item in value.split(',') if item.strip()]
 
 
-DEBUG = _env_bool('DJANGO_DEBUG', 'true')
+DEBUG = _env_bool('DJANGO_DEBUG', 'false')
 TESTING = 'test' in sys.argv
 SECRET_KEY = (os.getenv('DJANGO_SECRET_KEY') or '').strip()
+if not SECRET_KEY and (DEBUG or TESTING):
+    SECRET_KEY = 'sinac-local-development-only-key-change-before-deployment-2026'
 if not DEBUG and len(SECRET_KEY) < 50:
     raise ImproperlyConfigured(
         'DJANGO_SECRET_KEY debe configurarse con al menos 50 caracteres cuando DEBUG está desactivado.'
     )
-if not SECRET_KEY:
-    SECRET_KEY = 'sinac-local-development-only-key-change-before-deployment-2026'
 ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS', '*' if DEBUG else 'localhost,127.0.0.1,[::1],backend')
 
 INSTALLED_APPS = [
@@ -35,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'preregistro',
 ]
@@ -75,9 +78,16 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME', 'camunda'),
         'USER': os.getenv('DB_USER', 'camunda'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'camunda'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'camunda' if DEBUG else ''),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5433' if os.getenv('DB_HOST') is None else '5432'),
+    }
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'sinac_cache',
     }
 }
 
@@ -93,6 +103,8 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
     ),
+    'DEFAULT_PAGINATION_CLASS': 'preregistro.paginacion.PaginacionOpcional',
+    'PAGE_SIZE': 50,
     'DEFAULT_THROTTLE_CLASSES': (
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
@@ -103,14 +115,17 @@ REST_FRAMEWORK = {
         'login': '10000/minute' if TESTING else os.getenv('THROTTLE_LOGIN', '10/minute'),
         'registro': '10000/minute' if TESTING else os.getenv('THROTTLE_REGISTRO', '5/hour'),
         'refresh': '10000/minute' if TESTING else os.getenv('THROTTLE_REFRESH', '30/minute'),
+        'recuperacion': '10000/minute' if TESTING else os.getenv('THROTTLE_RECUPERACION', '5/hour'),
     },
     'NUM_PROXIES': int(os.getenv('DJANGO_NUM_PROXIES', '1')),
 }
 
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=int(os.getenv('JWT_ACCESS_MINUTES', '120'))),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=int(os.getenv('JWT_ACCESS_MINUTES', '30'))),
     'REFRESH_TOKEN_LIFETIME': timedelta(hours=int(os.getenv('JWT_REFRESH_HOURS', '24'))),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
 }
 
@@ -149,16 +164,33 @@ if HTTPS:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_HSTS_SECONDS', '31536000'))
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool('DJANGO_HSTS_SUBDOMAINS', 'false')
-    SECURE_HSTS_PRELOAD = False
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool('DJANGO_HSTS_SUBDOMAINS', 'true')
+    SECURE_HSTS_PRELOAD = _env_bool('DJANGO_HSTS_PRELOAD', 'false')
+
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = _env_bool('EMAIL_USE_TLS', 'true')
+EMAIL_USE_SSL = _env_bool('EMAIL_USE_SSL', 'false')
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'no-responder@sinac.local')
+PASSWORD_RESET_TIMEOUT = int(os.getenv('PASSWORD_RESET_SECONDS', '3600'))
+SINAC_URL_PUBLICA = os.getenv('SINAC_URL_PUBLICA', 'http://localhost:3000').rstrip('/')
+if DEBUG and not EMAIL_HOST:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'formatters': {
+        'sinac': {'format': '%(asctime)s %(levelname)s %(name)s %(message)s'},
+    },
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'sinac'}},
     'loggers': {
         'django.security': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
-        'preregistro': {'handlers': ['console'], 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO')},
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'preregistro': {'handlers': ['console'], 'level': 'ERROR' if TESTING else os.getenv('DJANGO_LOG_LEVEL', 'INFO')},
     },
 }
 
