@@ -10,6 +10,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
+from reportlab.pdfgen import canvas as pdfgen_canvas
 from reportlab.platypus import Image as PDFImage, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -25,6 +26,7 @@ from .serializers import (
     SeguimientoSolicitudSerializer,
     SolicitudAcademicaSerializer,
 )
+from .roles import es_director, es_gestion_academica, es_servicios
 from .servicios_views import ruta_logo_constancia
 from .seguridad import FORMATOS_IMAGEN, url_media
 
@@ -32,16 +34,12 @@ logger = logging.getLogger(__name__)
 PIE_EXPEDIENTE = 'Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco.'
 
 
-def _rol(user):
-    return str(getattr(user, 'rol', '') or '').strip().lower()
-
-
 def _es_gestion(user):
-    return bool(user.is_staff or _rol(user) in {'coordinacion', 'coordinador', 'servicios', 'servicios_escolares', 'servicios escolares'})
+    return bool(es_gestion_academica(user) or es_servicios(user))
 
 
 def _es_director_del_expediente(user, expediente):
-    return _rol(user) in {'director', 'director de tesis'} and expediente.aspirante.director_tesis_id == user.id
+    return es_director(user) and expediente.aspirante.director_tesis_id == user.id
 
 
 def _imagen_perfil_pdf(alumno):
@@ -79,13 +77,13 @@ def _bloque_firma_director_general(styles):
         alignment=1,
         fontName='Helvetica-Bold',
         fontSize=9,
-        leading=12,
+        leading=11,
         textColor=colors.HexColor('#123d5a'),
     )
     bloque = Table(
         [[''], [Paragraph('Director General del Cinvestav', etiqueta)]],
         colWidths=[4.2 * inch],
-        rowHeights=[.62 * inch, .3 * inch],
+        rowHeights=[.48 * inch, .26 * inch],
     )
     bloque.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -93,13 +91,19 @@ def _bloque_firma_director_general(styles):
         ('LINEABOVE', (0, 1), (0, 1), .8, colors.HexColor('#526872')),
         ('LEFTPADDING', (0, 0), (-1, -1), 8),
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
     ]))
     return bloque
 
 
-def _dibujar_pie_expediente(canvas, documento):
+def _texto_hoja_expediente(pagina, total_paginas=None):
+    if total_paginas is None:
+        return f'Hoja {pagina}'
+    return f'Hoja {pagina} de {total_paginas}'
+
+
+def _dibujar_pie_expediente(canvas, documento, total_paginas=None):
     canvas.saveState()
     ancho, _ = documento.pagesize
     y = .48 * inch
@@ -109,8 +113,34 @@ def _dibujar_pie_expediente(canvas, documento):
     canvas.setFont('Helvetica', 7.5)
     canvas.setFillColor(colors.HexColor('#526672'))
     canvas.drawCentredString(ancho / 2, .28 * inch, PIE_EXPEDIENTE)
-    canvas.drawRightString(ancho - documento.rightMargin, .28 * inch, f'Pág. {canvas.getPageNumber()}')
+    canvas.drawRightString(
+        ancho - documento.rightMargin,
+        .28 * inch,
+        _texto_hoja_expediente(canvas.getPageNumber(), total_paginas),
+    )
     canvas.restoreState()
+
+
+class ExpedienteNumberedCanvas(pdfgen_canvas.Canvas):
+    """Dibuja el pie con el total de hojas tras conocer cuántas páginas se generaron."""
+
+    def __init__(self, *args, documento=None, **kwargs):
+        self._documento = documento
+        self._saved_page_states = []
+        super().__init__(*args, **kwargs)
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total = len(self._saved_page_states)
+        for estado in self._saved_page_states:
+            self.__dict__.update(estado)
+            if self._documento is not None:
+                _dibujar_pie_expediente(self, self._documento, total_paginas=total)
+            pdfgen_canvas.Canvas.showPage(self)
+        pdfgen_canvas.Canvas.save(self)
 
 
 class ExpedientePDFView(APIView):
@@ -127,11 +157,11 @@ class ExpedientePDFView(APIView):
         styles = getSampleStyleSheet()
         azul = colors.HexColor('#123d5a')
         turquesa = colors.HexColor('#168b91')
-        title = ParagraphStyle('ExpTitle', parent=styles['Title'], textColor=colors.white, fontSize=17, leading=20, alignment=1)
-        subtitle = ParagraphStyle('ExpSubtitle', parent=styles['Normal'], textColor=colors.white, fontSize=8, leading=11, alignment=1)
-        heading = ParagraphStyle('ExpSection', parent=styles['Heading3'], textColor=azul, fontSize=11, leading=14, spaceBefore=8, spaceAfter=5)
+        title = ParagraphStyle('ExpTitle', parent=styles['Title'], textColor=colors.white, fontSize=16, leading=18, alignment=1)
+        subtitle = ParagraphStyle('ExpSubtitle', parent=styles['Normal'], textColor=colors.white, fontSize=8, leading=10, alignment=1)
+        heading = ParagraphStyle('ExpSection', parent=styles['Heading3'], textColor=azul, fontSize=10, leading=12, spaceBefore=4, spaceAfter=3)
         label = ParagraphStyle('ExpLabel', parent=styles['Normal'], textColor=colors.HexColor('#536674'), fontSize=7, leading=9)
-        value = ParagraphStyle('ExpValue', parent=styles['Normal'], textColor=colors.HexColor('#1e293b'), fontSize=9, leading=12)
+        value = ParagraphStyle('ExpValue', parent=styles['Normal'], textColor=colors.HexColor('#1e293b'), fontSize=9, leading=11)
         small = ParagraphStyle('ExpSmall', parent=styles['Normal'], textColor=colors.HexColor('#475569'), fontSize=7, leading=9)
         column_header = ParagraphStyle('ExpTableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', textColor=colors.white, fontSize=8, leading=10)
         bio = BytesIO()
@@ -140,7 +170,7 @@ class ExpedientePDFView(APIView):
             pagesize=letter,
             rightMargin=.65 * inch,
             leftMargin=.65 * inch,
-            topMargin=.55 * inch,
+            topMargin=.45 * inch,
             bottomMargin=.72 * inch,
         )
 
@@ -190,9 +220,9 @@ class ExpedientePDFView(APIView):
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
         ]))
-        story = [encabezado, Spacer(1, 8), banner, Spacer(1, 12)]
+        story = [encabezado, Spacer(1, 4), banner, Spacer(1, 8)]
 
-        def tabla(filas, widths, header=False, padding=6):
+        def tabla(filas, widths, header=False, padding=4):
             t = Table(filas, colWidths=widths, repeatRows=1 if header else 0)
             estilo = [
                 ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#d5e0e6')),
@@ -241,27 +271,27 @@ class ExpedientePDFView(APIView):
 
         egreso = getattr(alumno, 'egreso', None)
         if egreso:
-            story += [Spacer(1, 12), Paragraph('Datos de egreso', heading)]
+            story += [Spacer(1, 6), Paragraph('Datos de egreso', heading)]
             story.append(tabla([
                 [celda('Fecha de egreso', label), celda(egreso.fecha_egreso.strftime('%d/%m/%Y'))],
                 [celda('Generación', label), celda(egreso.generacion)],
                 [celda('Promedio final', label), celda(egreso.promedio_final)],
                 [celda('Título de tesis', label), celda(egreso.titulo_tesis)],
-            ], [1.65 * inch, 5.5 * inch], padding=5))
+            ], [1.65 * inch, 5.5 * inch], padding=4))
 
-        story += [Spacer(1, 12), Paragraph('Documentos', heading)]
+        story += [Spacer(1, 6), Paragraph('Documentos', heading)]
         documentos = DocumentoAspirante.objects.filter(aspirante=alumno).order_by('tipo')
         filas = [[celda('Documento', column_header), celda('Archivo', column_header), celda('Revisado', column_header)]]
         filas += [[celda(d.get_tipo_display()), celda(d.nombre_original), celda('Sí' if d.revisado else 'No')] for d in documentos]
         story.append(tabla(filas, [2.3 * inch, 3.5 * inch, 1.35 * inch], header=True) if len(filas) > 1 else Paragraph('Sin documentos cargados.', styles['BodyText']))
 
-        story += [Spacer(1, 12), Paragraph('Tesis', heading)]
+        story += [Spacer(1, 6), Paragraph('Tesis', heading)]
         proyectos = ProyectoTesis.objects.filter(alumno=alumno).select_related('director')
         filas = [[celda('Título', column_header), celda('Director', column_header), celda('Estado', column_header)]]
         filas += [[celda(p.titulo), celda(p.director.nombre if p.director else None), celda(p.get_estado_display())] for p in proyectos]
         story.append(tabla(filas, [3.3 * inch, 2.2 * inch, 1.65 * inch], header=True) if len(filas) > 1 else Paragraph('Sin proyecto de tesis.', styles['BodyText']))
 
-        story += [Spacer(1, 12), Paragraph('Firmas electrónicas', heading)]
+        story += [Spacer(1, 6), Paragraph('Firmas electrónicas', heading)]
         firmas = list(expediente.firmas.select_related('firmante').order_by('firmado_at'))
         for firma in firmas:
             huella = firma.huella
@@ -278,21 +308,27 @@ class ExpedientePDFView(APIView):
                 ('BOX', (0, 0), (-1, -1), .6, colors.HexColor('#cfdae0')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 0), (0, 0), 'CENTER'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 7),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 7),
-                ('TOPPADDING', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ]))
-            story.append(KeepTogether([firma_card, Spacer(1, 6)]))
+            story.append(KeepTogether([firma_card, Spacer(1, 4)]))
+        cierre_firma = [_bloque_firma_director_general(styles)]
         if not firmas:
             story.append(Paragraph('El expediente aún no ha sido firmado.', styles['BodyText']))
-        else:
             story.append(Spacer(1, 8))
-            story.append(Paragraph('Escanea el código QR para consultar la huella SHA-256 de la firma electrónica.', small))
-        story.append(Spacer(1, 16))
-        story.append(KeepTogether([_bloque_firma_director_general(styles)]))
+        else:
+            cierre_firma = [
+                Spacer(1, 4),
+                Paragraph('Escanea el código QR para consultar la huella SHA-256 de la firma electrónica.', small),
+                Spacer(1, 8),
+                _bloque_firma_director_general(styles),
+            ]
+        # Mantener la firma del director junto al cierre para que no quede aislada en otra hoja.
+        story.append(KeepTogether(cierre_firma))
 
-        doc.build(story, onFirstPage=_dibujar_pie_expediente, onLaterPages=_dibujar_pie_expediente)
+        doc.build(story, canvasmaker=lambda *args, **kwargs: ExpedienteNumberedCanvas(*args, documento=doc, **kwargs))
         bio.seek(0)
         return FileResponse(bio, as_attachment=request.query_params.get('inline') != '1', filename=f'{expediente.folio}.pdf', content_type='application/pdf')
 

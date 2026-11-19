@@ -34,10 +34,15 @@ from .historico_views import HistoricoPersonaDetalleView, HistoricoPersonasView
 from .docentes_views import ServiciosDocentesView, ServiciosDocenteDetailView
 from .sesiones import CerrarSesionView, RestablecerContrasenaView, SolicitarRecuperacionView
 from .examenes_gestion_views import ExamenesGestionView, ExamenesGestionDetailView, ExamenesCandidatosView
+from .credencial_views import CredencialAlumnoView, CredencialPdfView, ReponerCredencialView, VerificarCredencialView
 
 urlpatterns = [
     path('servicios-escolares/panel/', ServiciosEscolaresPanelView.as_view(), name='servicios-panel'),
     path('servicios-escolares/alumnos/<int:pk>/', ServiciosEscolaresAlumnoView.as_view(), name='servicios-alumno'),
+    path('servicios-escolares/alumnos/<int:pk>/credencial/reponer/', ReponerCredencialView.as_view(), name='servicios-reponer-credencial'),
+    path('alumno/credencial/', CredencialAlumnoView.as_view(), name='alumno-credencial'),
+    path('alumno/credencial/pdf/', CredencialPdfView.as_view(), name='alumno-credencial-pdf'),
+    path('credencial/verificar/<str:token>/', VerificarCredencialView.as_view(), name='verificar-credencial'),
     path('servicios-escolares/alumnos/<int:pk>/validar-inscripcion/', ServiciosEscolaresValidacionView.as_view(), name='servicios-validar-inscripcion'),
     path('servicios-escolares/solicitudes-extemporaneas/', SolicitudesExtemporaneasServiciosView.as_view(), name='servicios-solicitudes-extemporaneas'),
     path('servicios-escolares/solicitudes-extemporaneas/<int:pk>/', SolicitudesExtemporaneasServiciosView.as_view(), name='servicios-solicitud-extemporanea'),

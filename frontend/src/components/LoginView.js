@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
 import civLogo from '../assets/logociv.png';
 import campusImage from '../assets/54088665669_251d9c0f8a_z.jpg';
+import {normalizedRole} from '../roles';
 import {useLanguage} from '../translations';
 
 function enlaceRestablecer() {
@@ -72,7 +73,7 @@ function RecuperacionContrasena({enlace, onVolver}) {
         </label>
       ))}
       {mensaje ? <div className="login-role-readonly" role="status"><span>{mensaje}</span></div> : null}
-      {error ? <div className="login-error">{error}</div> : null}
+      {error ? <div className="login-error" role="alert">{error}</div> : null}
       {!terminado && (
         <button type="submit" className="login-submit" disabled={enviando}>
           {enviando ? 'Enviando...' : enlace ? 'Guardar contraseña' : 'Enviar enlace'}
@@ -132,11 +133,13 @@ export default function LoginView({onBackHome, onLoginSuccess}){
         return;
       }
 
-      const rawRole = data.role ?? data.rol ?? role ?? 'aspirante';
-      const authenticatedRole = String(rawRole).trim() || 'aspirante';
+      const authenticatedRole = normalizedRole(data.role ?? data.rol ?? role);
       setRole(authenticatedRole);
 
       const storage = remember ? localStorage : sessionStorage;
+      (remember ? sessionStorage : localStorage).removeItem('sinac_access');
+      (remember ? sessionStorage : localStorage).removeItem('sinac_refresh');
+      (remember ? sessionStorage : localStorage).removeItem('sinac_role');
       storage.setItem('sinac_access', data.access);
       storage.setItem('sinac_refresh', data.refresh);
       storage.setItem('sinac_role', authenticatedRole);
@@ -183,9 +186,12 @@ export default function LoginView({onBackHome, onLoginSuccess}){
             {t('login.userOrEmail')}
             <input
               type="text"
+              autoComplete="username"
               placeholder={t('login.userPlaceholder')}
               value={usuario}
               onChange={(e) => setUsuario(e.target.value)}
+              aria-invalid={error && !usuario.trim() ? true : undefined}
+              aria-describedby={error ? 'login-error' : undefined}
             />
           </label>
 
@@ -194,15 +200,19 @@ export default function LoginView({onBackHome, onLoginSuccess}){
             <div className="password-row">
               <input
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 placeholder={t('login.passwordPlaceholder')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={error && !password.trim() ? true : undefined}
+                aria-describedby={error ? 'login-error' : undefined}
               />
               <button
                 type="button"
                 className="toggle-password"
                 onClick={() => setShowPassword(v => !v)}
-                aria-label={showPassword ? t('login.password') : t('login.password')}
+                aria-pressed={showPassword}
+                aria-label={`${showPassword ? 'Ocultar' : 'Mostrar'} ${t('login.password').toLowerCase()}`}
               >
                 {showPassword ? 'Ocultar' : 'Mostrar'}
               </button>
@@ -226,7 +236,7 @@ export default function LoginView({onBackHome, onLoginSuccess}){
             <button type="button" className="link-btn" onClick={() => { setError(''); setRecuperando(true); }}>{t('login.forgotPassword')}</button>
           </div>
 
-          {error ? <div className="login-error">{error}</div> : null}
+          {error ? <div className="login-error" id="login-error" role="alert">{error}</div> : null}
 
           <button type="submit" className="login-submit" disabled={loading}>
             {loading ? t('login.signIn') + '...' : t('login.signInButton')}

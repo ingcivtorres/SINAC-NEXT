@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import ProyectoTesis, RevisionAntiplagio
+from .roles import bloquear_si_egresado, es_alumno
 from .seguridad import nombre_archivo_seguro, validar_pdf
 
 
@@ -94,7 +95,7 @@ class RevisionAntiplagioView(APIView):
 
     def _puede_revisar(self, user, proyecto):
         rol = str(getattr(user, 'rol', '') or '').strip().lower()
-        if user.is_staff or rol in {'coordinacion', 'coordinador'}:
+        if user.is_superuser or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'}:
             return True
         if rol in {'director', 'director de tesis'}:
             return proyecto.alumno.director_tesis_id == user.id
@@ -107,6 +108,10 @@ class RevisionAntiplagioView(APIView):
 
         if not self._puede_revisar(request.user, proyecto):
             return Response({'detail': 'No tienes permisos para revisar este proyecto.'}, status=status.HTTP_403_FORBIDDEN)
+        if es_alumno(request.user):
+            bloqueo = bloquear_si_egresado(request.user)
+            if bloqueo:
+                return bloqueo
         if proyecto.estado not in ESTADOS_REVISABLES:
             return Response(
                 {'detail': 'La revisión anti-plagio solo aplica a proyectos en borrador, en revisión o con observaciones.'},

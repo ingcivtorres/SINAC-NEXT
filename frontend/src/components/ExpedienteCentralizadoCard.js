@@ -86,7 +86,7 @@ export default function ExpedienteCentralizadoCard({expedienteId, session}) {
   }
 
   if (!expedienteId) return <p className="form-hint">{t.noRecord}</p>;
-  if (error) return <p className="api-error">{t.loadError}</p>;
+  if (error) return <p className="api-error" role="alert">{t.loadError}</p>;
   if (!expediente) return <p className="form-hint">{t.loading}</p>;
 
   const {alumno, firmas, documentos} = expediente;
@@ -104,7 +104,7 @@ export default function ExpedienteCentralizadoCard({expedienteId, session}) {
         <button type="button" className="btn-secondary" onClick={() => abrir(`/api/expedientes/${expedienteId}/pdf/`, {descargar: true, nombre: `${expediente.expediente.folio}.pdf`})}>{t.downloadPdf}</button>
       </div>
     </div>
-    {aviso && <p className="api-error">{aviso}</p>}
+    {aviso && <p className="api-error" role="alert">{aviso}</p>}
     <div className="expediente-centralizado-metrics"><div><strong>{documentos.length}</strong><span>{t.documents}</span></div><div><strong>{expediente.inscripciones.length}</strong><span>{t.enrollments}</span></div><div><strong>{firmas.length}</strong><span>{t.signatures}</span></div><div><strong>{expediente.tesis.length}</strong><span>{t.thesis}</span></div></div>
 
     <div className="expediente-centralizado-list"><strong>{t.eSignatures}</strong>

@@ -162,7 +162,8 @@ class AutorizacionPorRolTests(TestCase):
             (crear_usuario('SERVSTAFF', rol='servicios', is_staff=True), 403),
             (crear_usuario('ALUMSTAFF', rol='alumno'), 403),
             (crear_usuario('COORDROL', rol='coordinacion'), 200),
-            (crear_usuario('COORDLEG', is_staff=True), 200),
+            (crear_usuario('ADMINROL', rol='admin'), 200),
+            (crear_usuario('ASPSTAFF', is_staff=True), 403),
         ]
         for usuario, esperado in casos:
             cliente = APIClient()
@@ -179,6 +180,49 @@ class AutorizacionPorRolTests(TestCase):
             cliente = APIClient()
             cliente.force_authenticate(usuario)
             self.assertEqual(cliente.get(ruta).status_code, esperado, usuario.usuario)
+
+    def test_is_staff_no_concede_sesion_ni_permisos_de_coordinacion(self):
+        from preregistro.serializers import InicioSesionSerializer
+
+        aspirante_staff = crear_usuario('ASPSTAFF2', is_staff=True)
+        self.assertEqual(InicioSesionSerializer.obtener_rol(aspirante_staff), 'aspirante')
+        cliente = APIClient()
+        cliente.force_authenticate(aspirante_staff)
+        self.assertEqual(cliente.get('/api/coordinacion/materias/').status_code, 403)
+        self.assertEqual(cliente.post('/api/preregistro/evaluaciones-colegio/', {}, format='json').status_code, 403)
+
+    def test_dictamen_colegio_solo_lo_emite_gestion_academica(self):
+        aspirante = crear_usuario('ASPCOLEGIO')
+        docente = crear_usuario('DOCCOLEGIO', rol='docente')
+        coordinacion = crear_usuario('COOCOLEGIO', rol='coordinacion')
+        ruta = '/api/preregistro/evaluaciones-colegio/'
+        datos = {'aspirante': aspirante.pk, 'estado': 'favorable', 'dictamen': 'Cumple.'}
+
+        cliente = APIClient()
+        cliente.force_authenticate(docente)
+        self.assertEqual(cliente.post(ruta, datos, format='json').status_code, 403)
+
+        cliente.force_authenticate(coordinacion)
+        self.assertEqual(cliente.post(ruta, {**datos, 'fecha_evaluacion': 'mañana'}, format='json').status_code, 400)
+        creada = cliente.post(ruta, {**datos, 'fecha_evaluacion': '2026-11-10'}, format='json')
+        self.assertEqual(creada.status_code, 201, creada.content)
+
+        cliente.force_authenticate(docente)
+        detalle = f"{ruta}{creada.data['id']}/"
+        self.assertEqual(cliente.patch(detalle, {'estado': 'no_favorable'}, format='json').status_code, 403)
+        self.assertEqual(cliente.get(ruta).data, [])
+
+    def test_migracion_retira_is_staff_a_roles_sin_gestion(self):
+        from importlib import import_module
+        from django.apps import apps as django_apps
+
+        aspirante = crear_usuario('ASPMIGRA', is_staff=True)
+        coordinacion = crear_usuario('COOMIGRA', rol='coordinacion', is_staff=True)
+        import_module('preregistro.migrations.0054_retirar_is_staff_sin_rol_de_gestion').retirar_is_staff(django_apps, None)
+        aspirante.refresh_from_db()
+        coordinacion.refresh_from_db()
+        self.assertFalse(aspirante.is_staff)
+        self.assertTrue(coordinacion.is_staff)
 
     def test_superusuario_se_crea_con_rol_admin(self):
         admin = Aspirante.objects.create_superuser(usuario='SUPERROL', correo='super.rol@example.com', password='Segura2026x')

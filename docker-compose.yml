@@ -32,6 +32,7 @@ x-backend-env: &backend-env
   EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
   EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
   EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+  EMAIL_USE_SSL: ${EMAIL_USE_SSL:-false}
   DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
 
 services:
@@ -160,12 +161,28 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en el archivo .env}
       RESPALDOS_DIAS: ${RESPALDOS_DIAS:-14}
       TZ: America/Mexico_City
+    # Al iniciar Docker Desktop los contenedores arrancan a la vez y depends_on no se aplica:
+    # se espera a PostgreSQL, se descartan archivos vacíos y solo se depura tras un respaldo válido.
     command: >-
       sh -c 'while true; do
+      until pg_isready -q; do sleep 5; done;
       f=/respaldos/sinac_$$(date +%Y%m%d_%H%M);
-      pg_dump -Fc -f "$${f}.dump" && tar -czf "$${f}_media.tar.gz" -C /media . && echo "Respaldo creado: $${f}";
+      if pg_dump -Fc -f "$${f}.dump" && test -s "$${f}.dump" && tar -czf "$${f}_media.tar.gz" -C /media .; then
+      echo "Respaldo creado: $${f}";
       find /respaldos -name "sinac_*" -type f -mtime +$${RESPALDOS_DIAS} -delete;
-      sleep 86400; done'
+      espera=86400;
+      else
+      rm -f "$${f}.dump" "$${f}_media.tar.gz";
+      echo "Respaldo fallido: $${f}; nuevo intento en 10 minutos" >&2;
+      espera=600;
+      fi;
+      sleep $${espera}; done'
+    healthcheck:
+      test: ["CMD-SHELL", "find /respaldos -name 'sinac_*.dump' -size +0 -mmin -1560 | grep -q ."]
+      interval: 10m
+      timeout: 10s
+      start_period: 5m
+      retries: 1
     volumes:
       - ./respaldos:/respaldos
       - documentos_media:/media:ro
@@ -185,7 +202,7 @@ services:
       dockerfile: Dockerfile
     container_name: sinac-frontend
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       - backend
     deploy:

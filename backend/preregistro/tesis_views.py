@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Aspirante, ProyectoTesis
+from .roles import bloquear_si_egresado
 from .serializers import ProyectoTesisSerializer
 from .views import _registrar_seguimiento
 from .tesis_flujo_views import evaluar_elegibilidad_tesis, tiene_match_tesis
@@ -21,7 +22,7 @@ def _rol(user):
 
 
 def _es_coordinacion(user):
-    return bool(user.is_staff or _rol(user) in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+    return bool(user.is_superuser or _rol(user) in {'admin', 'administrador', 'coordinacion', 'coordinador'})
 
 
 def _es_director(user):
@@ -70,6 +71,10 @@ class ProyectoTesisView(APIView):
         rol = _rol(user)
         if not (_es_coordinacion(user) or _es_director(user) or rol == 'alumno'):
             return Response({'detail': 'Tu rol no puede registrar proyectos de tesis.'}, status=status.HTTP_403_FORBIDDEN)
+        if rol == 'alumno':
+            bloqueo = bloquear_si_egresado(user)
+            if bloqueo:
+                return bloqueo
 
         alumno_id = request.data.get('alumno') if (_es_coordinacion(user) or _es_director(user)) else user.id
         alumno = Aspirante.objects.filter(pk=alumno_id, rol='alumno', is_staff=False).first()
@@ -123,6 +128,10 @@ class ProyectoTesisView(APIView):
         es_alumno = rol == 'alumno' and proyecto.alumno_id == user.id
         if not (es_coord or es_director_proyecto or es_alumno):
             return Response({'detail': 'No tienes permisos sobre este proyecto.'}, status=status.HTTP_403_FORBIDDEN)
+        if es_alumno:
+            bloqueo = bloquear_si_egresado(user)
+            if bloqueo:
+                return bloqueo
 
         data = request.data.copy()
         requested_state = data.get('estado')

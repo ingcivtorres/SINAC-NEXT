@@ -1,16 +1,18 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
+from PIL import Image, ImageDraw, ImageFont
 
 from preregistro.models import (
     Aspirante, CargaAcademica, CargaAcademicaMateria, ConfiguracionPrograma, DefensaTesis, DocumentoAspirante, EgresoAlumno, EntrevistaVirtual,
     EvaluacionColegio, ExamenEnLinea, ExpedienteDigital, Inscripcion, JuradoProyecto, Materia,
-    PeriodoInscripcion, PlanEstudioMateria, PreguntaExamen, ProyectoTesis, RespuestaExamen,
+    PeriodoInscripcion, PlanEstudioMateria, PreguntaExamen, ProyectoTesis, RespuestaExamen, RevisionAntiplagio,
     SeguimientoSolicitud, SolicitudAcademica, SolicitudDireccionTesis, SolicitudInscripcionExtemporanea,
 )
 
@@ -53,8 +55,8 @@ def _password(prefijo, n):
     return f'Cinv{prefijo}{n}#2026'
 
 
-def _pdf_demo():
-    contenido = b'BT /F1 18 Tf 72 720 Td (Documento de prueba SINAC NEXT) Tj ET'
+def _pdf_demo(etiqueta='Documento de prueba SINAC NEXT'):
+    contenido = f'BT /F1 16 Tf 72 720 Td ({etiqueta[:60]}) Tj ET'.encode('latin-1', 'replace')
     objetos = [
         b'<< /Type /Catalog /Pages 2 0 R >>',
         b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -75,6 +77,24 @@ def _pdf_demo():
         f'trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
     )
     return bytes(salida)
+
+
+def _foto_demo(iniciales, tono=(18, 61, 90)):
+    imagen = Image.new('RGB', (320, 400), color=tono)
+    dibujo = ImageDraw.Draw(imagen)
+    dibujo.rectangle((20, 20, 300, 380), outline=(255, 255, 255), width=3)
+    try:
+        fuente = ImageFont.truetype('DejaVuSans-Bold.ttf', 64)
+    except OSError:
+        fuente = ImageFont.load_default()
+    texto = (iniciales or 'SN')[:2].upper()
+    caja = dibujo.textbbox((0, 0), texto, font=fuente)
+    x = (320 - (caja[2] - caja[0])) / 2
+    y = (400 - (caja[3] - caja[1])) / 2
+    dibujo.text((x, y), texto, fill=(255, 255, 255), font=fuente)
+    buffer = BytesIO()
+    imagen.save(buffer, format='JPEG', quality=88)
+    return buffer.getvalue()
 
 
 class Command(BaseCommand):
@@ -201,6 +221,8 @@ class Command(BaseCommand):
                 'activo': True,
             },
         )
+        # Solo un periodo activo para la demo: el resto queda cerrado.
+        PeriodoInscripcion.objects.exclude(pk=periodo_demo_abierto.pk).update(activo=False)
 
         materias = []
         for i, nombre in enumerate(MATERIAS):
@@ -290,9 +312,9 @@ class Command(BaseCommand):
                 creador=coordinacion,
                 periodo=nombre_periodo_carga,
                 defaults={
-                    'estado': 'aprobada',
-                    'comentario': 'Carga académica de demostración aprobada.',
-                    'periodo_inscripcion': None,
+                    'estado': 'publicada',
+                    'comentario': 'Carga académica de demostración publicada y ligada al periodo abierto.',
+                    'periodo_inscripcion': periodo_demo_abierto,
                 },
             )
             for indice, materia in enumerate(materias[inicio:inicio + 5], start=inicio):
@@ -398,6 +420,7 @@ class Command(BaseCommand):
         for alumno, director, estado, alumno_acepto, director_acepto in (
             (alumnos[2], directores[2], 'pendiente_director', True, False),
             (alumnos[3], directores[3], 'aprobada', True, True),
+            (alumnos[4], directores[4], 'aprobada', True, True),
         ):
             SolicitudDireccionTesis.objects.update_or_create(
                 alumno=alumno,
@@ -453,7 +476,7 @@ class Command(BaseCommand):
 
         egresados = []
         for i, nombre in enumerate(EGRESADOS, 1):
-            usuario, clave = f'egr.demo{i}', None
+            usuario, clave = f'egr.demo{i}', _password('Egr', i)
             egresado = self._persona(usuario, nombre, 'alumno', 50 + i, clave, PROGRAMAS[(i + 1) % len(PROGRAMAS)], proceso_estado='egresado',
                                      matricula=f'DEMO-E{i:03d}', numero_periodo_actual=4, director_tesis=directores[i - 1], tutor_propuesto=directores[i - 1].nombre)
             inscribir(egresado, i + 3, previo, 2)
@@ -466,7 +489,7 @@ class Command(BaseCommand):
                           'promedio_final': Decimal('8.6') + Decimal(i) / 10, 'titulo_tesis': TESIS[4 + i],
                           'observaciones': 'Registro de datos de prueba.', 'excepcion_motivo': 'Datos de prueba (carga demo).'})
             ExpedienteDigital.objects.get_or_create(aspirante=egresado, defaults={'folio': f'EXP-DEMO-{egresado.pk:06d}'})
-            credenciales.append(('Egresado', usuario, '(sin acceso)', f'{nombre} · {egresado.programa}'))
+            credenciales.append(('Egresado', usuario, clave, f'{nombre} · {egresado.programa}'))
 
         proyecto_concluido = ProyectoTesis.objects.filter(alumno__in=egresados, estado='concluido').first()
         if proyecto_concluido:
@@ -494,9 +517,104 @@ class Command(BaseCommand):
                     },
                 )
 
+        # Fotos de perfil para credencial y expediente.
+        tonos = [(18, 61, 90), (22, 139, 145), (70, 90, 110), (90, 50, 70), (40, 100, 70)]
+        for indice, persona in enumerate([*alumnos, *egresados, *aspirantes[:2]]):
+            iniciales = ''.join(parte[0] for parte in persona.nombre.split()[:2]) or 'SN'
+            foto = _foto_demo(iniciales, tonos[indice % len(tonos)])
+            persona.profile_photo.save(f'perfil_{persona.usuario}.jpg', ContentFile(foto), save=True)
+
+        # Revisiones antiplagio de muestra (heurística local si no hay proveedor).
+        for alumno, proveedor, porcentaje, estado_rev in (
+            (alumnos[0], 'manual', Decimal('8.50'), 'aprobado'),
+            (alumnos[1], 'turnitin', Decimal('18.20'), 'observado'),
+            (alumnos[2], 'copyleaks', Decimal('32.40'), 'rechazado'),
+        ):
+            proyecto = ProyectoTesis.objects.filter(alumno=alumno).order_by('-id').first()
+            if not proyecto:
+                continue
+            revision, _ = RevisionAntiplagio.objects.update_or_create(
+                proyecto=proyecto,
+                proveedor=proveedor,
+                defaults={
+                    'nombre_original': f'tesis_antiplagio_{alumno.usuario}.pdf',
+                    'porcentaje_similitud': porcentaje,
+                    'estado': estado_rev,
+                    'observaciones': 'Revisión de demostración cargada por la semilla.',
+                    'resultados': {'origen': 'cargar_datos_prueba', 'proveedor': proveedor},
+                },
+            )
+            if not revision.archivo:
+                revision.archivo.save(
+                    f'tesis_antiplagio_{alumno.usuario}.pdf',
+                    ContentFile(_pdf_demo(f'Antiplagio {alumno.usuario}')),
+                    save=False,
+                )
+                revision.save()
+
+        # Exámenes predoctorales para doctorado (alu.demo4 programado, alu.demo5 aprobado).
+        for alumno, estado_exam, calificacion, dias in (
+            (alumnos[3], 'programado', None, 10),
+            (alumnos[4], 'aprobado', Decimal('8.8'), -20),
+        ):
+            ExamenEnLinea.objects.update_or_create(
+                business_key=f'DEMO-PREDOC-{alumno.usuario}',
+                defaults={
+                    'aspirante': alumno,
+                    'tipo': 'predoctoral',
+                    'titulo': 'Examen predoctoral (Demostración)',
+                    'descripcion': 'Evaluación predoctoral de muestra para el flujo de doctorado.',
+                    'fecha_programada': ahora + timedelta(days=dias),
+                    'fecha_inicio': ahora + timedelta(days=dias) if estado_exam != 'programado' else None,
+                    'fecha_fin': ahora + timedelta(days=dias, hours=2) if estado_exam != 'programado' else None,
+                    'duracion_minutos': 120,
+                    'estado': estado_exam,
+                    'calificacion': calificacion,
+                    'intentos': 1 if estado_exam != 'programado' else 0,
+                    'max_intentos': 1,
+                    'retroalimentacion': 'Dictamen de demostración.' if estado_exam == 'aprobado' else '',
+                    'evaluador': alumno.director_tesis,
+                },
+            )
+
+        # Defensa programada para alumno de doctorado con proyecto aprobado.
+        proyecto_alumno = ProyectoTesis.objects.filter(alumno=alumnos[3], estado='aprobado').first()
+        if proyecto_alumno:
+            DefensaTesis.objects.update_or_create(
+                proyecto=proyecto_alumno,
+                defaults={
+                    'fecha': ahora + timedelta(days=21),
+                    'lugar': 'Auditorio Demo',
+                    'modalidad': 'hibrida',
+                    'estado': 'programada',
+                    'observaciones': 'Defensa programada de demostración (alumno activo).',
+                    'calificacion_final': None,
+                },
+            )
+            for orden, rol, docente in zip((1, 2, 3), ('presidente', 'secretario', 'vocal'), docentes[1:4]):
+                JuradoProyecto.objects.update_or_create(
+                    proyecto=proyecto_alumno,
+                    rol=rol,
+                    defaults={
+                        'jurado': docente,
+                        'orden': orden,
+                        'estado': 'confirmado',
+                        'observaciones': 'Jurado de demostración.',
+                        'fecha_confirmacion': ahora - timedelta(days=3),
+                    },
+                )
+
+        # Marca LIDA simulada en aspirantes (sin romper Camunda si no hay instancia real).
+        for aspirante in aspirantes:
+            if not aspirante.camunda_instance_id:
+                aspirante.camunda_instance_id = f'demo-lida-{aspirante.usuario}'
+                aspirante.save(update_fields=['camunda_instance_id'])
+
         self.stdout.write(self.style.SUCCESS(
-            f'Datos demo cargados: {len(credenciales) - len(EGRESADOS)} cuentas con acceso, '
-            f'{len(EGRESADOS)} egresados sin acceso y {len(materias) + 1} materias demo.'
+            f'Datos demo cargados: {len(credenciales)} cuentas con acceso y {len(materias) + 1} materias demo.'
         ))
+        self.stdout.write(
+            'Extras: fotos de perfil, antiplagio, predoctoral, cargas ligadas al periodo abierto y un solo periodo activo.'
+        )
         for rol, usuario, clave, detalle in credenciales:
             self.stdout.write(f'{rol:10} | {usuario:12} | {clave:16} | {detalle}')

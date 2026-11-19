@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {useApplicantCopy} from './aspirantPanelTranslations';
+import {alPulsarFondo} from '../a11yModales';
 
 const TIPOS_REQUISITO = ['cv', 'titulo', 'carta_motivacion', 'carta_recomendacion'];
 
@@ -144,7 +145,7 @@ export default function DocumentosAspirante({session, soloLectura = false}) {
       const textos = {delete: text.deleteText, replace: text.replaceText, uploaded: text.uploadedText, deleted: text.deletedText};
       const nombre = modal.documento?.nombre_original || modal.nombre;
       const confirmar = modal.kind === 'delete' ? () => eliminar(modal.documento) : () => subirArchivo(modal.tipo, modal.archivo);
-      return <div className="modal-backdrop" role="presentation" onClick={cerrarModal}><div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      return <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(cerrarModal)}><div className="modal-card" role="dialog" aria-modal="true">
         <h3>{titulos[modal.kind]}</h3>
         <p>{textos[modal.kind]} <strong>{nombre}</strong></p>
         <div className="modal-actions">

@@ -20,7 +20,7 @@ def _rol(user):
 
 
 def _es_coordinacion(user):
-    return bool(user.is_staff or _rol(user) in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+    return bool(user.is_superuser or _rol(user) in {'admin', 'administrador', 'coordinacion', 'coordinador'})
 
 
 def _es_director(user):

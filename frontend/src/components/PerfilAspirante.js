@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {useApplicantCopy} from './aspirantPanelTranslations';
+import {alPulsarFondo} from '../a11yModales';
 
 // Usar la misma base de origen permite que funcione tanto en desarrollo
 // como detrás del proxy de nginx en Docker.
@@ -72,7 +73,7 @@ export default function PerfilAspirante({perfil, session, onActualizado}) {
   return <div className="profile-editor panel-card">
     <div className="profile-editor-head"><div className="profile-avatar">{preview ? <img src={preview} alt={text.photo} onError={() => setPreview('')}/> : <span>{(nombre || 'A').charAt(0).toUpperCase()}</span>}</div><div><h3>{text.name}</h3><p>{text.update}</p></div></div>
     <form className="profile-form" onSubmit={(event) => { event.preventDefault(); setModal('confirm'); }}><label>{text.photo}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={seleccionarFoto}/><small>{text.fileHelp}</small></label><label>{text.name}<input value={nombre} onChange={(event) => setNombre(event.target.value)} required/></label><label>{text.email}<input type="email" value={correo} onChange={(event) => setCorreo(event.target.value)} required/></label><label>{text.phone}<input type="tel" inputMode="tel" autoComplete="tel" maxLength={20} value={telefono} onChange={(event) => setTelefono(event.target.value)} required/></label>{error && <div className="api-error" role="alert">{error}</div>}{mensaje && <div className="api-success" role="status">{mensaje}</div>}<button type="submit" className="qa-btn" disabled={guardando}>{guardando ? text.saving : text.save}</button></form>
-    {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal('')}><div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+    {modal && <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(() => setModal(''))}><div className="modal-card" role="dialog" aria-modal="true">
       <h3>{modal === 'confirm' ? text.confirmTitle : text.savedTitle}</h3>
       <p>{modal === 'confirm' ? text.confirmText : text.saved}</p>
       <div className="modal-actions">

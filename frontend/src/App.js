@@ -12,7 +12,12 @@ import ContactPage from './components/ContactPage';
 import NotificationBell from './components/NotificationBell';
 import ErrorPage from './components/ErrorPage';
 import ErrorBoundary from './components/ErrorBoundary';
+import AccessibilityStatement from './components/AccessibilityStatement';
 import {cerrarSesionServidor} from './auth';
+import {instalarGestorModales} from './a11yModales';
+import {instalarMejorasTablas} from './a11yTablas';
+import {homeViewForRole, isDocentePanelRole, normalizedRole, ROLE_HOME_VIEW, ROLE_VIEW_ACCESS} from './roles';
+import {useLanguage} from './translations';
 import './styles.css';
 import './components/Navbar.css';
 import './components/Footer.css';
@@ -26,33 +31,30 @@ const PanelCoordinacion = lazy(() => import('./components/PanelCoordinacion'));
 const PanelDocente = lazy(() => import('./components/PanelDocente'));
 const PanelDirector = lazy(() => import('./components/PanelDirector'));
 const PanelServiciosEscolares = lazy(() => import('./components/PanelServiciosEscolares'));
+const VerificarCredencial = lazy(() => import('./components/VerificarCredencial'));
 
-const ROLE_HOME_VIEW = {
-  aspirante: 'panel',
-  alumno: 'alumno-panel',
-  docente: 'docente-panel',
-  investigador: 'docente-panel',
-  director: 'director-panel',
-  coordinacion: 'coordinacion-panel',
-  servicios: 'servicios-panel',
-  admin: 'admin-panel',
+const PUBLIC_VIEWS = ['home', 'contact', 'privacy', 'accessibility', 'portal', 'login', 'verify', 'error-403', 'error-404'];
+const VERIFY_PATH = /^\/verificar\/([^/]+)$/;
+
+const VIEW_TITLE_KEYS = {
+  home: 'navbar.home',
+  contact: 'navbar.contact',
+  privacy: 'page.privacy',
+  accessibility: 'page.accessibility',
+  portal: 'navbar.portal',
+  login: 'login.signIn',
+  verify: 'page.verify',
+  panel: 'navbar.panel',
+  'alumno-panel': 'navbar.alumnoPanel',
+  'docente-panel': 'navbar.docentePanel',
+  'director-panel': 'role.director',
+  'coordinacion-panel': 'navbar.coordinacionPanel',
+  'servicios-panel': 'role.servicios',
+  'admin-panel': 'navbar.adminPanel',
+  'error-403': 'page.error403',
+  'error-404': 'page.error404',
 };
-
-const ROLE_VIEW_ACCESS = Object.fromEntries(Object.entries(ROLE_HOME_VIEW).map(([role, view]) => [view, [role]]));
-ROLE_VIEW_ACCESS['docente-panel'] = ['docente', 'investigador', 'director'];
-
-const PUBLIC_VIEWS = ['home', 'contact', 'privacy', 'portal', 'login', 'error-403', 'error-404'];
 const KNOWN_VIEWS = new Set([...PUBLIC_VIEWS, ...Object.values(ROLE_HOME_VIEW)]);
-
-function initialView() {
-  const path = window.location.pathname.replace(/\/+$/, '');
-  if (path === '/restablecer') return 'login';
-  return path === '' || path === '/index.html' ? 'home' : 'error-404';
-}
-
-function isDocentePanelRole(role) {
-  return ROLE_VIEW_ACCESS['docente-panel'].includes(normalizedRole(role));
-}
 
 function clearAuthStorage(){
   localStorage.removeItem('sinac_access');
@@ -80,13 +82,18 @@ function SessionToast({message, onClose}){
 function getSession(){
   const access = localStorage.getItem('sinac_access') || sessionStorage.getItem('sinac_access');
   const role   = localStorage.getItem('sinac_role')   || sessionStorage.getItem('sinac_role');
-  return access ? {access, role} : null;
+  return access ? {access, role: normalizedRole(role)} : null;
 }
 
-function normalizedRole(role) {
-  const value = String(role || '').trim().toLowerCase();
-  if (value === 'teacher' || value === 'profesor') return 'docente';
-  return ['servicios_escolares', 'servicios escolares'].includes(value) ? 'servicios' : value;
+function initialView() {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  if (path === '/restablecer') return 'login';
+  if (VERIFY_PATH.test(path)) return 'verify';
+  if (path === '' || path === '/index.html') {
+    const session = getSession();
+    return session ? homeViewForRole(session.role) : 'home';
+  }
+  return 'error-404';
 }
 
 export default function App(){
@@ -94,11 +101,46 @@ export default function App(){
   const [view, setView]                       = useState(initialView);
   const [displayView, setDisplayView]         = useState(initialView);
   const [notFoundPath]                        = useState(() => window.location.pathname);
+  const [verifyToken]                         = useState(() => window.location.pathname.replace(/\/+$/, '').match(VERIFY_PATH)?.[1] || '');
   const [isViewTransitioning, setIsViewTransitioning] = useState(false);
   const [session, setSession]                 = useState(() => getSession());
   const [toastMessage, setToastMessage]       = useState('');
   const [pendingLogoutReason, setPendingLogoutReason] = useState(null);
   const switchTimerRef = useRef(null);
+  const {t} = useLanguage();
+  const [viewAnnouncement, setViewAnnouncement] = useState('');
+  const firstViewRender = useRef(true);
+  const viewTitle = t(VIEW_TITLE_KEYS[displayView] || 'navbar.home');
+
+  useEffect(() => instalarGestorModales(), []);
+  useEffect(() => instalarMejorasTablas(), []);
+
+  useEffect(() => {
+    document.title = `${viewTitle} · SINAC NEXT`;
+  }, [viewTitle]);
+
+  useEffect(() => {
+    if (firstViewRender.current) {
+      firstViewRender.current = false;
+      return undefined;
+    }
+    setViewAnnouncement(`${t('page.loaded')}: ${viewTitle}`);
+    const frame = window.requestAnimationFrame(() => {
+      const main = document.getElementById('contenido-principal');
+      if (!main || main.contains(document.activeElement)) return;
+      const heading = main.querySelector('h1, h2');
+      if (heading) {
+        if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+        heading.focus({preventScroll: true});
+      } else {
+        main.focus({preventScroll: true});
+      }
+      window.scrollTo({top: 0});
+    });
+    return () => window.cancelAnimationFrame(frame);
+    // Solo debe reaccionar al cambio de vista, no al cambio de idioma.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayView]);
 
   useEffect(()=>{
     const t = setTimeout(()=> setLoading(false), 2200);
@@ -138,8 +180,7 @@ export default function App(){
     const authenticatedRole = normalizedRole(sess.role);
     const authenticatedSession = {...sess, role: authenticatedRole};
     setSession(authenticatedSession);
-    const target = ROLE_HOME_VIEW[authenticatedRole] || 'panel';
-    handleNavigate(target, authenticatedSession);
+    handleNavigate(homeViewForRole(authenticatedRole), authenticatedSession);
   }
 
   const sesionActiva = Boolean(session);
@@ -176,12 +217,13 @@ export default function App(){
   return (
     <div className={`app-root ${!loading ? 'loaded' : ''}`}>
       <LoadingScreen />
+      <div className="a11y-sr-only" role="status" aria-live="polite">{viewAnnouncement}</div>
       {pendingLogoutReason && createPortal(
         <LogoutModal onCancel={() => setPendingLogoutReason(null)} onConfirm={confirmLogout} />,
         document.body
       )}
       <Navbar onNavigate={handleNavigate} activeView={view} session={session} onLogout={requestLogout} />
-      <main className={`main-content view-transition ${isViewTransitioning ? 'is-switching' : ''}`}>
+      <main id="contenido-principal" tabIndex={-1} className={`main-content view-transition ${isViewTransitioning ? 'is-switching' : ''}`}>
         {toastMessage && createPortal(
           <SessionToast message={toastMessage} onClose={() => setToastMessage('')} />,
           document.body
@@ -189,11 +231,13 @@ export default function App(){
         <ErrorBoundary resetKey={displayView} onHome={() => handleNavigate('home')}>
         <Suspense fallback={<div className="panel-cargando" role="status">Cargando…</div>}>
         {displayView === 'error-404' && <ErrorPage code={404} path={notFoundPath} onHome={() => handleNavigate('home')} onBack={window.history.length > 1 ? () => window.history.back() : undefined} />}
-        {displayView === 'error-403' && <ErrorPage code={403} onHome={() => handleNavigate(session ? ROLE_HOME_VIEW[normalizedRole(session.role)] || 'home' : 'home')} />}
+        {displayView === 'error-403' && <ErrorPage code={403} onHome={() => handleNavigate(session ? homeViewForRole(session.role) : 'home')} />}
         {displayView === 'home'   && <HomePage />}
         {displayView === 'contact' && <ContactPage onNavigate={handleNavigate} />}
         {displayView === 'privacy' && <AvisoPrivacidad onNavigate={handleNavigate} />}
+        {displayView === 'accessibility' && <AccessibilityStatement onNavigate={handleNavigate} />}
         {displayView === 'portal' && <AspirantRegistration />}
+        {displayView === 'verify' && <VerificarCredencial token={verifyToken} onHome={() => handleNavigate('home')} />}
         {displayView === 'login'  && (
           <LoginView
             onBackHome={()=>handleNavigate('home')}

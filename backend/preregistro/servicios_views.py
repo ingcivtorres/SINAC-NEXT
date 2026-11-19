@@ -25,17 +25,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Aspirante, CargaAcademicaMateria, ConfiguracionPrograma, DocumentoAspirante, ExpedienteDigital, Inscripcion, PeriodoInscripcion, SeguimientoSolicitud, SolicitudInscripcionExtemporanea
+from .roles import es_gestion_academica, es_servicios, rol_efectivo
 from .serializers import DocumentoAspiranteSerializer, InscripcionSerializer
 from .seguridad import url_media
 
 PIE_CONSTANCIA = 'Documento generado por SINAC NEXT - Cinvestav Unidad Zacatenco.'
-
-
-def es_servicios(user):
-    return bool(user.is_superuser or str(getattr(user, 'rol', '')).strip().lower() in {
-        'servicios', 'servicios_escolares', 'servicios escolares',
-    })
-
 
 MENSAJE_EGRESO_FORMAL = 'El egreso se registra desde Egresados, donde se verifica la prevalidación académica.'
 ESTADOS_SIN_CONSTANCIA = {'baja', 'inactivo'}
@@ -686,10 +680,8 @@ class SolicitudesExtemporaneasServiciosView(APIView):
 
     @staticmethod
     def descargar_oficio(request, pk, permitir_coordinacion=False):
-        rol = str(getattr(request.user, 'rol', '')).strip().lower()
-        es_coordinacion = bool(
-            (request.user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
-            and rol not in {'servicios', 'servicios_escolares', 'servicios escolares'}
+        es_coordinacion = es_gestion_academica(request.user) and not (
+            es_servicios(request.user) and not request.user.is_superuser
         )
         if not es_servicios(request.user) and not (permitir_coordinacion and es_coordinacion):
             return Response({'detail': 'No tienes permisos de Servicios Escolares.'}, status=status.HTTP_403_FORBIDDEN)
@@ -813,9 +805,9 @@ class ServiciosEscolaresDocumentoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk, tipo):
-        es_personal = bool(request.user.is_staff or str(getattr(request.user, 'rol', '')).strip().lower() in {
-            'servicios', 'servicios_escolares', 'servicios escolares'
-        })
+        es_personal = rol_efectivo(request.user) in {
+            'admin', 'coordinacion', 'servicios',
+        } or request.user.is_superuser
         if es_personal:
             alumno = Aspirante.objects.filter(pk=pk, rol='alumno', is_staff=False).first()
         elif int(pk) == int(getattr(request.user, 'id', -1)):

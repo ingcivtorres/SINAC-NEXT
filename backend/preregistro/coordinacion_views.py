@@ -15,6 +15,7 @@ from .models import Aspirante, DocumentoAspirante, SeguimientoSolicitud, Materia
 from . import camunda
 from .admin_views import CoordinacionRolePermission
 from .configuracion_sistema import email_notifications_enabled
+from .roles import es_gestion_academica
 from .serializers import (
     AspiranteCoordinacionSerializer,
     AspiranteCoordinacionUpdateSerializer,
@@ -339,8 +340,7 @@ class MateriasListView(APIView):
 
     def get(self, request):
         rol = str(getattr(request.user, 'rol', '')).strip().lower()
-        puede_consultar = request.user.is_staff or request.user.is_superuser or rol in {
-            'admin', 'administrador', 'coordinacion', 'coordinador',
+        puede_consultar = es_gestion_academica(request.user) or rol in {
             'servicios', 'servicios_escolares', 'servicios escolares',
         }
         if not puede_consultar:
@@ -392,7 +392,7 @@ class CoordinacionReporteView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def _rows(self, request):
-        if not (request.user.is_staff or getattr(request.user, 'rol', '') == 'coordinacion'):
+        if not es_gestion_academica(request.user):
             return None
         tipo = (request.query_params.get('tipo') or 'expedientes').lower()
         users = Aspirante.objects.filter(is_staff=False).order_by('nombre')

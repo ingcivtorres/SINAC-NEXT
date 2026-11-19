@@ -1,4 +1,5 @@
 import logging
+import re
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import timedelta
 from django.core.cache import cache
@@ -11,7 +12,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.urls import reverse
-import re
+from .roles import rol_efectivo
 from .models import (
     Aspirante, DocumentoAspirante, ExpedienteDigital, FirmaElectronica, SeguimientoSolicitud,
     Materia, Inscripcion, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual,
@@ -421,25 +422,7 @@ class InicioSesionSerializer(TokenObtainPairSerializer):
 
     @staticmethod
     def obtener_rol(user):
-        if user.is_superuser:
-            return 'admin'
-        if str(getattr(user, 'rol', '')).strip().lower() in ('admin', 'administrador'):
-            return 'admin'
-        if str(getattr(user, 'rol', '')).strip().lower() in ('servicios', 'servicios_escolares', 'servicios escolares'):
-            return 'servicios'
-        if user.is_staff or str(getattr(user, 'rol', '')).strip().lower() in ('coordinacion', 'coordinador'):
-            return 'coordinacion'
-        if str(getattr(user, 'rol', '')).strip().lower() in ('director', 'director de tesis'):
-            return 'director'
-        if getattr(user, 'rol', None) == 'docente':
-            return 'docente'
-        if str(getattr(user, 'rol', '')).strip().lower() == 'investigador':
-            return 'investigador'
-        if getattr(user, 'rol', None) == 'alumno':
-            return 'alumno'
-        if getattr(user, 'rol', None) == 'director':
-            return 'director'
-        return 'aspirante'
+        return rol_efectivo(user)
 
     def _origen(self):
         request = self.context.get('request')

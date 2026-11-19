@@ -24,6 +24,7 @@ from io import BytesIO
 from .views import (
     _registrar_seguimiento,
 )
+from .roles import bloquear_si_egresado, es_alumno, es_gestion_academica, es_servicios, rol_efectivo
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class MisMateriasDisponiblesView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if not es_alumno(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         periodo = _periodo_inscripcion_vigente()
         if not periodo:
@@ -135,10 +136,7 @@ class PeriodoInscripcionView(APIView):
 
     @staticmethod
     def puede_gestionar(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        return rol in {
-            'admin', 'administrador', 'servicios', 'servicios_escolares', 'servicios escolares',
-        }
+        return rol_efectivo(user) in {'admin', 'servicios'}
 
     @staticmethod
     def puede_consultar_todos(user):
@@ -154,6 +152,7 @@ class PeriodoInscripcionView(APIView):
             'nombre': periodo.nombre,
             'apertura': periodo.apertura,
             'cierre': periodo.cierre,
+            'fin_periodo': periodo.fin_periodo,
             'activo': vigente,
             'habilitado': periodo.activo,
         }
@@ -179,6 +178,15 @@ class PeriodoInscripcionView(APIView):
             cierre = timezone.make_aware(cierre)
         if apertura >= cierre:
             return Response({'detail': 'La fecha de apertura debe ser anterior a la fecha de cierre.'}, status=status.HTTP_400_BAD_REQUEST)
+        fin_periodo = periodo.fin_periodo if periodo else None
+        if 'fin_periodo' in data:
+            from django.utils.dateparse import parse_date
+            fin_raw = str(data.get('fin_periodo') or '').strip()
+            fin_periodo = parse_date(fin_raw[:10]) if fin_raw else None
+            if fin_raw and not fin_periodo:
+                return Response({'detail': 'El fin del periodo escolar debe ser una fecha válida (AAAA-MM-DD).'}, status=status.HTTP_400_BAD_REQUEST)
+            if fin_periodo and fin_periodo <= timezone.localtime(cierre).date():
+                return Response({'detail': 'El fin del periodo escolar debe ser posterior al cierre de inscripciones.'}, status=status.HTTP_400_BAD_REQUEST)
 
         duplicado = PeriodoInscripcion.objects.filter(nombre=nombre)
         traslapado = PeriodoInscripcion.objects.filter(activo=True, apertura__lt=cierre, cierre__gt=apertura)
@@ -191,14 +199,15 @@ class PeriodoInscripcionView(APIView):
             return Response({'detail': 'El periodo se traslapa con otro periodo de inscripción activo.'}, status=status.HTTP_409_CONFLICT)
 
         if periodo is None:
-            periodo = PeriodoInscripcion.objects.create(nombre=nombre, apertura=apertura, cierre=cierre, activo=activo)
+            periodo = PeriodoInscripcion.objects.create(nombre=nombre, apertura=apertura, cierre=cierre, fin_periodo=fin_periodo, activo=activo)
             response_status = status.HTTP_201_CREATED
         else:
             periodo.nombre = nombre
             periodo.apertura = apertura
             periodo.cierre = cierre
+            periodo.fin_periodo = fin_periodo
             periodo.activo = activo
-            periodo.save(update_fields=['nombre', 'apertura', 'cierre', 'activo'])
+            periodo.save(update_fields=['nombre', 'apertura', 'cierre', 'fin_periodo', 'activo'])
             response_status = status.HTTP_200_OK
         return Response(self.serializar(periodo), status=response_status)
 
@@ -234,14 +243,17 @@ class MisInscripcionesView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.is_staff:
+        if not es_alumno(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         inscripciones = request.user.inscripciones.select_related('materia', 'periodo_inscripcion').order_by('materia__clave')
         return Response(InscripcionSerializer(inscripciones, many=True).data)
 
     def post(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if not es_alumno(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
+        bloqueo = bloquear_si_egresado(request.user)
+        if bloqueo:
+            return bloqueo
         periodo = _periodo_inscripcion_vigente()
         if not periodo:
             return Response({'detail': 'El periodo de inscripción está cerrado o no ha sido habilitado por Coordinación Académica.'}, status=status.HTTP_409_CONFLICT)
@@ -336,10 +348,9 @@ class InscripcionCoordinacionView(APIView):
 
     @staticmethod
     def puede_gestionar(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+        if es_servicios(user) and not user.is_superuser:
             return False
-        return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+        return es_gestion_academica(user)
 
     @staticmethod
     def alumno(pk):
@@ -502,10 +513,9 @@ class BoletaInscripcionCoordinacionView(APIView):
 
     @staticmethod
     def puede_gestionar(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'}) and rol not in {
-            'servicios', 'servicios_escolares', 'servicios escolares',
-        }
+        if es_servicios(user) and not user.is_superuser:
+            return False
+        return es_gestion_academica(user)
 
     def get(self, request, pk):
         if not self.puede_gestionar(request.user):
@@ -580,8 +590,7 @@ class InscripcionExtemporaneaView(APIView):
 
     @staticmethod
     def puede_gestionar(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        return user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'}
+        return es_gestion_academica(user)
 
     def get(self, request, pk):
         if not self.puede_gestionar(request.user):

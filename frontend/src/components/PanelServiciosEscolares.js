@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
 import ExpedienteCentralizadoCard from "./ExpedienteCentralizadoCard";
+import ReponerCredencial from "./ReponerCredencial";
 import EgresadosPanel from "./EgresadosPanel";
 import HistoricoPanel from "./HistoricoPanel";
 import DocentesDirectorioPanel from "./DocentesDirectorioPanel";
@@ -371,7 +372,7 @@ export default function PanelServiciosEscolares({session, onLogout}) {
 
   function detalleAlumno() {
     if (!alumno) return detalleAlumnoBase();
-    return <><ExpedienteCentralizadoCard expedienteId={alumno.expediente?.id} session={session}/>{detalleAlumnoBase()}</>;
+    return <><ExpedienteCentralizadoCard expedienteId={alumno.expediente?.id} session={session}/>{detalleAlumnoBase()}<ReponerCredencial alumnoId={alumno.id} session={session} onLogout={onLogout}/></>;
   }
 
   function contenido() {

@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import Count, Avg, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from django.http import HttpResponse
 from django.http import FileResponse
 from io import BytesIO
@@ -29,20 +29,9 @@ from .models import (
 )
 from .configuracion_sistema import DEFAULTS as SYSTEM_CONFIG_DEFAULTS, parse_password_policy, password_meets_policy
 from .paginacion import paginar
+from .roles import ROLE_ALIASES, es_admin, es_coordinacion, normalizar_rol, rol_efectivo
 from .seguridad import celda_segura
 from .sesiones import revocar_sesiones
-
-
-ROLE_ALIASES = {
-    'admin': 'admin', 'administrador': 'admin',
-    'coordinacion': 'coordinacion', 'coordinación': 'coordinacion',
-    'coordinador': 'coordinacion', 'docente': 'docente',
-    'profesor': 'docente', 'director': 'director',
-    'director de tesis': 'director', 'servicios': 'servicios',
-    'servicios escolares': 'servicios', 'servicios_escolares': 'servicios',
-    'investigador': 'investigador', 'alumno': 'alumno',
-    'aspirante': 'aspirante',
-}
 
 
 class AdminRolePermission(permissions.BasePermission):
@@ -50,11 +39,7 @@ class AdminRolePermission(permissions.BasePermission):
     message = 'Se requiere el rol Administrador para acceder a este módulo.'
 
     def has_permission(self, request, view):
-        user = request.user
-        return bool(
-            user and user.is_authenticated and
-            (user.is_superuser or str(getattr(user, 'rol', '')).strip().lower() == 'admin')
-        )
+        return es_admin(request.user)
 
 
 class CoordinacionRolePermission(permissions.BasePermission):
@@ -62,25 +47,13 @@ class CoordinacionRolePermission(permissions.BasePermission):
     message = 'Se requiere el rol Coordinación para acceder a este módulo.'
 
     def has_permission(self, request, view):
-        from .serializers import InicioSesionSerializer
-
-        user = request.user
-        return bool(
-            user and user.is_authenticated and
-            InicioSesionSerializer.obtener_rol(user) in ('coordinacion', 'admin')
-        )
-
-
-def normalizar_rol(value):
-    raw = str(value or '').strip().lower()
-    normalized = ''.join(ch for ch in unicodedata.normalize('NFKD', raw) if not unicodedata.combining(ch))
-    return ROLE_ALIASES.get(raw, ROLE_ALIASES.get(normalized, 'aspirante'))
+        return es_coordinacion(request.user)
 
 
 def rol_es_valido(value):
     raw = str(value or '').strip().lower()
     normalized = ''.join(ch for ch in unicodedata.normalize('NFKD', raw) if not unicodedata.combining(ch))
-    return raw in ROLE_ALIASES or normalized in ROLE_ALIASES
+    return raw in ROLE_ALIASES or normalized in ROLE_ALIASES or normalizar_rol(value) in set(ROLE_ALIASES.values())
 
 
 def validar_password(password):
@@ -109,7 +82,7 @@ def normalizar_estado_activo(value):
 
 
 def usuario_es_admin_activo(user):
-    return user.is_active and (user.is_superuser or normalizar_rol(user.rol) == 'admin')
+    return user.is_active and rol_efectivo(user) == 'admin'
 
 
 def evitar_desactivar_ultimo_admin(user, activo, rol):
@@ -382,7 +355,7 @@ class AdminCatalogosView(APIView):
             'departamentos': departamentos, 'programas': programas,
             'roles': sorted(set(ROLE_ALIASES.values())),
             'materias': list(Materia.objects.order_by('clave').values('id', 'clave', 'nombre', 'creditos', 'profesor', 'horario', 'salon', 'capacidad')),
-            'periodos': list(PeriodoInscripcion.objects.order_by('-apertura').values('id', 'nombre', 'apertura', 'cierre', 'activo')),
+            'periodos': list(PeriodoInscripcion.objects.order_by('-apertura').values('id', 'nombre', 'apertura', 'cierre', 'fin_periodo', 'activo')),
         })
 
     def post(self, request):
@@ -428,13 +401,22 @@ class AdminCatalogosView(APIView):
             if timezone.is_naive(cierre): cierre = timezone.make_aware(cierre)
             if apertura >= cierre:
                 return Response({'error': 'La apertura debe ser anterior al cierre.'}, status=status.HTTP_400_BAD_REQUEST)
+            fin_texto = str(request.data.get('fin_periodo') or '').strip()
+            fin_periodo = parse_date(fin_texto) if fin_texto else None
+            if fin_texto and not fin_periodo:
+                return Response({'error': 'El fin del periodo escolar debe ser una fecha válida.'}, status=status.HTTP_400_BAD_REQUEST)
+            if fin_periodo and fin_periodo <= timezone.localtime(cierre).date():
+                return Response({'error': 'El fin del periodo escolar debe ser posterior al cierre de inscripciones.'}, status=status.HTTP_400_BAD_REQUEST)
             activo = request.data.get('activo', True) in (True, 'true', '1', 1, 'si', 'sí')
             traslape = PeriodoInscripcion.objects.filter(activo=True, apertura__lt=cierre, cierre__gt=apertura).exclude(nombre=nombre).exists()
             if activo and traslape:
                 return Response({'error': 'El periodo se traslapa con otro periodo activo.'}, status=status.HTTP_409_CONFLICT)
-            periodo, _ = PeriodoInscripcion.objects.update_or_create(nombre=nombre, defaults={'apertura': apertura, 'cierre': cierre, 'activo': activo})
+            valores = {'apertura': apertura, 'cierre': cierre, 'activo': activo}
+            if 'fin_periodo' in request.data:
+                valores['fin_periodo'] = fin_periodo
+            periodo, _ = PeriodoInscripcion.objects.update_or_create(nombre=nombre, defaults=valores)
             registrar_auditoria(request, 'actualizacion_periodo', 'PeriodoInscripcion', periodo.id, nuevos={'nombre': periodo.nombre, 'activo': periodo.activo})
-            return Response({'id': periodo.id, 'nombre': periodo.nombre, 'apertura': periodo.apertura, 'cierre': periodo.cierre, 'activo': periodo.activo})
+            return Response({'id': periodo.id, 'nombre': periodo.nombre, 'apertura': periodo.apertura, 'cierre': periodo.cierre, 'fin_periodo': periodo.fin_periodo, 'activo': periodo.activo})
         return Response({'error': 'Tipo de catálogo no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
 

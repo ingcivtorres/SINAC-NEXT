@@ -3,6 +3,7 @@ import ExpedienteCentralizadoCard from './ExpedienteCentralizadoCard';
 import DashboardAnalitico from './DashboardAnalitico';
 import {useAdminCopy} from './adminPanelTranslations';
 import {TablaHerramientas, TablaPaginacion, normalizarTexto, useTablaControl} from './TablaControles';
+import {alPulsarFondo} from '../a11yModales';
 
 const ESTADOS = ['pendiente', 'iniciado', 'revision', 'aceptado'];
 const MENU_GROUPS = [
@@ -60,14 +61,14 @@ function passwordCumplePolitica(password, policyText = '8 caracteres, mayúscula
 
 function roleFormValue(role) {
   const value = String(role || '').toLowerCase();
-  if (value.includes('admin')) return 'Administrador';
-  if (value.includes('coordin')) return 'Coordinación';
-  if (value.includes('docente')) return 'Docente';
-  if (value.includes('director')) return 'Director de Tesis';
-  if (value.includes('servicios')) return 'Servicios Escolares';
-  if (value.includes('investigador')) return 'Investigador';
-  if (value.includes('alumno') || value.includes('student')) return 'Alumno';
-  return 'Aspirante';
+  if (value.includes('admin')) return 'admin';
+  if (value.includes('coordin')) return 'coordinacion';
+  if (value.includes('docente')) return 'docente';
+  if (value.includes('director')) return 'director';
+  if (value.includes('servicios')) return 'servicios';
+  if (value.includes('investigador')) return 'investigador';
+  if (value.includes('alumno') || value.includes('student')) return 'alumno';
+  return 'aspirante';
 }
 
 export default function PanelAdministrador({session, onLogout}) {
@@ -94,7 +95,7 @@ export default function PanelAdministrador({session, onLogout}) {
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [formData, setFormData] = useState({
-    name: '', usuario: '', email: '', password: '', role: 'Alumno', area: 'Sistemas', status: 'Activo',
+    name: '', usuario: '', email: '', password: '', role: 'alumno', area: 'Sistemas', status: 'Activo',
   });
   const [catalogos, setCatalogos] = useState({materias: [], periodos: [], departamentos: [], programas: [], roles: []});
   const [reportes, setReportes] = useState(null);
@@ -102,7 +103,7 @@ export default function PanelAdministrador({session, onLogout}) {
   const [configuracion, setConfiguracion] = useState({});
   const [catalogForm, setCatalogForm] = useState({tipo: 'materia', clave: '', nombre: '', creditos: 4, profesor: '', horario: '', salon: 'salon_1', capacidad: 42});
   const [catalogEditing, setCatalogEditing] = useState(false);
-  const [periodoForm, setPeriodoForm] = useState({nombre: '', apertura: '', cierre: '', activo: true});
+  const [periodoForm, setPeriodoForm] = useState({nombre: '', apertura: '', cierre: '', fin_periodo: '', activo: true});
   const [periodoEditing, setPeriodoEditing] = useState(false);
   const [apiStatus, setApiStatus] = useState('checking');
 
@@ -126,24 +127,6 @@ export default function PanelAdministrador({session, onLogout}) {
     setDialogValue('');
     resolve?.(value);
   };
-
-  useEffect(() => {
-    if (!dialog && !message) return undefined;
-    const cerrarConEscape = (event) => {
-      if (event.key !== 'Escape') return;
-      if (dialog) {
-        const resolve = dialogResolver.current;
-        dialogResolver.current = null;
-        setDialog(null);
-        setDialogValue('');
-        resolve?.(dialog.type === 'confirm' ? false : null);
-      } else {
-        setMessage('');
-      }
-    };
-    window.addEventListener('keydown', cerrarConEscape);
-    return () => window.removeEventListener('keydown', cerrarConEscape);
-  }, [dialog, message]);
 
   const cargarPanel = useCallback(async (signal) => {
     setCargando(true);
@@ -363,7 +346,7 @@ export default function PanelAdministrador({session, onLogout}) {
 
   const handleOpenCreate = () => {
     setEditingUser(null);
-    setFormData({name: '', usuario: '', email: '', password: '', role: 'Alumno', area: 'Sistemas', status: 'Activo'});
+    setFormData({name: '', usuario: '', email: '', password: '', role: 'alumno', area: 'Sistemas', status: 'Activo'});
     setShowForm(true);
   };
 
@@ -512,7 +495,7 @@ export default function PanelAdministrador({session, onLogout}) {
 
       setShowForm(false);
       setEditingUser(null);
-      setFormData({name: '', usuario: '', email: '', password: '', role: 'Alumno', area: 'Sistemas', status: 'Activo'});
+      setFormData({name: '', usuario: '', email: '', password: '', role: 'alumno', area: 'Sistemas', status: 'Activo'});
       setError('');
       setMessage(wasEditing ? copy.messages.userUpdated : copy.messages.userCreated);
       await cargarAdministracion();
@@ -558,7 +541,7 @@ export default function PanelAdministrador({session, onLogout}) {
     };
     setPeriodoForm({
       nombre: periodo.nombre, apertura: toLocalInput(periodo.apertura),
-      cierre: toLocalInput(periodo.cierre), activo: periodo.activo,
+      cierre: toLocalInput(periodo.cierre), fin_periodo: periodo.fin_periodo || '', activo: periodo.activo,
     });
     setPeriodoEditing(true);
   };
@@ -576,7 +559,7 @@ export default function PanelAdministrador({session, onLogout}) {
       }
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || copy.messages.periodError);
-      setPeriodoForm({nombre: '', apertura: '', cierre: '', activo: true});
+      setPeriodoForm({nombre: '', apertura: '', cierre: '', fin_periodo: '', activo: true});
       setPeriodoEditing(false);
       await cargarAdministracion();
       setMessage(periodoEditing ? copy.messages.periodUpdated : copy.messages.periodSaved);
@@ -995,11 +978,12 @@ export default function PanelAdministrador({session, onLogout}) {
 
         {activeSection === 'periods' && (
           <div className="admin-card">
-            <div className="admin-card-head"><div><p className="panel-kicker">{copy.periods.calendar}</p><h3>{copy.periods.title}</h3></div>{periodoEditing && <button type="button" className="btn-secondary" onClick={() => {setPeriodoEditing(false); setPeriodoForm({nombre: '', apertura: '', cierre: '', activo: true});}}>{copy.modal.cancel}</button>}</div>
+            <div className="admin-card-head"><div><p className="panel-kicker">{copy.periods.calendar}</p><h3>{copy.periods.title}</h3></div>{periodoEditing && <button type="button" className="btn-secondary" onClick={() => {setPeriodoEditing(false); setPeriodoForm({nombre: '', apertura: '', cierre: '', fin_periodo: '', activo: true});}}>{copy.modal.cancel}</button>}</div>
             <form className="config-grid" onSubmit={guardarPeriodo}>
               <label className="config-item">{copy.periods.period}<input value={periodoForm.nombre} onChange={(e) => setPeriodoForm({...periodoForm, nombre: e.target.value})} placeholder="2026-2" required disabled={periodoEditing} /></label>
               <label className="config-item">{copy.periods.opening}<input type="datetime-local" value={periodoForm.apertura} onChange={(e) => setPeriodoForm({...periodoForm, apertura: e.target.value})} required /></label>
               <label className="config-item">{copy.periods.closing}<input type="datetime-local" value={periodoForm.cierre} onChange={(e) => setPeriodoForm({...periodoForm, cierre: e.target.value})} required /></label>
+              <label className="config-item">{copy.periods.schoolEnd}<input type="date" value={periodoForm.fin_periodo} onChange={(e) => setPeriodoForm({...periodoForm, fin_periodo: e.target.value})} /></label>
               <label className="config-item">{copy.common.status}<select value={periodoForm.activo ? 'true' : 'false'} onChange={(e) => setPeriodoForm({...periodoForm, activo: e.target.value === 'true'})}><option value="true">{copy.common.active}</option><option value="false">{copy.common.inactive}</option></select></label>
               <div className="config-item"><span>&nbsp;</span><button className="btn-primary" type="submit">{periodoEditing ? copy.users.saveChanges : copy.periods.save}</button></div>
             </form>
@@ -1039,14 +1023,14 @@ export default function PanelAdministrador({session, onLogout}) {
       </main>
 
       {showForm && (
-        <div className="modal-backdrop" onClick={() => setShowForm(false)}>
-          <div className="modal-card admin-user-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(() => setShowForm(false))}>
+          <div className="modal-card admin-user-modal" role="dialog" aria-modal="true" aria-labelledby="admin-user-modal-title">
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.modal.users}</p>
-                <h3>{editingUser ? copy.users.editing : copy.users.adding}</h3>
+                <h3 id="admin-user-modal-title">{editingUser ? copy.users.editing : copy.users.adding}</h3>
               </div>
-              <button type="button" className="close-btn" onClick={() => setShowForm(false)}>×</button>
+              <button type="button" className="close-btn" aria-label={copy.dialog.cancel} onClick={() => setShowForm(false)}><span aria-hidden="true">×</span></button>
             </div>
 
             <form onSubmit={handleFormSubmit} className="modal-form">
@@ -1077,14 +1061,14 @@ export default function PanelAdministrador({session, onLogout}) {
                 <label>
                   {copy.modal.role}
                   <select name="role" value={formData.role} onChange={handleFormChange}>
-                    <option value="Administrador">{copy.roles.admin}</option>
-                    <option value="Coordinación">{copy.roles.coordinacion}</option>
-                    <option value="Docente">{copy.roles.docente}</option>
-                    <option value="Director de Tesis">{copy.roles.director}</option>
-                    <option value="Servicios Escolares">{copy.roles.servicios}</option>
-                    <option value="Investigador">{copy.roles.investigador}</option>
-                    <option value="Alumno">{copy.roles.alumno}</option>
-                    <option value="Aspirante">{copy.roles.aspirante}</option>
+                    <option value="admin">{copy.roles.admin}</option>
+                    <option value="coordinacion">{copy.roles.coordinacion}</option>
+                    <option value="docente">{copy.roles.docente}</option>
+                    <option value="director">{copy.roles.director}</option>
+                    <option value="servicios">{copy.roles.servicios}</option>
+                    <option value="investigador">{copy.roles.investigador}</option>
+                    <option value="alumno">{copy.roles.alumno}</option>
+                    <option value="aspirante">{copy.roles.aspirante}</option>
                   </select>
                 </label>
                 <label>
@@ -1110,13 +1094,12 @@ export default function PanelAdministrador({session, onLogout}) {
       )}
 
       {dialog && (
-        <div className="admin-dialog-backdrop" onClick={() => resolverDialogo(dialog.type === 'confirm' ? false : null)}>
+        <div className="admin-dialog-backdrop" role="presentation" onClick={alPulsarFondo(() => resolverDialogo(dialog.type === 'confirm' ? false : null))}>
           <section
             className={`admin-dialog-card admin-dialog-card--${dialog.type}`}
             role={dialog.type === 'confirm' ? 'alertdialog' : 'dialog'}
             aria-modal="true"
             aria-labelledby="admin-dialog-title"
-            onClick={event => event.stopPropagation()}
           >
             <div className="admin-dialog-symbol" aria-hidden="true">{dialog.type === 'confirm' ? '!' : '↻'}</div>
             <div className="admin-dialog-copy">
@@ -1153,12 +1136,12 @@ export default function PanelAdministrador({session, onLogout}) {
       )}
 
       {!dialog && message && (
-        <div className="admin-dialog-backdrop" onClick={() => setMessage('')}>
-          <section className="admin-dialog-card admin-dialog-card--success" role="status" aria-live="polite" aria-labelledby="admin-success-title" onClick={event => event.stopPropagation()}>
+        <div className="admin-dialog-backdrop" role="presentation" onClick={alPulsarFondo(() => setMessage(''))}>
+          <section className="admin-dialog-card admin-dialog-card--success" role="dialog" aria-modal="true" aria-labelledby="admin-success-title" aria-describedby="admin-success-text">
             <div className="admin-dialog-symbol" aria-hidden="true">✓</div>
             <div className="admin-dialog-copy">
               <h2 id="admin-success-title">{copy.dialog.successTitle}</h2>
-              <p>{message}</p>
+              <p id="admin-success-text">{message}</p>
             </div>
             <div className="admin-dialog-actions">
               <button type="button" className="btn-primary" autoFocus onClick={() => setMessage('')}>{copy.dialog.accept}</button>

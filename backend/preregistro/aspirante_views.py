@@ -1,9 +1,10 @@
 """Vistas del portal del aspirante: registro, perfil, documentos, apoyos, exámenes y entrevistas."""
 import logging
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from django.http import FileResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -24,6 +25,7 @@ from .serializers import (
     EvaluacionColegioSerializer,
 )
 
+from .roles import bloquear_si_egresado, es_gestion_academica
 from .seguridad import nombre_archivo_seguro, validar_imagen, validar_pdf
 from .views import (
     MAX_DOCUMENTO_BYTES,
@@ -213,6 +215,9 @@ class MisExamenesView(APIView):
         return Response({'examenes': data, 'total': len(data)})
 
     def post(self, request):
+        bloqueo = bloquear_si_egresado(request.user)
+        if bloqueo:
+            return bloqueo
         try: examen = request.user.examenes_en_linea.get(pk=request.data.get('id'))
         except ExamenEnLinea.DoesNotExist: return Response({'detail': 'Examen no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if examen.tipo == 'predoctoral': return Response({'detail': 'El examen predoctoral debe ser evaluado por tu Director de Tesis o Coordinación Académica.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -224,6 +229,9 @@ class MisExamenesView(APIView):
         return Response(ExamenEnLineaSerializer(examen).data)
 
     def put(self, request):
+        bloqueo = bloquear_si_egresado(request.user)
+        if bloqueo:
+            return bloqueo
         try: examen = request.user.examenes_en_linea.get(pk=request.data.get('id'))
         except ExamenEnLinea.DoesNotExist: return Response({'detail': 'Examen no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if examen.tipo == 'predoctoral': return Response({'detail': 'El examen predoctoral debe ser evaluado por tu Director de Tesis o Coordinación Académica.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -249,18 +257,38 @@ class MisExamenesView(APIView):
         return Response(ExamenEnLineaSerializer(examen).data)
 
 
+def _fecha_evaluacion(valor):
+    """Devuelve (fecha, error). Acepta fecha o fecha y hora ISO; vacío equivale a ahora."""
+    if valor in (None, ''):
+        return timezone.now(), None
+    texto = str(valor).strip()
+    try:
+        fecha = parse_datetime(texto)
+        if fecha is None:
+            dia = parse_date(texto)
+            fecha = datetime.combine(dia, time.min) if dia else None
+    except ValueError:
+        fecha = None
+    if fecha is None:
+        return None, Response({'fecha_evaluacion': 'Indica una fecha válida (AAAA-MM-DD).'}, status=status.HTTP_400_BAD_REQUEST)
+    if timezone.is_naive(fecha):
+        fecha = timezone.make_aware(fecha)
+    return fecha, None
+
+
 class EvaluacionColegioView(APIView):
+    """El dictamen del Colegio lo registran Coordinación o Administración; el aspirante solo consulta el suyo."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.is_staff:
+        if es_gestion_academica(request.user):
             evaluaciones = EvaluacionColegio.objects.select_related('aspirante').all()
         else:
             evaluaciones = EvaluacionColegio.objects.filter(aspirante=request.user)
         return Response(EvaluacionColegioSerializer(evaluaciones, many=True).data)
 
     def post(self, request):
-        if getattr(request.user, 'rol', '') not in ('docente', 'coordinacion') and not request.user.is_staff:
+        if not es_gestion_academica(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
         aspirante_id = request.data.get('aspirante')
         try:
@@ -275,14 +303,17 @@ class EvaluacionColegioView(APIView):
             return Response({'estado': 'Selecciona un estado de evaluación válido.'}, status=status.HTTP_400_BAD_REQUEST)
         if estado in ('favorable', 'no_favorable') and not dictamen:
             return Response({'dictamen': 'El dictamen es obligatorio para cerrar la evaluación.'}, status=status.HTTP_400_BAD_REQUEST)
-        evaluacion = EvaluacionColegio.objects.create(aspirante=aspirante, evaluador=request.user, estado=estado, dictamen=dictamen, fecha_evaluacion=request.data.get('fecha_evaluacion') or timezone.now())
+        fecha, error = _fecha_evaluacion(request.data.get('fecha_evaluacion'))
+        if error:
+            return error
+        evaluacion = EvaluacionColegio.objects.create(aspirante=aspirante, evaluador=request.user, estado=estado, dictamen=dictamen, fecha_evaluacion=fecha)
         _registrar_seguimiento(aspirante, 'aceptado' if estado == 'favorable' else 'rechazado' if estado == 'no_favorable' else 'revision', f'El Colegio de Profesores registró un dictamen: {evaluacion.get_estado_display()}.', 'Colegio de Profesores', notificar=True, asunto='Actualización del Colegio de Profesores')
         return Response(EvaluacionColegioSerializer(evaluacion).data, status=status.HTTP_201_CREATED)
 
     def patch(self, request, pk):
         try: evaluacion = EvaluacionColegio.objects.get(pk=pk)
         except EvaluacionColegio.DoesNotExist: return Response(status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_staff and getattr(request.user, 'rol', '') not in ('docente', 'coordinacion'): return Response(status=status.HTTP_403_FORBIDDEN)
+        if not es_gestion_academica(request.user): return Response(status=status.HTTP_403_FORBIDDEN)
         estado = request.data.get('estado', evaluacion.estado)
         dictamen = (request.data.get('dictamen', evaluacion.dictamen) or '').strip()
         if estado not in dict(EvaluacionColegio.ESTADOS):
@@ -292,7 +323,10 @@ class EvaluacionColegioView(APIView):
         evaluacion.estado = estado
         evaluacion.dictamen = dictamen
         if 'fecha_evaluacion' in request.data:
-            evaluacion.fecha_evaluacion = request.data['fecha_evaluacion']
+            fecha, error = _fecha_evaluacion(request.data['fecha_evaluacion'])
+            if error:
+                return error
+            evaluacion.fecha_evaluacion = fecha
         evaluacion.evaluador = request.user; evaluacion.save()
         _registrar_seguimiento(evaluacion.aspirante, 'aceptado' if estado == 'favorable' else 'rechazado' if estado == 'no_favorable' else 'revision', f'El dictamen del Colegio fue actualizado a {evaluacion.get_estado_display()}.', 'Colegio de Profesores', notificar=True, asunto='Dictamen actualizado')
         return Response(EvaluacionColegioSerializer(evaluacion).data)
@@ -401,7 +435,7 @@ class DocumentoDescargaView(APIView):
             documento = DocumentoAspirante.objects.select_related('aspirante').get(pk=pk)
         except DocumentoAspirante.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_staff and documento.aspirante_id != request.user.id:
+        if documento.aspirante_id != request.user.id:
             from .expediente_central_views import _es_gestion
             director = str(getattr(request.user, 'rol', '')).strip().lower() in ('director', 'director de tesis') and (
                 documento.aspirante.director_tesis_id == request.user.id

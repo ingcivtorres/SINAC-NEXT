@@ -176,7 +176,7 @@ function QuestionEditor({question, index, t, onChange, onRemove, canRemove}) {
             <div className="exg-option-row" key={i}>
               <input type="radio" name={`correct-${index}`} checked={question.correctIdx === i} onChange={() => set({correctIdx: i})} title={t.correct} aria-label={`${t.correct} ${i + 1}`} />
               <input type="text" maxLength={255} placeholder={`${t.option} ${i + 1}`} value={opcion} onChange={(e) => setOption(i, e.target.value)} aria-label={`${t.option} ${i + 1}`} />
-              {question.opciones.length > 2 && <button type="button" className="exg-icon-btn" onClick={() => removeOption(i)} aria-label={t.removeApplicant}>×</button>}
+              {question.opciones.length > 2 && <button type="button" className="exg-icon-btn" onClick={() => removeOption(i)} aria-label={`${t.removeApplicant} ${t.option} ${i + 1}`}>×</button>}
             </div>
           ))}
           {question.opciones.length < 8 && <button type="button" className="qa-btn" onClick={() => set({opciones: [...question.opciones, '']})}>{t.addOption}</button>}

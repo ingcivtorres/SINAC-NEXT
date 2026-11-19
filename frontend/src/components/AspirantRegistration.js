@@ -105,30 +105,61 @@ function saveDraft(f){ try { localStorage.setItem(DRAFT_KEY, JSON.stringify(f));
 function clearDraft(){ try { localStorage.removeItem(DRAFT_KEY); } catch {} }
 
 /* badge: checks / total required in this section */
+const BADGE_LABELS = {
+  es: {err: 'Con errores', ok: 'Completa', of: 'de'},
+  en: {err: 'Has errors', ok: 'Complete', of: 'of'},
+  de: {err: 'Enthält Fehler', ok: 'Vollständig', of: 'von'},
+  zh: {err: '有错误', ok: '已完成', of: '/'},
+  pt: {err: 'Com erros', ok: 'Completa', of: 'de'},
+};
+
 function SectionBadge({def, form, errors}){
+  const {language} = useLanguage();
+  const labels = BADGE_LABELS[language] || BADGE_LABELS.es;
   const hasErr = def.required.some(f => errors[f]);
   const done   = def.required.filter(f => `${form[f]||''}`.trim()).length;
   const total  = def.required.length;
   if (total === 0) return null;
-  if (hasErr) return <span className="sec-badge sec-badge--err">!</span>;
-  if (done === total) return <span className="sec-badge sec-badge--ok">✓</span>;
-  return <span className="sec-badge sec-badge--partial">{done}/{total}</span>;
+  if (hasErr) return <span className="sec-badge sec-badge--err" role="img" aria-label={labels.err}>!</span>;
+  if (done === total) return <span className="sec-badge sec-badge--ok" role="img" aria-label={labels.ok}>✓</span>;
+  return <span className="sec-badge sec-badge--partial" role="img" aria-label={`${done} ${labels.of} ${total}`}>{done}/{total}</span>;
 }
+
+const AUTOCOMPLETE = {
+  nombre: 'name', usuario: 'username', correo: 'email', telefono: 'tel', nacimiento: 'bday',
+  password: 'new-password', passwordConfirm: 'new-password',
+  estadoActual: 'address-level1', municipioActual: 'address-level2', direccionActual: 'street-address',
+  institucion: 'organization',
+};
 
 function Field({label, req, error, ok, hint, children}){
   const {language} = useLanguage();
+  const baseId = React.useId();
   const errorText = error?.startsWith('i18n:')
     ? (REGISTRATION_COPY[language] || REGISTRATION_COPY.es)[error.slice(5)]
     : error;
+  const hintId = hint ? `${baseId}-ayuda` : null;
+  const errorId = errorText ? `${baseId}-error` : null;
+  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
+  const control = React.Children.map(children, child => {
+    if (!React.isValidElement(child)) return child;
+    const autoComplete = child.props.autoComplete ?? AUTOCOMPLETE[child.props.name];
+    return React.cloneElement(child, {
+      'aria-invalid': errorText ? true : undefined,
+      'aria-describedby': describedBy,
+      'aria-required': req ? true : undefined,
+      ...(autoComplete ? {autoComplete} : {}),
+    });
+  });
   return (
     <label className="af-label">
-      <span className="af-label-text">{label}{req && <em> *</em>}</span>
+      <span className="af-label-text">{label}{req && <em aria-hidden="true"> *</em>}</span>
       <span className={`af-valid-wrap ${ok ? 'is-valid' : ''}`}>
-        {children}
-        {ok && <span className="af-valid-check" role="img" aria-label="OK">✔</span>}
+        {control}
+        {ok && <span className="af-valid-check" aria-hidden="true">✔</span>}
       </span>
-      {hint}
-      {errorText && <span className="field-error">{errorText}</span>}
+      {hint && <span id={hintId}>{hint}</span>}
+      {errorText && <span className="field-error" id={errorId}>{errorText}</span>}
     </label>
   );
 }
@@ -212,7 +243,12 @@ export default function AspirantRegistration(){
     if(form.password !== form.passwordConfirm) errs.passwordConfirm='i18n:passwordMismatch';
     setErrors(errs);
     const errSec = sectionDefs.find(s => s.required.some(f => errs[f]));
-    if(errSec) setActiveId(errSec.id);
+    if(errSec) {
+      setActiveId(errSec.id);
+      window.setTimeout(() => {
+        document.querySelector('.registration-section [aria-invalid="true"]')?.focus();
+      }, 0);
+    }
     return Object.keys(errs).length === 0;
   }
 
@@ -402,7 +438,7 @@ export default function AspirantRegistration(){
           <h1>{t('portalTitle')}</h1>
           <p>{t('portalIntro')}</p>
         </div>
-        <div className="progress-outer" title={`${completion}% ${t('progress')}`}>
+        <div className="progress-outer" title={`${completion}% ${t('progress')}`} role="progressbar" aria-label={t('progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={completion}>
           <div className="progress-inner" style={{width:`${completion}%`}}/>
           <span className="progress-label">{completion}%</span>
         </div>
@@ -416,6 +452,7 @@ export default function AspirantRegistration(){
               key={def.id}
               type="button"
               className={`sb-item${activeId===def.id?' sb-item--active':''}`}
+              aria-current={activeId===def.id ? 'step' : undefined}
               onClick={()=>selectSection(def.id)}
             >
               <span className="sb-item-title">{sectionTitle(def.id)}</span>
@@ -440,7 +477,7 @@ export default function AspirantRegistration(){
               <strong>{t('lida')}</strong>
               <span style={{marginLeft:10,fontSize:'.85rem',color:'var(--muted)'}}>{lidaPacket.businessKey}</span>
             </div>
-            {apiError && <div className="api-error">{apiError}</div>}
+            {apiError && <div className="api-error" role="alert">{apiError}</div>}
             <div className="form-actions">
               <button type="submit" className="btn-primary" disabled={sending}>
                 {sending ? t('sending') : t('submit')}

@@ -7,8 +7,11 @@ from .serializers import ExpedienteDigitalSerializer, FirmaElectronicaSerializer
 from .seguridad import url_media
 
 
+from .roles import es_director
+
+
 def _es_director(user):
-    return str(getattr(user, 'rol', '')).strip().lower() in ('director', 'director de tesis')
+    return es_director(user)
 
 
 def _tesistas_del_director(user):

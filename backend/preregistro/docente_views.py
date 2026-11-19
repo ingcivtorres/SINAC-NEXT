@@ -23,11 +23,11 @@ from .seguridad import url_media
 
 logger = logging.getLogger(__name__)
 
-ROLES_DOCENTE = ('docente', 'teacher', 'investigador', 'director')
+from .roles import es_docente
 
 
 def _es_docente(user):
-    return bool(user and str(getattr(user, 'rol', '')).strip().lower() in ROLES_DOCENTE)
+    return es_docente(user)
 
 
 def _asignaciones(docente):

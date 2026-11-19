@@ -6,4 +6,4 @@ class PreregistroConfig(AppConfig):
     name = 'preregistro'
 
     def ready(self):
-        from . import historial  # noqa: F401
+        from . import checks, historial  # noqa: F401

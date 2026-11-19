@@ -20,7 +20,7 @@ django.setup()
 from preregistro.models import Aspirante, ConfiguracionPrograma, ConfiguracionSistema, ExpedienteDigital, FirmaElectronica, Materia, CargaAcademica, CargaAcademicaMateria, PeriodoInscripcion, SeguimientoSolicitud, ProyectoTesis, JuradoProyecto, DefensaTesis, Inscripcion, PlanEstudioMateria, DocumentoAspirante, EgresoAlumno, SolicitudInscripcionExtemporanea, SolicitudAcademica, ExamenEnLinea, EntrevistaVirtual
 from preregistro.models import SolicitudDireccionTesis
 from preregistro.alertas import generar_alertas_automatizadas
-from preregistro.serializers import AspiranteRegistroSerializer
+from preregistro.serializers import AspiranteRegistroSerializer, InicioSesionSerializer
 from preregistro.expediente_central_views import PIE_EXPEDIENTE, _bloque_firma_director_general, _dibujar_pie_expediente
 from preregistro.servicios_views import (
     PIE_CONSTANCIA,
@@ -176,7 +176,7 @@ class CargaAcademicaPreparationTests(TestCase):
         self.assertEqual(updated.data['periodo'], '2027-1')
         self.assertEqual(updated.data['materias'][0]['modalidad'], 'hibrida')
 
-    def test_staff_coordination_without_explicit_role_can_load_academic_loads(self):
+    def test_staff_without_management_role_cannot_load_academic_loads(self):
         self.coordinacion.rol = ''
         self.coordinacion.is_staff = True
         self.coordinacion.save(update_fields=['rol', 'is_staff'])
@@ -184,9 +184,7 @@ class CargaAcademicaPreparationTests(TestCase):
 
         response = self.client.get('/api/cargas-academicas/')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('cargas', response.data)
-        self.assertIn('materias_catalogo', response.data)
+        self.assertEqual(response.status_code, 403)
 
     def test_submission_requires_assigned_teacher_and_schedule(self):
         self.client.force_authenticate(user=self.coordinacion)
@@ -570,18 +568,18 @@ class DocumentoAspiranteViewTests(TestCase):
     def test_expediente_pdf_footer_is_fixed_at_page_bottom(self):
         canvas = Mock()
         documento = Mock(pagesize=letter, leftMargin=.65 * inch, rightMargin=.65 * inch)
-        canvas.getPageNumber.return_value = 2
+        canvas.getPageNumber.return_value = 1
 
-        _dibujar_pie_expediente(canvas, documento)
+        _dibujar_pie_expediente(canvas, documento, total_paginas=1)
 
         canvas.drawCentredString.assert_called_once_with(letter[0] / 2, .28 * inch, PIE_EXPEDIENTE)
-        canvas.drawRightString.assert_called_once_with(letter[0] - .65 * inch, .28 * inch, 'Pág. 2')
+        canvas.drawRightString.assert_called_once_with(letter[0] - .65 * inch, .28 * inch, 'Hoja 1 de 1')
 
     def test_expediente_pdf_has_director_general_signature_space(self):
         bloque = _bloque_firma_director_general(getSampleStyleSheet())
 
         self.assertEqual(bloque._cellvalues[1][0].getPlainText(), 'Director General del Cinvestav')
-        self.assertAlmostEqual(bloque._rowHeights[0], .62 * inch)
+        self.assertAlmostEqual(bloque._rowHeights[0], .48 * inch)
         self.assertTrue(any(comando[0] == 'LINEABOVE' for comando in bloque._linecmds))
 
 
@@ -1676,7 +1674,7 @@ class SolicitudAcademicaWorkflowTests(TestCase):
         )
         self.assertEqual(repeated_resolution.status_code, 403)
 
-    def test_staff_account_uses_coordination_queue_when_its_stored_role_is_legacy(self):
+    def test_staff_flag_without_coordination_role_only_sees_own_requests(self):
         ajuste = SolicitudAcademica.objects.create(
             aspirante=self.alumno,
             tipo='ajuste_materias',
@@ -1696,7 +1694,10 @@ class SolicitudAcademicaWorkflowTests(TestCase):
         queue = self.client.get('/api/preregistro/solicitudes-academicas/')
 
         self.assertEqual(queue.status_code, 200)
-        self.assertEqual([item['id'] for item in queue.data], [ajuste.id])
+        self.assertEqual(queue.data, [])
+        self.assertEqual(self.client.patch(
+            f'/api/preregistro/solicitudes-academicas/{ajuste.id}/', {'estado': 'aprobado'}, format='json',
+        ).status_code, 403)
 
         admin = Aspirante.objects.create_superuser(
             usuario='ADMIN_SOL_NO_QUEUE',
@@ -2737,6 +2738,21 @@ class AspiranteLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['role'], 'servicios')
 
+    def test_coordinacion_login_returns_coordinacion_role(self):
+        self.user.rol = 'coordinacion'
+        self.user.is_staff = True
+        self.user.save(update_fields=['rol', 'is_staff'])
+
+        response = self.client.post('/api/auth/login/', {'usuario': 'DOCENTE01', 'password': 'password123'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'coordinacion')
+        self.assertEqual(InicioSesionSerializer.obtener_rol(self.user), 'coordinacion')
+        self.assertEqual(
+            InicioSesionSerializer.obtener_rol(type('U', (), {'rol': 'Coordinación Académica', 'is_superuser': False})()),
+            'coordinacion',
+        )
+
     def test_investigador_login_returns_investigador_role(self):
         self.user.rol = 'investigador'
         self.user.save(update_fields=['rol'])
@@ -2972,7 +2988,7 @@ class NotificacionesDeFechasTests(TestCase):
         }
         self.aspirante = Aspirante.objects.create_user(usuario='ASPPRO1', password='password123', **datos)
         coordinador_datos = {**datos, 'nombre': 'Coordinación', 'curp': 'COOR850101HDFRNN01', 'correo': 'coordinacion.prueba@example.com', 'business_key': 'COORD-PRUEBA'}
-        self.coordinador = Aspirante.objects.create_user(usuario='COORDP1', password='password123', is_staff=True, **coordinador_datos)
+        self.coordinador = Aspirante.objects.create_user(usuario='COORDP1', password='password123', rol='coordinacion', is_staff=True, **coordinador_datos)
         self.client.force_authenticate(user=self.coordinador)
 
     def test_cada_fecha_genera_una_sola_notificacion_por_cambio(self):
@@ -3119,7 +3135,7 @@ class NotificacionesMasivasCoordinacionTests(TestCase):
         self.client = APIClient()
         self.coordinacion = Aspirante.objects.create_user(
             usuario='COORDBULK', correo='coord.bulk@example.com', password='password123',
-            nombre='Coordinación', is_staff=True,
+            nombre='Coordinación', rol='coordinacion', is_staff=True,
         )
         self.base_aspirante = {
             'password': 'password123',
@@ -3252,7 +3268,7 @@ class AceptacionRequiereRevisionDocumentosTests(TestCase):
         self.client = APIClient()
         self.coordinacion = Aspirante.objects.create_user(
             usuario='COORD01', correo='coord.docs@example.com', password='password123',
-            nombre='Coordinación', is_staff=True,
+            nombre='Coordinación', rol='coordinacion', is_staff=True,
         )
         self.aspirante = Aspirante.objects.create_user(
             usuario='ASPDOC01', correo='asp.docs@example.com', password='password123',
@@ -3803,7 +3819,7 @@ class EgresadosTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.coordinacion = Aspirante.objects.create_user(
-            usuario='COORDEG', correo='coord.eg@example.com', password='password123',             nombre='Coordinación', is_staff=True, business_key='COORDEG-01',
+            usuario='COORDEG', correo='coord.eg@example.com', password='password123',             nombre='Coordinación', rol='coordinacion', is_staff=True, business_key='COORDEG-01',
         )
         self.alumno = Aspirante.objects.create_user(
             usuario='ALUEG01', correo='alu.eg@example.com', password='password123', nombre='Alumno Egreso',

@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from .models import Aspirante, CargaAcademica, CargaAcademicaMateria, Materia, Inscripcion, PeriodoInscripcion
 from . import camunda
 from .admin_views import CoordinacionRolePermission
+from .roles import es_gestion_academica
 
 from io import BytesIO
 from .seguridad import celda_segura
@@ -37,7 +38,7 @@ class CargaAcademicaWorkflowView(APIView):
 
     def _puede_preparar(self, user):
         role = str(getattr(user, 'rol', '')).strip().lower()
-        return user.is_staff or user.is_superuser or role in (
+        return user.is_superuser or role in (
             'admin', 'administrador', 'coordinacion', 'coordinador',
             'servicios', 'servicios_escolares', 'servicios escolares',
         )
@@ -184,10 +185,10 @@ class CargaAcademicaWorkflowView(APIView):
         role = str(getattr(request.user, 'rol', '')).strip().lower()
         es_creador = carga.creador_id == request.user.id
 
-        puede_coordinar = role in ('coordinacion', 'coordinador')
+        puede_coordinar = es_gestion_academica(request.user)
         puede_servicios = role in ('servicios', 'servicios_escolares', 'servicios escolares')
         if carga.estado == 'borrador' and (
-            es_creador or request.user.is_staff or puede_coordinar or puede_servicios or request.user.is_superuser
+            es_creador or puede_coordinar or puede_servicios
         ) and ('periodo' in request.data or 'materias' in request.data):
             if not self._puede_preparar(request.user):
                 return Response(status=status.HTTP_403_FORBIDDEN)
@@ -214,7 +215,7 @@ class CargaAcademicaWorkflowView(APIView):
 
         if estado not in dict(CargaAcademica.ESTADOS):
             return Response({'estado':'Estado inválido.'},status=status.HTTP_400_BAD_REQUEST)
-        es_envio = carga.estado == 'borrador' and estado == 'en_revision' and (es_creador or request.user.is_staff or puede_coordinar) and self._puede_preparar(request.user)
+        es_envio = carga.estado == 'borrador' and estado == 'en_revision' and (es_creador or puede_coordinar) and self._puede_preparar(request.user)
         es_decision_revision = (
             carga.estado == 'en_revision'
             and estado in ('aprobada', 'rechazada')
@@ -229,7 +230,7 @@ class CargaAcademicaWorkflowView(APIView):
         es_reapertura = (
             carga.estado == 'rechazada'
             and estado == 'borrador'
-            and (es_creador or request.user.is_staff or puede_coordinar)
+            and (es_creador or puede_coordinar)
             and self._puede_preparar(request.user)
         )
         if not es_envio and not es_decision_revision and not es_publicacion and not es_reapertura:

@@ -1,17 +1,25 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import ExamenesEnLinea from './ExamenesEnLinea';
+import CredencialDigital from './CredencialDigital';
 import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from './TablaControles';
 import {useStudentCopy} from './studentPanelTranslations';
 import thesisWorkflowTranslations from './tesisWorkflowTranslations';
 import './PanelAlumno.css';
 import './PanelAlumnoFixes.css';
+import {alPulsarFondo} from '../a11yModales';
 
 const MENU = [
-  {label: 'space', items: [['resumen', 'Resumen', '\u2302'], ['perfil', 'Mi perfil', '\u263A']]},
+  {label: 'space', items: [['resumen', 'Resumen', '\u2302'], ['perfil', 'Mi perfil', '\u263A'], ['credencial', 'Credencial digital', '\u2399']]},
   {label: 'academic', items: [['materias', 'Materias e inscripciones', '\u25A6'], ['calificaciones', 'Calificaciones y avance', '\u2713'], ['horario', 'Horario', '\u25F7'], ['examenes', 'Exámenes en línea', '\u270E']]},
   {label: 'communication', items: [['solicitudes', 'Solicitudes académicas', '\u2709'], ['entrevistas', 'Entrevistas virtuales', '\u25C9']]},
   {label: 'thesisDocs', items: [['tesis', 'Proyecto de tesis', '\u25C7'], ['predoctoral', 'Examen predoctoral', '\u2736'], ['diploma', 'Diploma digital', '\u25C8'], ['tramites', 'Documentos y trámites', '\u25A4']]},
+];
+const SECCIONES_EGRESADO = new Set(['resumen', 'perfil', 'calificaciones', 'horario', 'diploma', 'tramites']);
+const MENU_EGRESADO = [
+  {label: 'space', items: [['resumen', 'Resumen', '\u2302'], ['perfil', 'Mi perfil', '\u263A']]},
+  {label: 'academic', items: [['calificaciones', 'Calificaciones y avance', '\u2713'], ['horario', 'Horario', '\u25F7']]},
+  {label: 'thesisDocs', items: [['diploma', 'Diploma digital', '\u25C8'], ['tramites', 'Documentos y trámites', '\u25A4']]},
 ];
 
 function InfoRow({label, value}) { return <div className="info-row"><span>{label}</span><strong>{value || '-'}</strong></div>; }
@@ -290,10 +298,15 @@ export default function PanelAlumno({session, onLogout}) {
     } catch (e) { setError(e.message || copy.messages.downloadError); }
   }, [apiHeaders, copy, onLogout]);
   const examenesEnLinea = useMemo(() => examenes.filter(examen => examen.tipo !== 'predoctoral'), [examenes]);
+  const esEgresado = String(perfil?.proceso_estado || '').toLowerCase() === 'egresado';
+  const menuActivo = esEgresado ? MENU_EGRESADO : MENU;
   const esDoctorado = Boolean(flujoTesis?.es_doctorado)
     || flujoTesis?.elegibilidad?.configuracion?.grado === 'doctorado'
     || /doctorado/i.test(perfil?.programa || '')
     || examenes.some(examen => examen.tipo === 'predoctoral');
+  useEffect(() => {
+    if (esEgresado && !SECCIONES_EGRESADO.has(seccion)) setSeccion('resumen');
+  }, [esEgresado, seccion]);
   const proyectoActivo = proyectosTesis.find(item => item.estado !== 'rechazado');
   const proyectoAntiplagio = proyectoActivo && ESTADOS_ANTIPLAGIO.includes(proyectoActivo.estado) ? proyectoActivo : null;
   const revisionesAntiplagio = proyectoActivo?.revisiones_antiplagio || [];
@@ -457,6 +470,7 @@ export default function PanelAlumno({session, onLogout}) {
       const examenesPredoctorales = examenes.filter(examen => examen.tipo === 'predoctoral');
       return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.predoctoral.kicker}</p><h3>{copy.predoctoral.title}</h3></div><Badge tone="info">{copy.predoctoral.academic}</Badge></div><p>{copy.predoctoral.intro}</p>{examenesPredoctorales.length ? <div className="request-list">{examenesPredoctorales.map(examen => <article key={examen.id}><strong>{examen.titulo}</strong><p>{examen.descripcion || copy.predoctoral.evaluation}</p><p><strong>{copy.common.date}:</strong> {formatoFecha(examen.fecha_programada, copy.locale, copy.communication.datePending)} · <strong>{copy.common.duration}:</strong> {examen.duracion_minutos || 120} {copy.common.minutes}</p><Badge tone={examen.color || 'neutral'}>{etiquetaEstado(examen.estado, copy)}</Badge>{examen.calificacion !== null && examen.calificacion !== undefined && <p>{copy.common.result}: <strong>{examen.calificacion}</strong></p>}{examen.retroalimentacion && <p><strong>{copy.common.feedback}:</strong> {examen.retroalimentacion}</p>}</article>)}</div> : <p>{copy.predoctoral.noExam}</p>}{!examenesPredoctorales.length && flujoTesis?.predoctoral_motivos?.length > 0 && <div className="form-hint"><strong>{copy.extra.review.predoctoralRequirements}</strong><ul>{flujoTesis.predoctoral_motivos.map(motivo => <li key={motivo}>{motivo}</li>)}</ul></div>}</div>;
     }
+    if (seccion === 'credencial') return <CredencialDigital session={session} onLogout={onLogout} onIrPerfil={() => setSeccion('perfil')} />;
     if (seccion === 'examenes') return <ExamenesEnLinea session={session} examenes={examenesEnLinea} onChange={setExamenes} />;
     if (seccion === 'resumen') return <div className="alumno-dashboard-grid">
       <section className="alumno-dashboard-hero">
@@ -471,30 +485,32 @@ export default function PanelAlumno({session, onLogout}) {
             <p>{copy.summary.user}: <strong>{perfil.usuario || perfil.correo || '-'}</strong></p>
           </div>
         </div>
-        <Badge tone="info">{etiquetaEstado(perfil.proceso_estado, copy)}</Badge>
+        <Badge tone={esEgresado ? 'success' : 'info'}>{etiquetaEstado(perfil.proceso_estado, copy)}</Badge>
         <div className="alumno-dashboard-profile" aria-label={copy.summary.program}>
           <InfoRow label={copy.summary.program} value={perfil.programa}/>
           <InfoRow label={copy.summary.unit} value={perfil.unidad}/>
           <InfoRow label={copy.summary.modality} value={perfil.modalidad}/>
         </div>
       </section>
+      {esEgresado && <section className="panel-card" role="status"><strong>{copy.alumni?.title || 'Acceso de egresado'}</strong><p>{copy.alumni?.notice || 'Puedes consultar y descargar documentos. Las inscripciones, solicitudes y tesis operativas quedan deshabilitadas.'}</p></section>}
       <section className="alumno-stats" aria-label={copy.summary.quick}>
         <article className="alumno-stat-card alumno-stat-card--courses"><span aria-hidden="true">▤</span><strong>{inscripciones.length}</strong><small>{copy.summary.registered}</small></article>
         <article className="alumno-stat-card alumno-stat-card--average"><span aria-hidden="true">◉</span><strong>{promedio || '-'}</strong><small>{copy.summary.average}</small></article>
-        <article className="alumno-stat-card alumno-stat-card--requests"><span aria-hidden="true">✉</span><strong>{solicitudes.length}</strong><small>{copy.summary.requests}</small></article>
-        <article className="alumno-stat-card alumno-stat-card--interviews"><span aria-hidden="true">◷</span><strong>{entrevistas.length}</strong><small>{copy.summary.interviews}</small></article>
+        {!esEgresado && <article className="alumno-stat-card alumno-stat-card--requests"><span aria-hidden="true">✉</span><strong>{solicitudes.length}</strong><small>{copy.summary.requests}</small></article>}
+        {!esEgresado && <article className="alumno-stat-card alumno-stat-card--interviews"><span aria-hidden="true">◷</span><strong>{entrevistas.length}</strong><small>{copy.summary.interviews}</small></article>}
       </section>
       <section className="panel-card alumno-dashboard-actions">
         <div className="alumno-dashboard-section-heading"><p className="panel-kicker">{copy.panel}</p><h3>{copy.summary.quick}</h3></div>
         <div className="alumno-dashboard-action-grid">
           <button type="button" onClick={() => setSeccion('horario')}><span aria-hidden="true">▦</span><strong>{copy.summary.schedule}</strong><span aria-hidden="true">↗</span></button>
-          <button type="button" onClick={() => setSeccion('solicitudes')}><span aria-hidden="true">✉</span><strong>{copy.summary.viewRequests}</strong><span aria-hidden="true">↗</span></button>
+          {!esEgresado && <button type="button" onClick={() => setSeccion('solicitudes')}><span aria-hidden="true">✉</span><strong>{copy.summary.viewRequests}</strong><span aria-hidden="true">↗</span></button>}
           <button type="button" onClick={() => setSeccion('tramites')}><span aria-hidden="true">⇩</span><strong>{copy.summary.downloadDocs}</strong><span aria-hidden="true">↗</span></button>
+          {esEgresado && <button type="button" onClick={() => setSeccion('diploma')}><span aria-hidden="true">◇</span><strong>{copy.menu.diploma}</strong><span aria-hidden="true">↗</span></button>}
         </div>
       </section>
     </div>;
     if (seccion === 'materias') { const {inscritas, actuales: periodoActualInscripciones, requeridas, faltan} = cargaPeriodo(); const periodoActivo = Boolean(periodoInscripcion?.activo); const seleccionadas = new Set(materiasSeleccionadas); const fecha = valor => valor ? new Date(valor).toLocaleDateString(copy.locale) : '-'; const alternarMateria = id => setMateriasSeleccionadas(actual => actual.includes(id) ? actual.filter(item => item !== id) : actual.length < faltan ? [...actual, id] : actual); return <div className="alumno-materias-view"><div className="panel-card"><h3>{copy.summary.courses}</h3><p>{copy.enrollment.exact}</p><div className={`inscripcion-periodo ${periodoActivo ? 'is-open' : 'is-closed'}`}><strong>{periodoActivo ? `${copy.enrollment.open}: ${periodoInscripcion.nombre}` : copy.enrollment.closed}</strong><span>{periodoInscripcion ? `${fecha(periodoInscripcion.apertura)} - ${fecha(periodoInscripcion.cierre)}` : copy.enrollment.notEnabled}</span></div>{periodoActivo && <p className="form-hint">{copy.enrollment.load}: {periodoActualInscripciones} / {requeridas} · {copy.enrollment.selected}: {materiasSeleccionadas.length} / {faltan}</p>}{materias.length > 0 && periodoActivo ? <><div className="materias-grid">{materias.map(m => { const yaInscrita = inscritas.has(Number(m.id)); const seleccionada = seleccionadas.has(m.id); return <article className={`materia-card ${yaInscrita || seleccionada ? 'is-selected' : ''}`} key={m.id}><span className="materia-card-clave">{m.clave}</span><strong className="materia-card-nombre">{m.nombre}</strong>{m.categoria === 'seminario' && <Badge tone="info">{thesisWorkflowTranslations[copy.locale.split('-')[0]]?.seminar || thesisWorkflowTranslations.es.seminar}</Badge>}<small><strong>{copy.docs.schoolYear}: {periodoInscripcion.nombre}</strong><br/>{copy.common.period}: {m.periodo_sugerido}<br/>{copy.common.teacher}: {m.profesor || copy.common.notAssigned}<br/>{copy.docs.schedule}: {m.horario || copy.common.toDefine}<br/>{copy.common.roomPending}: {m.salon_label || copy.common.roomPending}<br/>{copy.common.enrolled}: {m.inscritos || 0} / {m.capacidad || 42}</small>{yaInscrita ? <Badge tone="success">{copy.enrollment.already}</Badge> : <button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || (!seleccionada && materiasSeleccionadas.length >= faltan)} onClick={() => alternarMateria(m.id)}>{seleccionada ? copy.enrollment.selectedLabel : copy.enrollment.select}</button>}</article>; })}</div><button type="button" className="btn-primary" disabled={inscribiendo || faltan === 0 || materiasSeleccionadas.length !== faltan} onClick={prepararInscripcion}>{inscribiendo ? copy.enrollment.submitting : faltan === 0 ? `${copy.enrollment.load} (${periodoActualInscripciones}/${requeridas})` : `${copy.enrollment.submit}: ${faltan}`}</button></> : <p>{periodoActivo ? copy.enrollment.noAvailableCourses : copy.enrollment.activeClosed}</p>}</div><div className="panel-card"><h3>{copy.summary.registered}</h3>{inscripciones.length ? <div className="subject-list">{inscripciones.map(m => <MateriaRow key={m.id} materia={m}/>)}</div> : <p>{copy.common.noCourses}</p>}</div></div>; }
-    if (seccion === 'calificaciones') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.grade.kicker}</p><h3>{copy.grade.title}</h3></div></div><AvanceCurricular inscripciones={inscripciones} plan={flujoTesis?.elegibilidad?.configuracion?.materias_plan || []}/><EtapaTesisEnAvance flujo={flujoTesis} onOpenThesis={() => setSeccion('tesis')} onOpenCourses={() => setSeccion('materias')}/><TablaHerramientas control={calificacionesTabla} filtros={[{clave: 'periodo', etiqueta: etiquetasFiltro.period}, {clave: 'estado', etiqueta: etiquetasFiltro.status}]} /><div className="subject-list tabla-scroll-lista">{calificacionesTabla.visibles.length ? calificacionesTabla.visibles.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>{copy.common.noCourses}</p>}</div><TablaPaginacion control={calificacionesTabla} /></div>;
+    if (seccion === 'calificaciones') return <div className="panel-card"><div className="alumno-section-title"><div><p className="panel-kicker">{copy.grade.kicker}</p><h3>{copy.grade.title}</h3></div></div><AvanceCurricular inscripciones={inscripciones} plan={flujoTesis?.elegibilidad?.configuracion?.materias_plan || []}/>{!esEgresado && <EtapaTesisEnAvance flujo={flujoTesis} onOpenThesis={() => setSeccion('tesis')} onOpenCourses={() => setSeccion('materias')}/>}<TablaHerramientas control={calificacionesTabla} filtros={[{clave: 'periodo', etiqueta: etiquetasFiltro.period}, {clave: 'estado', etiqueta: etiquetasFiltro.status}]} /><div className="subject-list tabla-scroll-lista">{calificacionesTabla.visibles.length ? calificacionesTabla.visibles.map(m => <MateriaRow key={m.id} materia={m}/>) : <p>{copy.common.noCourses}</p>}</div><TablaPaginacion control={calificacionesTabla} /></div>;
     if (seccion === 'horario' || seccion === 'tramites') {
       const inscripcionesConPeriodo = inscripciones.filter(materia => materia.periodo_inscripcion && materia.periodo_nombre);
       const periodoActualId = periodoInscripcion?.activo ? periodoInscripcion.id : null;
@@ -641,8 +657,8 @@ export default function PanelAlumno({session, onLogout}) {
   };
   const titulo = copy.menu[seccion];
   return <>
-  {modalInscripcion && <div className="modal-backdrop alumno-inscripcion-backdrop" role="presentation" onClick={() => { if (!inscribiendo) setModalInscripcion(null); }}>
-    <div className="modal-card alumno-inscripcion-modal" role="dialog" aria-modal="true" aria-labelledby="alumno-inscripcion-title" onClick={event => event.stopPropagation()}>
+  {modalInscripcion && <div className="modal-backdrop alumno-inscripcion-backdrop" role="presentation" onClick={alPulsarFondo(() => { if (!inscribiendo) setModalInscripcion(null); })}>
+    <div className="modal-card alumno-inscripcion-modal" role="dialog" aria-modal="true" aria-labelledby="alumno-inscripcion-title">
       <span className={`alumno-inscripcion-icon alumno-inscripcion-icon--${modalInscripcion.kind}`} aria-hidden="true">
         {modalInscripcion.kind === 'success' ? '✓' : modalInscripcion.kind === 'error' ? '!' : modalInscripcion.kind === 'processing' ? '…' : '▣'}
       </span>
@@ -664,11 +680,11 @@ export default function PanelAlumno({session, onLogout}) {
   <section className="panel-section" aria-label={copy.panel}>
     <div className="panel-hero"><div><p className="panel-kicker">{copy.summary.student}</p><h1>{copy.panel}</h1><p className="panel-sub">{copy.extra.intro}</p></div><button className="btn-secondary" onClick={() => cargarDatos(new AbortController().signal)}>{copy.refresh}</button></div>
     {message && <div className="api-success">{message}</div>}
-    {error && <div className="api-error">{error}<button className="link-btn" onClick={() => cargarDatos(new AbortController().signal)}>{copy.common.retry}</button></div>}
+    {error && <div className="api-error" role="alert">{error}<button type="button" className="link-btn" onClick={() => cargarDatos(new AbortController().signal)}>{copy.common.retry}</button></div>}
     {loading && !perfil && <div className="panel-card">{copy.loadingData}</div>}
     {perfil && <div className="alumno-layout">
       <aside className="alumno-sidebar"><div className="alumno-sidebar-user"><span className="alumno-avatar" style={{position:'relative',overflow:'hidden'}}>{(perfil.nombre || 'A').charAt(0).toUpperCase()}{perfil.profile_photo && <img src={fotoUrl(perfil.profile_photo)} alt="" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} onError={event => {event.currentTarget.style.display = 'none';}}/>}</span><div><strong>{perfil.nombre || copy.summary.student}</strong><small>{perfil.programa || copy.summary.program}</small></div></div>
-        <nav className="alumno-nav" aria-label={copy.panel}>{MENU.map(group => <div className="alumno-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.filter(([id]) => id !== 'predoctoral' || esDoctorado).map(([id, , icon]) => <button type="button" key={id} className={`alumno-nav-item ${seccion === id ? 'is-active' : ''}`} onClick={() => setSeccion(id)}><span className="alumno-nav-icon">{icon}</span><span>{copy.menu[id]}</span>{id === 'materias' && <b>{inscripciones.length}</b>}{id === 'solicitudes' && <b>{solicitudes.length}</b>}{id === 'entrevistas' && <b>{entrevistas.length}</b>}{id === 'examenes' && examenesPendientes > 0 && <b>{examenesPendientes}</b>}</button>)}</div>)}</nav>
+        <nav className="alumno-nav" aria-label={copy.panel}>{menuActivo.map(group => <div className="alumno-nav-group" key={group.label}><p>{copy.groups[group.label]}</p>{group.items.filter(([id]) => id !== 'predoctoral' || esDoctorado).map(([id, , icon]) => <button type="button" key={id} className={`alumno-nav-item ${seccion === id ? 'is-active' : ''}`} onClick={() => setSeccion(id)}><span className="alumno-nav-icon">{icon}</span><span>{copy.menu[id]}</span>{id === 'materias' && <b>{inscripciones.length}</b>}{id === 'solicitudes' && <b>{solicitudes.length}</b>}{id === 'entrevistas' && <b>{entrevistas.length}</b>}{id === 'examenes' && examenesPendientes > 0 && <b>{examenesPendientes}</b>}</button>)}</div>)}</nav>
         <button className="sidebar-logout" onClick={() => onLogout(copy.extra.review.sessionClosed)}>{copy.logout}</button>
       </aside>
       <div className="alumno-content">

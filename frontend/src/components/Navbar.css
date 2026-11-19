@@ -1,4 +1,4 @@
-/* Barra institucional: sobria, compacta y consistente con ambos temas. */
+/* Barra institucional: #009383 en tema claro y verde oscuro con acento #009383 en tema oscuro. */
 .site-header {
   position: sticky;
   top: 0;
@@ -6,19 +6,11 @@
   isolation: isolate;
   min-height: 86px;
   padding: 10px clamp(18px, 3vw, 44px);
-  background: linear-gradient(115deg, var(--header-bg) 0%, #08786d 58%, #075b61 100%);
+  background: var(--header-bg);
+  color: var(--header-fg);
   border-bottom: 1px solid rgba(255, 255, 255, .18);
   box-shadow: 0 12px 30px rgba(7, 52, 58, .18);
-}
-
-.site-header::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
-              linear-gradient(90deg, transparent 0 68%, rgba(255, 255, 255, .04));
+  transition: background-color .3s ease, border-color .3s ease;
 }
 
 .site-header .left {
@@ -190,7 +182,7 @@
 }
 
 .language-picker-check {
-  color: #00897b;
+  color: #00796b;
   font-weight: 800;
 }
 
@@ -250,9 +242,58 @@
   outline-offset: 2px;
 }
 
+.language-picker-option:focus-visible,
+.dropdown-menu .dropdown-item:focus-visible {
+  outline-color: #00695c;
+}
+
+[data-theme="dark"] .language-picker-option:focus-visible,
+[data-theme="dark"] .dropdown-menu .dropdown-item:focus-visible {
+  outline-color: #90ebdb;
+}
+
+.menu-dropdown.open .dropdown-menu {
+  transition: opacity .2s ease, transform .2s ease;
+}
+
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #00695c;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-150%);
+  transition: transform .15s ease;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid #ffd54f;
+  outline-offset: 2px;
+}
+
+#contenido-principal:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-header *,
+  .skip-link,
+  .dropdown-menu,
+  .language-picker-menu {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
 [data-theme="dark"] .site-header {
-  background: linear-gradient(115deg, #102f2d 0%, #0d4b48 60%, #102c39 100%);
-  border-bottom-color: rgba(148, 239, 224, .18);
+  border-bottom: 3px solid var(--cinvestav-primary);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
 }
 

@@ -9,6 +9,12 @@ export default defineConfig({
   esbuild: {loader: 'jsx', include: /src\/.*\.jsx?$/, exclude: []},
   optimizeDeps: {esbuildOptions: {loader: {'.js': 'jsx'}}},
   build: {outDir: 'build', sourcemap: false},
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.test.js'],
+    css: false,
+  },
   server: {
     port: 3000,
     proxy: {

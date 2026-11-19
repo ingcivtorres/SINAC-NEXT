@@ -134,6 +134,7 @@ class Aspirante(AbstractBaseUser, PermissionsMixin):
 
     # Profile
     profile_photo = models.ImageField(upload_to='profile_photos/%Y/%m/', null=True, blank=True)
+    credencial_version = models.PositiveIntegerField(default=1)
 
     # Control
     is_active  = models.BooleanField(default=True)
@@ -580,8 +581,21 @@ class PeriodoInscripcion(models.Model):
     nombre = models.CharField(max_length=40, unique=True)
     apertura = models.DateTimeField()
     cierre = models.DateTimeField()
+    fin_periodo = models.DateField(null=True, blank=True)
     activo = models.BooleanField(default=False)
     def __str__(self): return self.nombre
+
+
+class VerificacionCredencial(models.Model):
+    RESULTADOS = [('vigente', 'Vigente'), ('no_vigente', 'No vigente'), ('invalida', 'Inválida')]
+    TIPOS = [('pantalla', 'Pantalla'), ('impresa', 'Impresa')]
+    alumno = models.ForeignKey(Aspirante, on_delete=models.CASCADE, null=True, blank=True, related_name='verificaciones_credencial')
+    resultado = models.CharField(max_length=12, choices=RESULTADOS)
+    tipo = models.CharField(max_length=10, choices=TIPOS, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class AuditoriaSistema(models.Model):

@@ -10,6 +10,14 @@ const ETIQUETAS_CREADOR = {
   zh: "创建人",
   pt: "Preparada por",
 };
+const ETIQUETAS_FIN_PERIODO = {
+  es: "Fin del periodo escolar (vigencia de credenciales)",
+  en: "Term end date (ID card validity)",
+  de: "Semesterende (Gültigkeit der Ausweise)",
+  zh: "学期结束日期（学生证有效期）",
+  pt: "Fim do período letivo (validade das carteirinhas)",
+};
+const PERIODO_VACIO = {id: null, nombre: "", apertura: "", cierre: "", fin_periodo: "", activo: true};
 
 function nuevoPlan() {
   return {
@@ -34,7 +42,7 @@ function fechaLocal(value) {
 export default function SchoolAcademicConfiguration({section, session, onLogout}) {
   const copy = useCoordinationCopy();
   const [periodos, setPeriodos] = useState([]);
-  const [periodoForm, setPeriodoForm] = useState({id: null, nombre: "", apertura: "", cierre: "", activo: true});
+  const [periodoForm, setPeriodoForm] = useState(PERIODO_VACIO);
   const [planes, setPlanes] = useState([]);
   const [materias, setMaterias] = useState([]);
   const [cargas, setCargas] = useState([]);
@@ -93,6 +101,7 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
       nombre: periodo.nombre || "",
       apertura: fechaLocal(periodo.apertura),
       cierre: fechaLocal(periodo.cierre),
+      fin_periodo: periodo.fin_periodo || "",
       activo: periodo.habilitado ?? periodo.activo,
     });
     setError("");
@@ -326,7 +335,7 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
       <section className="servicios-card">
         <div className="servicios-card-heading">
           <div><span className="panel-kicker">{copy.periods.kicker}</span><h3>{copy.periods.title}</h3><p>{copy.periods.intro}</p></div>
-          <button type="button" className="btn-secondary" onClick={() => setPeriodoForm({id: null, nombre: "", apertura: "", cierre: "", activo: true})}>{copy.periods.createNew}</button>
+          <button type="button" className="btn-secondary" onClick={() => setPeriodoForm(PERIODO_VACIO)}>{copy.periods.createNew}</button>
         </div>
         {periodos.length > 0 && <label>{copy.periods.selectExisting}
           <select value={periodoForm.id || ""} onChange={event => {
@@ -342,6 +351,7 @@ export default function SchoolAcademicConfiguration({section, session, onLogout}
             <label>{copy.periods.name}<input maxLength="40" required value={periodoForm.nombre} onChange={event => setPeriodoForm({...periodoForm, nombre: event.target.value})}/></label>
             <label>{copy.periods.opening}<input type="datetime-local" required value={periodoForm.apertura} onChange={event => setPeriodoForm({...periodoForm, apertura: event.target.value})}/></label>
             <label>{copy.periods.closing}<input type="datetime-local" required value={periodoForm.cierre} onChange={event => setPeriodoForm({...periodoForm, cierre: event.target.value})}/></label>
+            <label>{ETIQUETAS_FIN_PERIODO[copy.locale.split("-")[0]] || ETIQUETAS_FIN_PERIODO.es}<input type="date" value={periodoForm.fin_periodo} onChange={event => setPeriodoForm({...periodoForm, fin_periodo: event.target.value})}/></label>
             <label>{copy.periods.enabled}<select value={periodoForm.activo ? "true" : "false"} onChange={event => setPeriodoForm({...periodoForm, activo: event.target.value === "true"})}><option value="true">{copy.periods.yes}</option><option value="false">{copy.periods.no}</option></select></label>
           </div>
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? copy.periods.saving : periodoForm.id ? copy.periods.update : copy.periods.save}</button>

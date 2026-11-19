@@ -23,6 +23,7 @@ from .views import (
     _registrar_seguimiento,
 )
 from .inscripciones_views import _periodo_inscripcion_vigente
+from .roles import bloquear_si_egresado, es_alumno, es_gestion_academica, rol_efectivo
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +33,18 @@ class SolicitudAcademicaView(APIView):
 
     @staticmethod
     def tipos_asignados(user):
-        rol = str(getattr(user, 'rol', '')).strip().lower()
-        if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
+        rol = rol_efectivo(user)
+        if rol == 'servicios':
             return {'historial', 'reinscripcion'}
-        if rol in {'admin', 'administrador'}:
+        if rol == 'admin':
             return set()
-        if rol in {'coordinacion', 'coordinador'}:
-            return {'ajuste_materias'}
-        if user.is_superuser:
-            return set()
-        if user.is_staff:
+        if rol == 'coordinacion':
             return {'ajuste_materias'}
         return set()
 
     def get(self, request):
-        if request.user.is_staff:
-            tipos = self.tipos_asignados(request.user)
+        tipos = self.tipos_asignados(request.user)
+        if tipos or es_gestion_academica(request.user):
             if not tipos:
                 return Response(status=status.HTTP_403_FORBIDDEN)
             solicitudes = SolicitudAcademica.objects.filter(tipo__in=tipos).select_related(
@@ -58,8 +55,11 @@ class SolicitudAcademicaView(APIView):
         return Response(SolicitudAcademicaSerializer(solicitudes, many=True).data)
 
     def post(self, request):
-        if request.user.is_staff or getattr(request.user, 'rol', '') != 'alumno':
+        if not es_alumno(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
+        bloqueo = bloquear_si_egresado(request.user)
+        if bloqueo:
+            return bloqueo
         tipo = request.data.get('tipo')
         comentario = (request.data.get('comentario') or '').strip()
         if tipo not in dict(SolicitudAcademica.TIPOS).keys():
@@ -86,7 +86,7 @@ class SolicitudAcademicaView(APIView):
 
     def patch(self, request, pk=None):
         tipos = self.tipos_asignados(request.user)
-        if not request.user.is_staff or not tipos:
+        if not tipos:
             return Response(status=status.HTTP_403_FORBIDDEN)
         try:
             solicitud = SolicitudAcademica.objects.select_related('aspirante').get(pk=pk, tipo__in=tipos)

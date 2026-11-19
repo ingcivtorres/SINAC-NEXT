@@ -17,27 +17,92 @@ const centers = [
   {name: 'Cinvestav Unidad CDMX Zacatenco', descriptionKey: 'home.center.zacatenco', image: civZaca}
 ];
 
+const INTERVAL_MS = 6000;
+
+function prefersReducedMotion(){
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+function animationsPausedBySite(){
+  return document.documentElement.hasAttribute('data-pause-animations');
+}
+
 export default function Carousel({t}){
   const [idx, setIdx] = useState(0);
+  const [stoppedByUser, setStoppedByUser] = useState(prefersReducedMotion);
+  const [sitePaused, setSitePaused] = useState(animationsPausedBySite);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const stopped = stoppedByUser || sitePaused;
+  const rotating = !stopped && !hovered && !focused;
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => setSitePaused(animationsPausedBySite()));
+    observer.observe(document.documentElement, {attributes: true, attributeFilter: ['data-pause-animations']});
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(()=>{
-    const t = setInterval(()=> setIdx(i => (i+1)%centers.length), 3500);
-    return ()=> clearInterval(t);
-  },[]);
+    if (!rotating) return undefined;
+    const timer = setInterval(()=> setIdx(i => (i+1)%centers.length), INTERVAL_MS);
+    return ()=> clearInterval(timer);
+  },[rotating]);
+
+  function onBlur(event){
+    if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+  }
 
   return (
-    <div className="carousel-root">
-      <div className="carousel-image">
-        <img src={centers[idx].image} alt={centers[idx].name} />
+    <section
+      className="carousel-root"
+      aria-roledescription={t('carousel.roleDescription')}
+      aria-label={t('carousel.label')}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={onBlur}
+    >
+      <div className="carousel-controls">
+        <button
+          type="button"
+          className="carousel-toggle"
+          disabled={sitePaused}
+          onClick={() => setStoppedByUser(value => !value)}
+        >
+          <span aria-hidden="true">{stopped ? '▶' : '❚❚'}</span>
+          {stopped ? t('carousel.play') : t('carousel.pause')}
+        </button>
       </div>
-      <div className="carousel-item">
-        <h2>{centers[idx].name}</h2>
-        <p>{t(centers[idx].descriptionKey)}</p>
+      <div
+        role="group"
+        aria-roledescription={t('carousel.slide')}
+        aria-label={`${idx + 1} / ${centers.length}`}
+        aria-live={rotating ? 'off' : 'polite'}
+      >
+        <div className="carousel-image">
+          <img src={centers[idx].image} alt={centers[idx].name} />
+        </div>
+        <div className="carousel-item">
+          <h2>{centers[idx].name}</h2>
+          <p>{t(centers[idx].descriptionKey)}</p>
+        </div>
       </div>
       <div className="carousel-dots">
         {centers.map((c,i)=>(
-          <button key={i} className={i===idx? 'dot active':'dot'} onClick={()=>setIdx(i)} aria-label={`Mostrar ${c.name}`}></button>
+          <button
+            type="button"
+            key={c.name}
+            className={i===idx? 'dot active':'dot'}
+            onClick={()=>setIdx(i)}
+            aria-label={`${t('carousel.show')} ${c.name}`}
+            aria-current={i===idx ? 'true' : undefined}
+          />
         ))}
       </div>
-    </div>
+    </section>
   )
 }

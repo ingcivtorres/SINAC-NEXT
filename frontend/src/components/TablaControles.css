@@ -3,7 +3,7 @@
 .tabla-filtro,.tabla-tamano{display:flex;flex-direction:column;gap:4px;font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 .tabla-filtro select,.tabla-tamano select{min-width:150px;padding:9px 10px;border:1px solid rgba(0,0,0,.14);border-radius:10px;background:var(--content-bg);color:var(--text);font:inherit;font-size:.85rem;text-transform:none;letter-spacing:0;font-weight:400}
 .tabla-tamano select{min-width:80px}
-.tabla-limpiar{padding:9px 12px;border:1px solid rgba(0,137,123,.35);border-radius:10px;background:transparent;color:var(--primary);font:inherit;font-size:.82rem;font-weight:700;cursor:pointer}
+.tabla-limpiar{padding:9px 12px;border:1px solid rgba(0,137,123,.35);border-radius:10px;background:transparent;color:var(--primary-text);font:inherit;font-size:.82rem;font-weight:700;cursor:pointer}
 .tabla-limpiar:hover{background:rgba(0,137,123,.08)}
 .tabla-scroll{max-height:min(62vh,600px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(0,137,123,.4) transparent}
 .tabla-scroll::-webkit-scrollbar{width:8px;height:8px}
@@ -15,8 +15,8 @@
 .tabla-resumen{flex:1 1 220px}
 .tabla-paginas{display:flex;gap:4px;flex-wrap:wrap}
 .tabla-paginas button{min-width:34px;height:34px;padding:0 8px;border:1px solid rgba(0,137,123,.25);border-radius:8px;background:var(--content-bg);color:var(--text);font:inherit;font-weight:700;cursor:pointer}
-.tabla-paginas button:hover:not(:disabled){border-color:var(--primary);color:var(--primary)}
-.tabla-paginas button.is-active{background:linear-gradient(135deg,#00695c,#00897b);border-color:transparent;color:#fff}
+.tabla-paginas button:hover:not(:disabled){border-color:var(--primary);color:var(--primary-text)}
+.tabla-paginas button.is-active{background:linear-gradient(135deg,#00695c,#00796b);border-color:transparent;color:#fff}
 .tabla-paginas button:disabled{opacity:.4;cursor:not-allowed}
 .docente-materia-tools{padding:4px 17px 12px}
 [data-theme="dark"] .tabla-busqueda,[data-theme="dark"] .tabla-filtro select,[data-theme="dark"] .tabla-tamano select,[data-theme="dark"] .tabla-paginas button{border-color:rgba(122,221,207,.25)}

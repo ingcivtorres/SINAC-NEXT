@@ -13,11 +13,10 @@ from . import camunda
 from .expediente_central_views import _es_gestion
 from .models import Aspirante, ExamenEnLinea, PreguntaExamen
 from .paginacion import paginar
-from .servicios_views import es_servicios
+from .roles import es_gestion_academica
 from .views import _registrar_seguimiento
 
 TIPOS_GESTIONABLES = ('admision', 'seleccion', 'diagnostico', 'otro')
-ROLES_COORDINACION = {'coordinacion', 'coordinador'}
 ROLES_EVALUADOR = ('docente', 'investigador', 'director')
 MAX_PREGUNTAS = 200
 
@@ -49,8 +48,7 @@ def _puede_consultar(user):
 
 
 def _puede_crear(user):
-    rol = str(getattr(user, 'rol', '') or '').strip().lower()
-    return bool(user.is_superuser or rol in ROLES_COORDINACION or (user.is_staff and not es_servicios(user)))
+    return es_gestion_academica(user)
 
 
 def _denegar(user):

@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from .director_views import es_programa_doctorado, requisitos_predoctoral
 from .models import Aspirante, ConfiguracionPrograma, Materia, PlanEstudioMateria, ProyectoTesis, SolicitudDireccionTesis
+from .roles import bloquear_si_egresado
 from .views import _registrar_seguimiento
 
 
@@ -18,7 +19,7 @@ def _es_coordinacion(user):
     rol = _rol(user)
     if rol in {'servicios', 'servicios_escolares', 'servicios escolares'}:
         return False
-    return bool(user.is_staff or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
+    return bool(user.is_superuser or rol in {'admin', 'administrador', 'coordinacion', 'coordinador'})
 
 
 def tiene_match_tesis(alumno):
@@ -165,6 +166,9 @@ class FlujoTesisView(APIView):
 
     def post(self, request):
         if _rol(request.user) == 'alumno':
+            bloqueo = bloquear_si_egresado(request.user)
+            if bloqueo:
+                return bloqueo
             elegibilidad = evaluar_elegibilidad_tesis(request.user)
             if not elegibilidad['elegible']:
                 return Response({'detail': 'Aún no cumples los requisitos para iniciar tesis.', 'elegibilidad': elegibilidad}, status=status.HTTP_400_BAD_REQUEST)
@@ -308,6 +312,9 @@ class SolicitudDireccionTesisDetailView(APIView):
             return Response(_solicitud_data(solicitud))
 
         if es_alumno:
+            bloqueo = bloquear_si_egresado(request.user)
+            if bloqueo:
+                return bloqueo
             if solicitud.alumno_id != request.user.id or solicitud.estado != 'pendiente_alumno':
                 return Response({'detail': 'No tienes una confirmación de dirección pendiente.'}, status=status.HTTP_409_CONFLICT)
             if estado not in {'aprobada', 'rechazada'}:

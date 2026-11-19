@@ -1,5 +1,6 @@
-import React, {useEffect} from 'react';
+import React from 'react';
 import {useLanguage} from '../translations';
+import {alPulsarFondo} from '../a11yModales';
 
 const COPY = {
   es: {title: '¿Cerrar sesión?', text: 'Tu sesión actual se cerrará y volverás al inicio.', cancel: 'Cancelar', confirm: 'Sí, cerrar sesión'},
@@ -13,14 +14,8 @@ export default function LogoutModal({onCancel, onConfirm}) {
   const {language} = useLanguage();
   const text = COPY[language] || COPY.es;
 
-  useEffect(() => {
-    const onKey = (event) => { if (event.key === 'Escape') onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
-  return <div className="modal-backdrop" role="presentation" onClick={onCancel}>
-    <div className="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="logout-modal-title" onClick={(event) => event.stopPropagation()}>
+  return <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(onCancel)}>
+    <div className="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="logout-modal-title">
       <h3 id="logout-modal-title">{text.title}</h3>
       <p>{text.text}</p>
       <div className="modal-actions">

@@ -4,6 +4,7 @@ import PerfilAspirante, {fotoUrl} from './PerfilAspirante';
 import MiPerfilAcademico from './MiPerfilAcademico';
 import {useTeacherCopy} from './teacherPanelTranslations';
 import {TablaHerramientas, TablaPaginacion, useEtiquetasFiltro, useTablaControl} from './TablaControles';
+import {alPulsarFondo} from '../a11yModales';
 
 const MENU_ITEMS = [
   {label: 'overview', items: [['overview', '▦']]},
@@ -721,8 +722,8 @@ export default function PanelDocente({session, onLogout}) {
       </main>
 
       {showCalificacionForm && (
-        <div className="modal-backdrop" onClick={cerrarFormularioCalificacion}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-grade-title" onClick={event => event.stopPropagation()}>
+        <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(cerrarFormularioCalificacion)}>
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-grade-title">
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.menu.calificaciones}</p>
@@ -766,8 +767,8 @@ export default function PanelDocente({session, onLogout}) {
       )}
 
       {examenCalificar && (
-        <div className="modal-backdrop" onClick={() => !guardandoExamen && setExamenCalificar(null)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-exam-grade-title" onClick={event => event.stopPropagation()}>
+        <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(() => !guardandoExamen && setExamenCalificar(null))}>
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-exam-grade-title">
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.exams.title}</p>
@@ -793,8 +794,8 @@ export default function PanelDocente({session, onLogout}) {
       )}
 
       {entrevistaFinalizar && (
-        <div className="modal-backdrop" onClick={() => setEntrevistaFinalizar(null)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-interview-finish-title" onClick={event => event.stopPropagation()}>
+        <div className="modal-backdrop" role="presentation" onClick={alPulsarFondo(() => setEntrevistaFinalizar(null))}>
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="docente-interview-finish-title">
             <div className="modal-head">
               <div>
                 <p className="panel-kicker">{copy.interviews.title}</p>

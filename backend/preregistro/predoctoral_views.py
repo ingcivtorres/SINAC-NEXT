@@ -32,7 +32,7 @@ def _es_director(user):
 
 
 def _es_coordinacion(user):
-    return bool(getattr(user, 'is_staff', False) or _rol(user) in {
+    return bool(getattr(user, 'is_superuser', False) or _rol(user) in {
         'admin', 'administrador', 'coordinacion', 'coordinador',
     })
 

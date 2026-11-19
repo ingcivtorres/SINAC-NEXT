@@ -116,6 +116,7 @@ REST_FRAMEWORK = {
         'registro': '10000/minute' if TESTING else os.getenv('THROTTLE_REGISTRO', '5/hour'),
         'refresh': '10000/minute' if TESTING else os.getenv('THROTTLE_REFRESH', '30/minute'),
         'recuperacion': '10000/minute' if TESTING else os.getenv('THROTTLE_RECUPERACION', '5/hour'),
+        'verificacion': '10000/minute' if TESTING else os.getenv('THROTTLE_VERIFICACION', '30/minute'),
     },
     'NUM_PROXIES': int(os.getenv('DJANGO_NUM_PROXIES', '1')),
 }
